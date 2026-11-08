@@ -1,0 +1,6 @@
+{
+  "name": "AetherCombine Studio",
+  "description": "Автономный облачный видеокомбайн и рендер-лупер 4K с интеграцией GitHub Actions FFmpeg, студией превью и генератором вирусных хуков.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

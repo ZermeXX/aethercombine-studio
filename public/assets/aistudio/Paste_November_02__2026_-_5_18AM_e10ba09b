@@ -1,0 +1,708 @@
+Создай новый проект: автономное веб-приложение «AetherCombine Studio» (Single Page Application без внешних тяжелых фреймворков, стилизованное под премиальный темный дашборд Slate/Gold/Cyberpunk).
+
+Вставь и разверни следующий полный код приложения:
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AetherCombine Studio | Cloud Montage & Loop Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@400;500;600;700&family=Bebas+Neue&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0b0f17; color: #e2e8f0; }
+    .font-cinzel { font-family: 'Cinzel', serif; }
+    .font-bebas { font-family: 'Bebas Neue', sans-serif; }
+    .gold-gradient { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+    .gold-border { border-color: rgba(245, 158, 11, 0.3); }
+    .custom-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #0b0f17; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #f59e0b; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-amber-500/30">
+
+  <!-- ШАПКА ПРИЛОЖЕНИЯ -->
+  <header class="bg-[#111622] border-b border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/10">
+        <i data-lucide="layers" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-wider text-slate-100 flex items-center gap-2">
+          AETHER<span class="text-amber-500">COMBINE</span>
+          <span class="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold px-2 py-0.5 rounded">PRO 4K</span>
+        </h1>
+        <p class="text-xs text-slate-400">Автономный облачный видеокомбайн & рендер-лупер</p>
+      </div>
+    </div>
+
+    <!-- Вкладки студии -->
+    <nav class="flex items-center bg-[#0b0f17] p-1 rounded-xl border border-slate-800">
+      <button onclick="switchTab('combine')" id="tab-combine" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition">
+        <i data-lucide="clapperboard" class="w-4 h-4"></i> Комбайн монтажа (60+ сцен)
+      </button>
+      <button onclick="switchTab('loop')" id="tab-loop" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition">
+        <i data-lucide="repeat" class="w-4 h-4"></i> Многочасовой Луп (1–10ч)
+      </button>
+      <button onclick="switchTab('thumb')" id="tab-thumb" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition">
+        <i data-lucide="image" class="w-4 h-4"></i> Студия 4K Превью
+      </button>
+      <button onclick="switchTab('hooks')" id="tab-hooks" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition">
+        <i data-lucide="zap" class="w-4 h-4"></i> Модуль Удержания (Хуки)
+      </button>
+    </nav>
+
+    <!-- GitHub Связь -->
+    <div class="flex items-center gap-3">
+      <button onclick="openConfigModal()" class="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 transition">
+        <i data-lucide="github" class="w-4 h-4 text-amber-500"></i>
+        <span id="gh-status-indicator" class="w-2 h-2 rounded-full bg-red-500"></span>
+        <span id="gh-status-text">GitHub не настроен</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ОСНОВНОЙ КОНТЕНТ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+
+    <!-- ЦЕХ 1: КОМБАЙН МОНТАЖА ИЗ СЦЕН -->
+    <section id="view-combine" class="studio-view space-y-6">
+      <div class="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <i data-lucide="film" class="text-amber-500 w-5 h-5"></i> Сборка ролика из отдельных сцен
+            </h2>
+            <p class="text-xs text-slate-400">Пакетная склейка анимированных кадров со звуковой дорожкой через GitHub Actions FFmpeg</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <select id="film-format" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2">
+              <option value="16:9">Горизонтальный 16:9 (YouTube 4K)</option>
+              <option value="9:16">Вертикальный 9:16 (Shorts/Reels)</option>
+            </select>
+            <select id="film-resolution" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2">
+              <option value="4k">4K Ultra HD (3840x2160)</option>
+              <option value="1080p">Full HD (1920x1080)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Дропзона файлов сцен -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-6 text-center cursor-pointer transition bg-[#0b0f17]/50" onclick="document.getElementById('scenes-files').click()">
+            <input type="file" id="scenes-files" multiple accept="video/*,image/*" class="hidden" onchange="handleSceneFiles(event)">
+            <i data-lucide="folder-up" class="w-10 h-10 text-amber-500 mx-auto mb-2"></i>
+            <p class="text-sm font-semibold text-slate-200">Загрузите пачку сцен (до 100 файлов)</p>
+            <p class="text-xs text-slate-500 mt-1">MP4, WebM или статичные 4K кадры (авто-применение Ken Burns FX)</p>
+          </div>
+
+          <div class="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-6 text-center cursor-pointer transition bg-[#0b0f17]/50" onclick="document.getElementById('audio-file').click()">
+            <input type="file" id="audio-file" accept="audio/*" class="hidden" onchange="handleAudioFile(event)">
+            <i data-lucide="music" class="w-10 h-10 text-amber-500 mx-auto mb-2"></i>
+            <p class="text-sm font-semibold text-slate-200" id="audio-label">Загрузите аудиодорожку (Голос / SFX)</p>
+            <p class="text-xs text-slate-500 mt-1">MP3, WAV, AAC или голосовой мастер-трек</p>
+          </div>
+        </div>
+
+        <!-- Визуальная лента таймлайна (Film Strip) -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i> Лента сцен (<span id="scenes-count">0</span>):
+            </span>
+            <button onclick="clearScenes()" class="text-xs text-rose-400 hover:text-rose-300">Очистить ленту</button>
+          </div>
+          <div id="film-strip" class="flex gap-3 overflow-x-auto custom-scroll pb-3 min-h-[120px] bg-[#0b0f17] p-3 rounded-xl border border-slate-800">
+            <div class="text-xs text-slate-600 flex items-center justify-center w-full">Лента пуста. Добавьте видеофрагменты или изображения.</div>
+          </div>
+        </div>
+
+        <!-- Нижняя панель запуска -->
+        <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+          <div class="text-xs text-slate-400">
+            Расчетный хронометраж ролика: <span id="total-duration" class="font-bold text-amber-400">00:00</span>
+          </div>
+          <button onclick="startFilmRender()" class="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-amber-500/20 transition">
+            <i data-lucide="play" class="w-4 h-4 fill-current"></i> Запустить облачную сборку (GitHub Actions)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ЦЕХ 2: ГЕНЕРАТОР МНОГОЧАСОВЫХ ЛУПОВ (1–10 ЧАСОВ) -->
+    <section id="view-loop" class="studio-view hidden space-y-6">
+      <div class="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
+        <div class="border-b border-slate-800 pb-4">
+          <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <i data-lucide="repeat" class="text-amber-500 w-5 h-5"></i> Облачный рендер многочасовых лупов (1–10 часов)
+          </h2>
+          <p class="text-xs text-slate-400">Бесшовное зацикливание эмбиенса, Lo-Fi музыки или шума природы без нагрузки на локальный ПК</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="space-y-4">
+            <label class="block text-xs font-semibold text-slate-400 uppercase">1. Исходный видеофрагмент или 4K-кадр</label>
+            <div class="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-8 text-center cursor-pointer transition bg-[#0b0f17]/50" onclick="document.getElementById('loop-video-file').click()">
+              <input type="file" id="loop-video-file" accept="video/*,image/*" class="hidden" onchange="handleLoopMedia(event)">
+              <i data-lucide="film" class="w-10 h-10 text-amber-500 mx-auto mb-2"></i>
+              <p class="text-sm font-semibold text-slate-200" id="loop-media-label">Выберите короткий ролик или картинку</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <label class="block text-xs font-semibold text-slate-400 uppercase">2. Зацикливаемая аудиодорожка</label>
+            <div class="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-8 text-center cursor-pointer transition bg-[#0b0f17]/50" onclick="document.getElementById('loop-audio-file').click()">
+              <input type="file" id="loop-audio-file" accept="audio/*" class="hidden" onchange="handleLoopAudio(event)">
+              <i data-lucide="headphones" class="w-10 h-10 text-amber-500 mx-auto mb-2"></i>
+              <p class="text-sm font-semibold text-slate-200" id="loop-audio-label">Выберите фоновый звук / трек</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Пресеты длительности -->
+        <div class="space-y-3 pt-2">
+          <label class="block text-xs font-semibold text-slate-400 uppercase">3. Длительность итогового стрима / видео</label>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <button onclick="setLoopHours(1)" class="loop-h-btn py-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-bold hover:border-amber-500 transition">1 Час</button>
+            <button onclick="setLoopHours(3)" class="loop-h-btn py-3 rounded-xl border border-amber-500 bg-amber-500/10 text-amber-400 text-xs font-bold transition">3 Часа</button>
+            <button onclick="setLoopHours(8)" class="loop-h-btn py-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-bold hover:border-amber-500 transition">8 Часов</button>
+            <button onclick="setLoopHours(10)" class="loop-h-btn py-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-bold hover:border-amber-500 transition">10 Часов</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+          <span class="text-xs text-slate-400">Рендер в GitHub Actions выполняется через <code class="text-amber-400 font-mono">stream_loop</code></span>
+          <button onclick="startLoopRender()" class="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-amber-500/20 transition">
+            <i data-lucide="infinity" class="w-4 h-4"></i> Создать многочасовой луп
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ЦЕХ 3: СТУДИЯ 4K ПРЕВЬЮ -->
+    <section id="view-thumb" class="studio-view hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Панель управления -->
+        <div class="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-5">
+          <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
+            <i data-lucide="sparkles" class="text-amber-500 w-5 h-5"></i> Настройка Обложки
+          </h2>
+
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Исходное изображение</label>
+            <input type="file" id="thumb-image-input" accept="image/*" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-amber-400 hover:file:bg-slate-700" onchange="loadThumbBaseImage(event)">
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Заголовок обложки (CTR Hook)</label>
+            <textarea id="thumb-title" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:border-amber-500 outline-none" placeholder="ТАЙНА РАСКРЫТА СПУСТЯ 50 ЛЕТ..."></textarea>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Стиль кинематографичного бейджа</label>
+            <select id="thumb-badge" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200">
+              <option value="4k_gold">4K ULTRA HD • DUAL SLATE GOLD</option>
+              <option value="ambience">AMBIENCE • 60FPS CINEMATIC</option>
+              <option value="10h">10 HOURS LOOP • RELAX AUDIO</option>
+              <option value="none">Без бейджа</option>
+            </select>
+          </div>
+
+          <button onclick="renderThumbnailCanvas()" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i> Обновить холст
+          </button>
+          <button onclick="downloadThumbnail()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2">
+            <i data-lucide="download" class="w-4 h-4"></i> Скачать обложку (1280x720)
+          </button>
+        </div>
+
+        <!-- Холст предпросмотра -->
+        <div class="lg:col-span-2 bg-[#111622] border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center">
+          <div class="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-800 bg-black shadow-2xl">
+            <canvas id="thumb-canvas" width="1280" height="720" class="w-full h-full object-contain"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ЦЕХ 4: МОДУЛЬ УДЕРЖАНИЯ (ХУКИ) -->
+    <section id="view-hooks" class="studio-view hidden space-y-6">
+      <div class="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
+        <div class="border-b border-slate-800 pb-4">
+          <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <i data-lucide="zap" class="text-amber-500 w-5 h-5"></i> Генератор вирусных хуков первых 15 секунд
+          </h2>
+          <p class="text-xs text-slate-400">Формулы удержания внимания для документалок, расследований и эмбиенс-проектов</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Формат ролика</label>
+            <select id="hook-format" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200">
+              <option value="doc">Документальный сюжет (10–20 мин)</option>
+              <option value="shorts">Shorts / Reels (до 60 сек)</option>
+              <option value="ambience">Эмбиенс / Релакс интро</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Психологический триггер</label>
+            <select id="hook-trigger" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200">
+              <option value="paradox">Парадокс и необъяснимый факт</option>
+              <option value="evidence">Скрытая архивная улика</option>
+              <option value="myth">Разрушение популярного мифа</option>
+              <option value="question">Провокационный вопрос к зрителю</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-400 uppercase">Тема или завязка сюжета</label>
+            <input type="text" id="hook-topic" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200" placeholder="Напр.: Тайна заброшенной станции в Альпах">
+          </div>
+        </div>
+
+        <button onclick="generateHookPack()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-3 rounded-xl transition text-xs flex items-center gap-2">
+          <i data-lucide="wand-2" class="w-4 h-4"></i> Сгенерировать пак из 5 хуков удержания
+        </button>
+
+        <div id="hooks-output" class="space-y-3 pt-2">
+          <!-- Сюда вставляются сгенерированные хуки -->
+        </div>
+      </div>
+    </section>
+
+    <!-- СТАТУС БАР ОБЛАЧНОГО РЕНДЕРА (НИЖНЯЯ ПЛАШКА) -->
+    <div id="render-status-bar" class="hidden bg-[#111622] border border-amber-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+      <div class="flex items-center gap-3">
+        <div class="w-3 h-3 rounded-full bg-amber-500 animate-ping"></div>
+        <div>
+          <p class="text-xs font-bold text-slate-200" id="render-status-title">Облачный рендер запущен...</p>
+          <p class="text-[11px] text-slate-400" id="render-status-desc">GitHub Actions FFmpeg выполняет компиляцию кадров</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="render-timer" class="text-xs font-mono text-amber-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">00:15</span>
+        <a id="gh-run-link" href="#" target="_blank" class="text-xs text-slate-300 hover:text-amber-400 flex items-center gap-1">
+          Смотреть лог в GitHub <i data-lucide="external-link" class="w-3 h-3"></i>
+        </a>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- МОДАЛКА НАСТРОЕК GITHUB -->
+  <div id="gh-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-[#111622] border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          <i data-lucide="github" class="text-amber-500 w-5 h-5"></i> Подключение GitHub Раннера
+        </h3>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-200"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">GitHub Personal Access Token (PAT):</label>
+          <input type="password" id="gh-token" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500" placeholder="ghp_xxxxxxxxxxxx">
+          <span class="text-[10px] text-slate-500">Требуются права: `repo` и `workflow`.</span>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Репозиторий (username/repo):</label>
+          <input type="text" id="gh-repo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500" placeholder="myusername/aether-render">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Ветка:</label>
+          <input type="text" id="gh-branch" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500" value="main">
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-slate-800 flex gap-3">
+        <button onclick="saveGitHubConfig()" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition">Сохранить</button>
+        <button onclick="copyWorkflowTemplate()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5">
+          <i data-lucide="copy" class="w-4 h-4"></i> Код workflow YAML
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="border-t border-slate-800/60 bg-[#0b0f17] py-3 px-6 text-center text-xs text-slate-500">
+    AetherCombine Studio • Автономный облачный конвейер 4K продакшна
+  </footer>
+
+  <script>
+    // Инициализация иконок Lucide
+    lucide.createIcons();
+
+    // Состояние приложения
+    let appState = {
+      scenes: [],
+      audioFile: null,
+      loopMedia: null,
+      loopAudio: null,
+      loopHours: 3,
+      ghToken: localStorage.getItem('ac_gh_token') || '',
+      ghRepo: localStorage.getItem('ac_gh_repo') || '',
+      ghBranch: localStorage.getItem('ac_gh_branch') || 'main',
+      thumbImg: null
+    };
+
+    // Обновление статуса GitHub
+    function updateGitHubUI() {
+      const dot = document.getElementById('gh-status-indicator');
+      const text = document.getElementById('gh-status-text');
+      if (appState.ghToken && appState.ghRepo) {
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+        text.innerText = appState.ghRepo;
+      } else {
+        dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        text.innerText = 'GitHub не настроен';
+      }
+    }
+    updateGitHubUI();
+
+    // Переключение вкладок
+    function switchTab(tabId) {
+      document.querySelectorAll('.studio-view').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.className = 'tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition';
+      });
+      document.getElementById('view-' + tabId).classList.remove('hidden');
+      const activeBtn = document.getElementById('tab-' + tabId);
+      activeBtn.className = 'tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition';
+      if (tabId === 'thumb') renderThumbnailCanvas();
+    }
+
+    // Обработка загрузки пачки сцен
+    function handleSceneFiles(event) {
+      const files = Array.from(event.target.files);
+      if (!files.length) return;
+      files.forEach(file => {
+        appState.scenes.push({
+          id: Math.random().toString(36).substring(7),
+          name: file.name,
+          file: file,
+          url: URL.createObjectURL(file),
+          type: file.type.startsWith('video') ? 'video' : 'image',
+          duration: 6
+        });
+      });
+      renderFilmStrip();
+    }
+
+    // Отрисовка ленты Film Strip
+    function renderFilmStrip() {
+      const strip = document.getElementById('film-strip');
+      const countEl = document.getElementById('scenes-count');
+      countEl.innerText = appState.scenes.length;
+      if (!appState.scenes.length) {
+        strip.innerHTML = '<div class="text-xs text-slate-600 flex items-center justify-center w-full">Лента пуста. Добавьте файлы.</div>';
+        document.getElementById('total-duration').innerText = '00:00';
+        return;
+      }
+      strip.innerHTML = '';
+      let totalSec = 0;
+      appState.scenes.forEach((sc, idx) => {
+        totalSec += sc.duration;
+        const card = document.createElement('div');
+        card.className = 'relative flex-shrink-0 w-36 h-24 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 group';
+        if (sc.type === 'video') {
+          card.innerHTML = `
+            <video src="${sc.url}" class="w-full h-full object-cover" muted></video>
+            <span class="absolute bottom-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-[10px] text-amber-400">#${idx + 1} 🎬 ${sc.duration}s</span>
+            <button onclick="removeScene(${idx})" class="absolute top-1 right-1 w-5 h-5 bg-rose-500/80 hover:bg-rose-600 text-white rounded flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">✕</button>
+          `;
+        } else {
+          card.innerHTML = `
+            <img src="${sc.url}" class="w-full h-full object-cover">
+            <span class="absolute bottom-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-[10px] text-sky-400">#${idx + 1} 📸 KenBurns</span>
+            <button onclick="removeScene(${idx})" class="absolute top-1 right-1 w-5 h-5 bg-rose-500/80 hover:bg-rose-600 text-white rounded flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">✕</button>
+          `;
+        }
+        strip.appendChild(card);
+      });
+      const mins = Math.floor(totalSec / 60);
+      const secs = totalSec % 60;
+      document.getElementById('total-duration').innerText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function removeScene(index) {
+      URL.revokeObjectURL(appState.scenes[index].url);
+      appState.scenes.splice(index, 1);
+      renderFilmStrip();
+    }
+
+    function clearScenes() {
+      appState.scenes.forEach(sc => URL.revokeObjectURL(sc.url));
+      appState.scenes = [];
+      renderFilmStrip();
+    }
+
+    function handleAudioFile(event) {
+      const file = event.target.files[0];
+      if (file) {
+        appState.audioFile = file;
+        document.getElementById('audio-label').innerText = `🎵 ${file.name}`;
+      }
+    }
+
+    // Запуск сборки 60+ сцен через GitHub Actions
+    async function startFilmRender() {
+      if (!appState.ghToken || !appState.ghRepo) {
+        openConfigModal();
+        return;
+      }
+      if (!appState.scenes.length) {
+        alert('Добавьте хотя бы одну сцену в ленту!');
+        return;
+      }
+      showStatusBar('Компиляция фильма запущена', `Отправлен запрос на склейку ${appState.scenes.length} сцен`);
+      try {
+        const res = await fetch(`https://api.github.com/repos/${appState.ghRepo}/actions/workflows/render_film.yml/dispatches`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${appState.ghToken}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ref: appState.ghBranch,
+            inputs: {
+              scenes_count: String(appState.scenes.length),
+              format: document.getElementById('film-format').value,
+              resolution: document.getElementById('film-resolution').value
+            }
+          })
+        });
+        if (res.ok) {
+          document.getElementById('gh-run-link').href = `https://github.com/${appState.ghRepo}/actions`;
+        } else {
+          alert('Ошибка GitHub API: ' + res.statusText);
+        }
+      } catch (e) {
+        alert('Сбой сетевого вызова: ' + e.message);
+      }
+    }
+
+    // Управление лупом
+    function handleLoopMedia(e) {
+      const file = e.target.files[0];
+      if (file) {
+        appState.loopMedia = file;
+        document.getElementById('loop-media-label').innerText = `🎥 ${file.name}`;
+      }
+    }
+
+    function handleLoopAudio(e) {
+      const file = e.target.files[0];
+      if (file) {
+        appState.loopAudio = file;
+        document.getElementById('loop-audio-label').innerText = `🎧 ${file.name}`;
+      }
+    }
+
+    function setLoopHours(h) {
+      appState.loopHours = h;
+      document.querySelectorAll('.loop-h-btn').forEach(btn => {
+        btn.className = 'loop-h-btn py-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-bold hover:border-amber-500 transition';
+      });
+      event.target.className = 'loop-h-btn py-3 rounded-xl border border-amber-500 bg-amber-500/10 text-amber-400 text-xs font-bold transition';
+    }
+
+    async function startLoopRender() {
+      if (!appState.ghToken || !appState.ghRepo) {
+        openConfigModal();
+        return;
+      }
+      showStatusBar(`Рендер ${appState.loopHours}-часового лупа`, 'GitHub Actions формирует бесшовный видеопоток');
+      await fetch(`https://api.github.com/repos/${appState.ghRepo}/actions/workflows/render_loop.yml/dispatches`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${appState.ghToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ref: appState.ghBranch,
+          inputs: { hours: String(appState.loopHours) }
+        })
+      });
+      document.getElementById('gh-run-link').href = `https://github.com/${appState.ghRepo}/actions`;
+    }
+
+    function showStatusBar(title, desc) {
+      const bar = document.getElementById('render-status-bar');
+      bar.classList.remove('hidden');
+      document.getElementById('render-status-title').innerText = title;
+      document.getElementById('render-status-desc').innerText = desc;
+    }
+
+    // Холст Превью (Thumbnail Canvas)
+    function loadThumbBaseImage(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+          appState.thumbImg = img;
+          renderThumbnailCanvas();
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function renderThumbnailCanvas() {
+      const canvas = document.getElementById('thumb-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, 1280, 720);
+
+      // Фон
+      if (appState.thumbImg) {
+        ctx.drawImage(appState.thumbImg, 0, 0, 1280, 720);
+      } else {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, 1280, 720);
+        ctx.fillStyle = '#334155';
+        ctx.font = '24px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText('Загрузите изображение для предпросмотра', 640, 360);
+      }
+
+      // Затемнение снизу для читаемости
+      const grad = ctx.createLinearGradient(0, 400, 0, 720);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 400, 1280, 320);
+
+      // Кинематографичный бейдж
+      const badgeType = document.getElementById('thumb-badge').value;
+      if (badgeType !== 'none') {
+        const badgeX = 1280 - 180;
+        const badgeY = 30;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, 150, 42, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 13px Inter';
+        ctx.textAlign = 'center';
+        let bText = '4K ULTRA HD';
+        if (badgeType === 'ambience') bText = 'AMBIENCE 60FPS';
+        if (badgeType === '10h') bText = '10 HOURS LOOP';
+        ctx.fillText(bText, badgeX + 75, badgeY + 26);
+      }
+
+      // Текст заголовка
+      const title = document.getElementById('thumb-title').value;
+      if (title) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 64px "Bebas Neue", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 12;
+        ctx.fillText(title.toUpperCase(), 50, 660);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    function downloadThumbnail() {
+      const canvas = document.getElementById('thumb-canvas');
+      const link = document.createElement('a');
+      link.download = 'thumbnail_4k.jpg';
+      link.href = canvas.toDataURL('image/jpeg', 0.95);
+      link.click();
+    }
+
+    // Генератор вирусных хуков
+    function generateHookPack() {
+      const topic = document.getElementById('hook-topic').value || 'Неизвестная аномалия';
+      const out = document.getElementById('hooks-output');
+      out.innerHTML = '';
+
+      const formulas = [
+        { name: 'ПАРАДОКС', text: `Все исследователи были уверены, что ${topic} уничтожен. Пока на глубине 40 метров не нашли это...` },
+        { name: 'УЛИКА', text: `Этот единственный архивный документ объясняет, почему военные оцепили территорию вокруг ${topic} ровно на 72 часа.` },
+        { name: 'РАЗРУШЕНИЕ МИФА', text: `Вам годами говорили, что ${topic} — это случайность. Реальные факты доказывают обратное.` },
+        { name: 'ПРОВОКАЦИЯ', text: `Что, если всё, что известно про ${topic}, было спланировано задолго до первых новостей?` },
+        { name: 'ЭМБИЕНС-ХУК', text: `Закройте глаза и вслушайтесь. Этот звук не менялся тысячи лет, пока не исчезли последние свидетели...` }
+      ];
+
+      formulas.forEach(f => {
+        const box = document.createElement('div');
+        box.className = 'bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-start justify-between gap-4';
+        box.innerHTML = `
+          <div>
+            <span class="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">${f.name}</span>
+            <p class="text-xs text-slate-200 mt-2 leading-relaxed">${f.text}</p>
+          </div>
+          <button onclick="navigator.clipboard.writeText('${f.text}')" class="text-slate-400 hover:text-amber-400 p-1"><i data-lucide="copy" class="w-4 h-4"></i></button>
+        `;
+        out.appendChild(box);
+      });
+      lucide.createIcons();
+    }
+
+    // Управление настройками GitHub
+    function openConfigModal() {
+      document.getElementById('gh-token').value = appState.ghToken;
+      document.getElementById('gh-repo').value = appState.ghRepo;
+      document.getElementById('gh-branch').value = appState.ghBranch;
+      document.getElementById('gh-modal').classList.remove('hidden');
+    }
+
+    function closeConfigModal() {
+      document.getElementById('gh-modal').classList.add('hidden');
+    }
+
+    function saveGitHubConfig() {
+      appState.ghToken = document.getElementById('gh-token').value.trim();
+      appState.ghRepo = document.getElementById('gh-repo').value.trim();
+      appState.ghBranch = document.getElementById('gh-branch').value.trim() || 'main';
+      localStorage.setItem('ac_gh_token', appState.ghToken);
+      localStorage.setItem('ac_gh_repo', appState.ghRepo);
+      localStorage.setItem('ac_gh_branch', appState.ghBranch);
+      updateGitHubUI();
+      closeConfigModal();
+    }
+
+    function copyWorkflowTemplate() {
+      const yaml = `name: AetherCombine Render
+on:
+  workflow_dispatch:
+    inputs:
+      hours: { description: 'Loop hours', required: false, default: '3' }
+      scenes_count: { description: 'Scenes count', required: false, default: '10' }
+      format: { description: 'Format', required: false, default: '16:9' }
+      resolution: { description: 'Resolution', required: false, default: '4k' }
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v2
+      - name: Run Cloud Concat / Loop
+        run: |
+          echo "Starting FFmpeg render on Ubuntu runner..."
+          # ffmpeg -stream_loop -1 -i video.mp4 -stream_loop -1 -i audio.mp3 -t 10800 -c:v copy -c:a aac output_loop.mp4
+      - name: Upload Master Video
+        uses: actions/upload-artifact@v3
+        with:
+          name: AetherCombine-Render
+          path: output_*.mp4`;
+      navigator.clipboard.writeText(yaml);
+      alert('Шаблон workflow скопирован в буфер обмена!');
+    }
+  </script>
+</body>
+</html>
