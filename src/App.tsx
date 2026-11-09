@@ -41,6 +41,12 @@ import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
 import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
 import { MontageCombineView } from './components/MontageCombineView';
+import {
+  LiveTerminal,
+  TerminalLogEntry,
+  TerminalRunnerState,
+  formatTerminalTime
+} from './components/StudioTerminal';
 interface ReleaseBufferProgress {
   active: boolean;
   current: number;
@@ -851,6 +857,32 @@ export default function App() {
     runUrl: 'https://github.com/ZermeXX/aetherflow-render/actions'
   });
 
+  // Состояние студийного псевдотерминала (LiveTerminal)
+  const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>([]);
+  const seenStepsRef = useRef<Record<string, string>>({});
+  const secondsRef = useRef<number>(0);
+
+  const appendTerminalLog = useCallback(
+    (text: string, level: TerminalLogEntry['level'] = 'info') => {
+      const id = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      setTerminalLogs(prev => [...prev, { id, text, level }]);
+    },
+    []
+  );
+
+  const clearTerminalLogs = useCallback(() => {
+    setTerminalLogs([]);
+  }, []);
+
+  const terminalRunnerStatus: TerminalRunnerState =
+    renderStatus.status === 'running'
+      ? 'running'
+      : renderStatus.status === 'success'
+      ? 'success'
+      : renderStatus.status === 'failure'
+      ? 'failed'
+      : 'idle';
+
   // Toast notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
@@ -978,15 +1010,19 @@ export default function App() {
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const timer = setInterval(() => {
-      setRenderStatus(prev => ({
-        ...prev,
-        seconds: prev.seconds + 1
-      }));
+      setRenderStatus(prev => {
+        const nextSec = prev.seconds + 1;
+        secondsRef.current = nextSec;
+        return {
+          ...prev,
+          seconds: nextSec
+        };
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [renderStatus.visible, renderStatus.status]);
 
-  // Автоматический опрос GitHub Actions (Polling каждые 6 секунд) после запуска сборки
+  // Автоматический опрос GitHub Actions (Polling каждые 3.5 секунды) и трансляция в LiveTerminal
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
@@ -1022,7 +1058,7 @@ export default function App() {
         const runId = latestRun.id;
         const runUrl = latestRun.html_url || `https://github.com/${targetRepo}/actions`;
 
-        // Запрашиваем текущие шаги активного запуска
+        // Запрашиваем список шагов и текущей задачи
         const jobsRes = await fetch(
           `https://api.github.com/repos/${targetRepo}/actions/runs/${runId}/jobs`,
           { headers }
@@ -1030,10 +1066,12 @@ export default function App() {
 
         let activeStepText = 'Шаг: Скачивание клипов из Google Drive...';
         let failedStepName = '';
+        let jobId: number | undefined;
 
         if (jobsRes.ok) {
           const jobsData = (await jobsRes.json()) as {
             jobs?: Array<{
+              id?: number;
               steps?: Array<{
                 name: string;
                 status: string;
@@ -1042,7 +1080,39 @@ export default function App() {
               }>;
             }>;
           };
-          const steps = jobsData.jobs?.[0]?.steps || [];
+          const primaryJob = jobsData.jobs?.[0];
+          jobId = primaryJob?.id;
+          const steps = primaryJob?.steps || [];
+
+          // Пошаговая трансляция шагов jobs[0].steps в студийный терминал
+          steps.forEach(step => {
+            const stepKey = `${runId}-${step.number ?? step.name}`;
+            const prevRecorded = seenStepsRef.current[stepKey];
+            const timeStr = formatTerminalTime(secondsRef.current);
+
+            if (step.status === 'in_progress' && !prevRecorded) {
+              seenStepsRef.current[stepKey] = 'in_progress';
+              appendTerminalLog(
+                `[${timeStr}] ⚙️ Выполняется шаг: ${step.name}...`,
+                'step'
+              );
+            } else if (step.status === 'completed') {
+              if (step.conclusion === 'success' && prevRecorded !== 'completed_success') {
+                seenStepsRef.current[stepKey] = 'completed_success';
+                appendTerminalLog(
+                  `[${timeStr}] ✅ Шаг ${step.name} завершён успешно.`,
+                  'success'
+                );
+              } else if (step.conclusion === 'failure' && prevRecorded !== 'completed_failure') {
+                seenStepsRef.current[stepKey] = 'completed_failure';
+                appendTerminalLog(
+                  `[${timeStr}] ❌ Сбой на шаге: ${step.name}!`,
+                  'error'
+                );
+              }
+            }
+          });
+
           const inProgressStep = steps.find(s => s.status === 'in_progress');
           const failedStep = steps.find(s => s.conclusion === 'failure');
 
@@ -1065,7 +1135,14 @@ export default function App() {
         if (isCancelled) return;
 
         if (latestRun.status === 'completed') {
+          const finalTimeStr = formatTerminalTime(secondsRef.current);
+
           if (latestRun.conclusion === 'success') {
+            appendTerminalLog(
+              `[${finalTimeStr}] 🎉 Рендер и выгрузка мастера в Google Drive завершены успешно!`,
+              'success'
+            );
+
             setRenderStatus(prev => ({
               ...prev,
               status: 'success',
@@ -1080,7 +1157,45 @@ export default function App() {
               '✅ Готово! 4K мастер успешно собран и выгружен на Google Drive',
               'success'
             );
+
+            // Подгрузка полного текста лога задачи по завершении (FFmpeg отчет)
+            if (jobId) {
+              try {
+                const jobLogRes = await fetch(
+                  `https://api.github.com/repos/${targetRepo}/actions/jobs/${jobId}/logs`,
+                  { headers }
+                );
+                if (jobLogRes.ok && !isCancelled) {
+                  const fullLogText = await jobLogRes.text();
+                  if (fullLogText && fullLogText.trim()) {
+                    const logLines = fullLogText.split(/\r?\n/).filter(Boolean);
+                    const tailLines =
+                      logLines.length > 350 ? logLines.slice(logLines.length - 350) : logLines;
+                    setTerminalLogs(prev => [
+                      ...prev,
+                      {
+                        id: `${Date.now()}-log-header`,
+                        text: `\n--- 📄 ПОЛНЫЙ ОТЧЕТ ЗАДАЧИ GITHUB ACTIONS / FFMPEG (job_id: ${jobId}) ---`,
+                        level: 'info'
+                      },
+                      ...tailLines.map((line, idx) => ({
+                        id: `${Date.now()}-raw-${idx}`,
+                        text: line,
+                        level: 'raw' as const
+                      }))
+                    ]);
+                  }
+                }
+              } catch {
+                // Если CORS или токен не разрешают редирект логов, не прерываем успешный статус
+              }
+            }
           } else {
+            appendTerminalLog(
+              `[${finalTimeStr}] ❌ Сборка прервана с ошибкой. Проверьте детали в логе выше.`,
+              'error'
+            );
+
             const errStepInfo = failedStepName
               ? `на шаге «${failedStepName}»`
               : `(статус: ${latestRun.conclusion || 'failure'})`;
@@ -1110,9 +1225,9 @@ export default function App() {
       }
     };
 
-    // Первый опрос через 2 секунды после dispatch и далее каждые 6 секунд
+    // Первый опрос через 2 секунды после dispatch и далее каждые 3.5 секунды (3–4 сек)
     const initialTimeout = setTimeout(pollGitHubActions, 2000);
-    const interval = setInterval(pollGitHubActions, 6000);
+    const interval = setInterval(pollGitHubActions, 3500);
 
     return () => {
       isCancelled = true;
@@ -1127,7 +1242,8 @@ export default function App() {
     mapGitHubStepToRussian,
     playRenderSuccessChime,
     triggerBrowserRenderNotification,
-    showToast
+    showToast,
+    appendTerminalLog
   ]);
 
   const formatTime = (totalSeconds: number) => {
@@ -1259,6 +1375,15 @@ export default function App() {
       Notification.requestPermission().catch(() => {});
     }
     const cleanRepo = (repo || 'ZermeXX/aetherflow-render').trim();
+    secondsRef.current = 0;
+    seenStepsRef.current = {};
+    setTerminalLogs([
+      {
+        id: `${Date.now()}-init`,
+        text: `[00:00] 🚀 Инициализация dispatch в репозиторий ${cleanRepo}...`,
+        level: 'info'
+      }
+    ]);
     setRenderStatus({
       visible: true,
       status: 'running',
@@ -2175,13 +2300,19 @@ export default function App() {
     }))
   };
 
-  const encodeManifestBase64 = (manifestObj: unknown): string => {
-    const jsonStr = JSON.stringify(manifestObj);
+  // Безопасное UTF-8 кодирование строки с кириллицей («Метель», названия актов/сцен) в Base64
+  const toBase64 = (str: string): string => {
     try {
-      return btoa(jsonStr);
+      const bytes = new TextEncoder().encode(str);
+      const binString = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
+      return btoa(binString);
     } catch {
-      return btoa(unescape(encodeURIComponent(jsonStr)));
+      return btoa(unescape(encodeURIComponent(str)));
     }
+  };
+
+  const encodeManifestBase64 = (manifestObj: unknown): string => {
+    return toBase64(JSON.stringify(manifestObj));
   };
 
   // 100% универсальный динамический парсер слота из любого входного JSON (без подстановки фейковых имен)
@@ -2848,7 +2979,7 @@ export default function App() {
             ref: ghBranch || 'main',
             inputs: {
               release_tag: createdReleaseTag,
-              manifest_payload: encodedPayload
+              manifest_payload: toBase64(JSON.stringify(currentManifest))
             }
           })
         }
@@ -3433,6 +3564,11 @@ export default function App() {
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
             encodeManifestBase64={encodeManifestBase64}
+            terminalStatus={terminalRunnerStatus}
+            terminalSeconds={renderStatus.seconds}
+            terminalLogs={terminalLogs}
+            terminalRunUrl={renderStatus.runUrl}
+            onClearTerminalLogs={clearTerminalLogs}
           />
         </section>
 
@@ -4702,41 +4838,25 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Блок предупреждения о размере и Base64 manifest_payload инспектор */}
-              <div className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-5 flex flex-col justify-between space-y-3">
+              {/* Правая карточка: Сводка сценария и кнопка запуска облачной сборки */}
+              <div className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-5 flex flex-col justify-between space-y-4">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wide">
                       Двухрежимная передача в GitHub Actions (manifest_payload Base64)
                     </h4>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      При нажатии <strong>«🚀 Запустить облачный рендер»</strong> весь манифест «Метель: 3:00:00» (<code className="font-mono text-amber-300">{videoCodec} {videoFps}fps</code>, асимметричные <code className="font-mono text-amber-300">inserts[]</code>, <code className="font-mono text-sky-300">loudnorm</code>) сериализуется в Base64 и передается в Python-раннер FFmpeg.
+                      При нажатии <strong>«🚀 Запустить облачную сборку»</strong> весь манифест (<code className="font-mono text-amber-300">{videoCodec} {videoFps}fps</code>, слоты <code className="font-mono text-amber-300">timeline_slots[]</code>, асимметричные <code className="font-mono text-amber-300">inserts[]</code>, <code className="font-mono text-sky-300">loudnorm</code>) кодируется в UTF-8 Base64 и передается в облачный раннер FFmpeg, а ход выполнения отображается в студийном терминале ниже.
                     </p>
                   </div>
                 </div>
 
-                {/* Живой предпросмотр передаваемого JSON-манифеста и Base64 */}
-                <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase font-semibold">
-                    <span>Текущий JSON-манифест (currentManifest):</span>
-                    <span className="text-emerald-400 font-mono">Base64 Ready</span>
-                  </div>
-                  <pre className="text-[10px] font-mono text-amber-300/90 overflow-x-auto max-h-36 custom-scroll leading-relaxed">
-                    {JSON.stringify(currentManifest, null, 2)}
-                  </pre>
-                  <div className="pt-1.5 border-t border-slate-800/80">
-                    <div className="text-[10px] text-slate-400 font-mono truncate">
-                      <span className="text-slate-500">inputs.manifest_payload: </span>
-                      <span className="text-emerald-400">{encodeManifestBase64(currentManifest)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-amber-500/20 text-[11px] text-slate-400">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-500/20 text-[11px] text-slate-400">
                   <span>
                     Актов: <code className="text-amber-400">{timelineSlots.length}</code>, Вставок:{' '}
-                    <code className="text-emerald-400">{totalInsertsCount}</code>
+                    <code className="text-emerald-400">{totalInsertsCount}</code> | Хронометраж:{' '}
+                    <code className="text-sky-300">{formatTime(calculatedProjectDurationSec)}</code>
                   </span>
                   <button
                     onClick={() => {
@@ -4748,37 +4868,39 @@ export default function App() {
                     Код Python + FFmpeg YAML →
                   </button>
                 </div>
+
+                <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-2">
+                  {releaseBufferProgress.active && (
+                    <span className="text-xs font-mono text-amber-300 block">
+                      Отправка ассетов в облачный буфер: [{releaseBufferProgress.current} /{' '}
+                      {releaseBufferProgress.total}] ...
+                    </span>
+                  )}
+                  <button
+                    onClick={startLoopRender}
+                    disabled={releaseBufferProgress.active}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer disabled:opacity-60 text-xs"
+                  >
+                    <InfinityIcon className="w-4 h-4" />{' '}
+                    {releaseBufferProgress.active
+                      ? `Отправка ассетов в облачный буфер: [${releaseBufferProgress.current} / ${releaseBufferProgress.total}] ...`
+                      : `🚀 Запустить облачную сборку (${videoCodec.toUpperCase()} ${videoFps}fps • ${getResolutionLabel(
+                          loopResolution
+                        )} ~ ${estimatedGb} ГБ)`}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-400 block">
-                  Отправка:{' '}
-                  <code className="text-amber-400 font-mono">
-                    inputs: &#123; release_tag, manifest_payload: btoa(JSON.stringify(currentManifest)) &#125;
-                  </code>
-                </span>
-                {releaseBufferProgress.active && (
-                  <span className="text-xs font-mono text-amber-300 block">
-                    Отправка ассетов в облачный буфер: [{releaseBufferProgress.current} /{' '}
-                    {releaseBufferProgress.total}] ...
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={startLoopRender}
-                disabled={releaseBufferProgress.active}
-                className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer disabled:opacity-60"
-              >
-                <InfinityIcon className="w-4 h-4" />{' '}
-                {releaseBufferProgress.active
-                  ? `Отправка ассетов в облачный буфер: [${releaseBufferProgress.current} / ${releaseBufferProgress.total}] ...`
-                  : `🚀 Запустить облачную сборку (${videoCodec.toUpperCase()} ${videoFps}fps • ${getResolutionLabel(
-                      loopResolution
-                    )} ~ ${estimatedGb} ГБ)`}
-              </button>
-            </div>
+            {/* СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ (на месте бывшего блока JSON-манифеста) */}
+            <LiveTerminal
+              status={terminalRunnerStatus}
+              elapsedSeconds={renderStatus.seconds}
+              logs={terminalLogs}
+              runUrl={renderStatus.runUrl}
+              onClearLogs={clearTerminalLogs}
+              onCopyLogs={() => showToast('Лог терминала скопирован в буфер обмена', 'info')}
+            />
           </div>
         </section>
 

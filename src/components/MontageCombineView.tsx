@@ -23,6 +23,11 @@ import {
 import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
 import {
+  LiveTerminal,
+  TerminalLogEntry,
+  TerminalRunnerState
+} from './StudioTerminal';
+import {
   googleDriveSignIn,
   getDriveAccessToken,
   resumableUploadToGoogleDrive
@@ -88,6 +93,11 @@ interface MontageCombineViewProps {
   onStartRenderStatus: (title: string, desc: string, repo: string) => void;
   onNotify: (message: string, type: 'info' | 'error' | 'success') => void;
   encodeManifestBase64: (manifestObj: unknown) => string;
+  terminalStatus: TerminalRunnerState;
+  terminalSeconds: number;
+  terminalLogs: TerminalLogEntry[];
+  terminalRunUrl?: string;
+  onClearTerminalLogs: () => void;
 }
 
 const formatTimecode = (sec: number): string => {
@@ -134,7 +144,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onOpenConfigModal,
   onStartRenderStatus,
   onNotify,
-  encodeManifestBase64
+  encodeManifestBase64,
+  terminalStatus,
+  terminalSeconds,
+  terminalLogs,
+  terminalRunUrl,
+  onClearTerminalLogs
 }) => {
   // Динамический массив сцен любой длины (80, 120, 160, 200+ сцен без лимитов и без тестовых заглушек)
   const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() =>
@@ -1469,34 +1484,22 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         </div>
       </div>
 
-      {/* 5. ПРЕДПРОСМОТР ИТОГОВОГО JSON-МАНИФЕСТА И КНОПКА «ЗАПУСТИТЬ ОБЛАЧНЫЙ МОНТАЖ» */}
-      <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-          <span className="font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Полный манифест для workflow{' '}
-            <code className="font-mono text-amber-300">render_scenes.yml</code> (без урезания массива scenes[]):
-          </span>
-          <span className="font-mono text-emerald-400">
-            Всего сцен: {narrativeScenes.length} | Расчетный хронометраж: {calcTotalDuration(narrativeScenes)} | Аудиодорожка:{' '}
-            {masterAudio.file_name.trim() || 'Не выбрана'}
-          </span>
-        </div>
-
-        <pre className="text-[10px] font-mono text-indigo-200/90 bg-slate-950/80 border border-slate-800 rounded-xl p-3 max-h-36 overflow-x-auto custom-scroll">
-          {JSON.stringify(narrativeManifest, null, 2)}
-        </pre>
-
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-800">
-          <div className="space-y-0.5 text-xs">
+      {/* 5. БЛОК ЗАПУСКА ОБЛАЧНОГО МОНТАЖА И СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ */}
+      <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-slate-800">
+          <div className="space-y-1 text-xs">
+            <span className="font-bold text-indigo-300 uppercase flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" /> Конфигурация отправки в{' '}
+              <code className="font-mono text-amber-300">render_scenes.yml</code>:
+            </span>
             <span className="text-slate-400 block">
               Целевой репозиторий:{' '}
               <code className="text-amber-300 font-mono">
                 {ghRepo || 'ZermeXX/aetherflow-render'}
               </code>{' '}
-              → <code className="text-indigo-300 font-mono">render_scenes.yml</code>
-            </span>
-            <span className="text-[11px] text-slate-500 block font-mono">
-              inputs: &#123; manifest_payload: &quot;{encodeManifestBase64(narrativeManifest).slice(0, 36)}...&quot; ({encodeManifestBase64(narrativeManifest).length} байт Base64) &#125;
+              | Всего сцен: <strong className="text-indigo-300">{narrativeScenes.length}</strong> | Хронометраж:{' '}
+              <strong className="text-emerald-400">{calcTotalDuration(narrativeScenes)}</strong> | Аудио:{' '}
+              <strong className="text-amber-300">{masterAudio.file_name.trim() || 'Не выбрана'}</strong>
             </span>
           </div>
 
@@ -1509,9 +1512,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <Play className="w-4 h-4 fill-current" />
             {isDispatching
               ? 'Отправка задачи в GitHub Actions...'
-              : '🚀 Запустить облачный монтаж'}
+              : '🚀 Запустить облачную сборку'}
           </button>
         </div>
+
+        {/* Интерактивный студийный терминал (LiveTerminal) на месте бывшего JSON-манифеста */}
+        <LiveTerminal
+          status={terminalStatus}
+          elapsedSeconds={terminalSeconds}
+          logs={terminalLogs}
+          runUrl={terminalRunUrl}
+          onClearLogs={onClearTerminalLogs}
+          onCopyLogs={() => onNotify('Лог терминала скопирован в буфер обмена', 'info')}
+        />
       </div>
     </div>
   );
