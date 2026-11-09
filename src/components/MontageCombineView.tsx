@@ -754,38 +754,31 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     onNotify(`JSON-манифест (${narrativeScenes.length} сцен) экспортирован!`, 'success');
   };
 
-  // Запуск облачного монтажа N-сцен: POST workflow_dispatch на render_scenes.yml
+  // Прямой и чистый запуск облачной сборки N-сцен: ровно один POST workflow_dispatch
   const startNarrativeScenesRender = async () => {
-    if (!ghToken) {
+    const githubToken = ghToken.trim();
+    if (!githubToken) {
       onNotify('Настройте GitHub Personal Access Token (PAT) в параметрах раннера!', 'error');
       onOpenConfigModal();
       return;
     }
 
-    const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
-    const encodedPayload = encodeManifestBase64(narrativeManifest);
+    const encodedPayload = btoa(unescape(encodeURIComponent(JSON.stringify(narrativeManifest))));
 
     setIsDispatching(true);
     try {
-      onStartRenderStatus(
-        `Облачный монтаж запущен (${narrativeScenes.length} сцен • ${calcTotalDuration(narrativeScenes)} • ${exportSettings.resolution.toUpperCase()} • ${exportSettings.video_codec} ${exportSettings.fps}fps)`,
-        `Workflow: render_scenes.yml | Мастер-аудио: ${
-          masterAudio.file_name || 'Не выбрана'
-        } | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
-        targetRepo
-      );
-
-      const res = await fetch(
-        `https://api.github.com/repos/${targetRepo}/actions/workflows/render_scenes.yml/dispatches`,
+      const response = await fetch(
+        'https://api.github.com/repos/ZermeXX/aetherflow-render/actions/workflows/render_scenes.yml/dispatches',
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${ghToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${githubToken}`,
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28'
           },
           body: JSON.stringify({
-            ref: ghBranch || 'main',
+            ref: 'main',
             inputs: {
               manifest_payload: encodedPayload
             }
@@ -793,21 +786,21 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         }
       );
 
-      if (res.ok) {
-        onNotify(
-          `🚀 Запущен workflow render_scenes.yml в ${targetRepo} (весь массив: ${narrativeScenes.length} сцен)!`,
-          'success'
+      if (response.status === 204) {
+        onStartRenderStatus(
+          'Сборка успешно запущена в GitHub Actions!',
+          `Workflow: render_scenes.yml (${narrativeScenes.length} сцен • ${calcTotalDuration(narrativeScenes)}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
+          'ZermeXX/aetherflow-render'
         );
+        onNotify('Сборка успешно запущена в GitHub Actions!', 'success');
       } else {
-        const errBody = await res.text().catch(() => '');
-        onNotify(
-          `Ошибка вызова render_scenes.yml (${res.status}): ${errBody || res.statusText}`,
-          'error'
-        );
+        const errBody = await response.text().catch(() => '');
+        const exactError = errBody.trim() || response.statusText || `HTTP ${response.status}`;
+        onNotify(`Ошибка GitHub API (${response.status}): ${exactError}`, 'error');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      onNotify('Сетевой сбой при запуске render_scenes.yml: ' + msg, 'error');
+      onNotify('Сетевой сбой при запуске сборки: ' + msg, 'error');
     } finally {
       setIsDispatching(false);
     }

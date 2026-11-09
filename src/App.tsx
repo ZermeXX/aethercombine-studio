@@ -47,17 +47,6 @@ import {
   TerminalRunnerState,
   formatTerminalTime
 } from './components/StudioTerminal';
-interface ReleaseBufferProgress {
-  active: boolean;
-  current: number;
-  total: number;
-  currentFileName: string;
-  releaseTag: string;
-  releaseId?: number;
-  uploadUrl?: string;
-  completed: boolean;
-  error?: string;
-}
 
 type TabId = 'combine' | 'loop' | 'thumb' | 'hooks';
 
@@ -440,25 +429,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3 jq curl
 
-      - name: Download Scene Assets from GitHub Release Buffer
-        if: \${{ github.event.inputs.release_tag != '' }}
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: \${{ github.event.inputs.release_tag }}
-          REPO: \${{ github.repository }}
-        run: |
-          echo "Fetching assets from draft release: $RELEASE_TAG"
-          RELEASE_JSON=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/$REPO/releases")
-          ASSET_IDS=$(echo "$RELEASE_JSON" | jq -r ".[] | select(.tag_name == \\"$RELEASE_TAG\\") | .assets[] | \\"\\(.id):\\(.name)\\"")
-          for ITEM in $ASSET_IDS; do
-            AID="\${ITEM%%:*}"
-            ANAME="\${ITEM#*:}"
-            echo "Downloading $ANAME (asset $AID)..."
-            curl -L -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \\
-              "https://api.github.com/repos/$REPO/releases/assets/$AID" -o "$ANAME"
-          done
-
-      - name: Setup Rclone for Google Drive (Optional Export)
+      - name: Setup Rclone for Google Drive (Source Assets & Master Export)
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: drive
           RCLONE_CONFIG_GDRIVE_SCOPE: drive
@@ -886,20 +857,8 @@ export default function App() {
   // Toast notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // GitHub Releases API Asset Buffer upload state
-  const [releaseBufferProgress, setReleaseBufferProgress] = useState<ReleaseBufferProgress>({
-    active: false,
-    current: 0,
-    total: 0,
-    currentFileName: '',
-    releaseTag: '',
-    completed: false
-  });
-
   const scenesInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
-  const loopVideoInputRef = useRef<HTMLInputElement | null>(null);
-  const loopAudioInputRef = useRef<HTMLInputElement | null>(null);
   const manifestInputRef = useRef<HTMLInputElement | null>(null);
 
   const showToast = useCallback((text: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -1393,162 +1352,6 @@ export default function App() {
       seconds: 0,
       runUrl: `https://github.com/${cleanRepo}/actions`
     });
-  };
-
-  // Start 60+ Scenes Montage Render via GitHub Releases Buffer + render_loop.yml
-  const startFilmRender = async () => {
-    if (!ghToken || !ghRepo) {
-      openConfigModal();
-      return;
-    }
-    if (!scenes.length) {
-      showToast('Добавьте хотя бы одну сцену в ленту!', 'error');
-      return;
-    }
-    if (releaseBufferProgress.active) {
-      showToast('Загрузка ассетов в облачный буфер уже выполняется...', 'info');
-      return;
-    }
-
-    const sceneFiles: File[] = [];
-    const seenNames = new Set<string>();
-    scenes.forEach(sc => {
-      if (sc.file && !seenNames.has(sc.file.name)) {
-        seenNames.add(sc.file.name);
-        sceneFiles.push(sc.file);
-      }
-    });
-    if (audioFile && !seenNames.has(audioFile.name)) {
-      seenNames.add(audioFile.name);
-      sceneFiles.push(audioFile);
-    }
-
-    const encodedPayload = encodeManifestBase64(currentManifest);
-    let createdReleaseTag = '';
-
-    try {
-      if (sceneFiles.length > 0) {
-        const tagName = 'release-' + Date.now();
-        setReleaseBufferProgress({
-          active: true,
-          current: 0,
-          total: sceneFiles.length,
-          currentFileName: 'Создание черновика релиза AetherCombine Assets Buffer...',
-          releaseTag: tagName,
-          completed: false
-        });
-
-        const releaseRes = await fetch(`https://api.github.com/repos/${ghRepo}/releases`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${ghToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            tag_name: tagName,
-            draft: true,
-            name: 'AetherCombine Assets Buffer'
-          })
-        });
-
-        if (!releaseRes.ok) {
-          const errText = await releaseRes.text().catch(() => '');
-          throw new Error(
-            `Не удалось создать черновик релиза (${releaseRes.status}): ${errText || releaseRes.statusText}`
-          );
-        }
-
-        const releaseData = (await releaseRes.json()) as {
-          id: number;
-          upload_url: string;
-          tag_name?: string;
-        };
-        const releaseId = releaseData.id;
-        const uploadUrl = releaseData.upload_url;
-        createdReleaseTag = releaseData.tag_name || tagName;
-
-        for (let i = 0; i < sceneFiles.length; i++) {
-          const file = sceneFiles[i];
-          setReleaseBufferProgress({
-            active: true,
-            current: i + 1,
-            total: sceneFiles.length,
-            currentFileName: file.name,
-            releaseTag: createdReleaseTag,
-            releaseId,
-            uploadUrl,
-            completed: false
-          });
-
-          const uploadRes = await fetch(
-            `https://uploads.github.com/repos/${ghRepo}/releases/${releaseId}/assets?name=${encodeURIComponent(
-              file.name
-            )}`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${ghToken}`,
-                Accept: 'application/vnd.github.v3+json',
-                'Content-Type': 'application/octet-stream'
-              },
-              body: file
-            }
-          );
-
-          if (!uploadRes.ok) {
-            const errBody = await uploadRes.text().catch(() => '');
-            throw new Error(
-              `Ошибка загрузки ассета ${file.name} (${uploadRes.status}): ${errBody || uploadRes.statusText}`
-            );
-          }
-        }
-
-        setReleaseBufferProgress(prev => ({
-          ...prev,
-          active: false,
-          completed: true
-        }));
-      }
-
-      showStatusBar(
-        'Компиляция фильма запущена',
-        `release_tag: ${createdReleaseTag || 'none'} | Склейка ${scenes.length} сцен (${filmFormat}, ${filmResolution.toUpperCase()})`,
-        ghRepo
-      );
-
-      const res = await fetch(
-        `https://api.github.com/repos/${ghRepo}/actions/workflows/render_loop.yml/dispatches`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${ghToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            ref: ghBranch || 'main',
-            inputs: {
-              release_tag: createdReleaseTag,
-              manifest_payload: encodedPayload
-            }
-          })
-        }
-      );
-      if (res.ok) {
-        showToast('Запрос успешно отправлен в GitHub Actions (render_loop.yml)!', 'success');
-      } else {
-        showToast('Ошибка GitHub API: ' + (res.statusText || res.status), 'error');
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setReleaseBufferProgress(prev => ({
-        ...prev,
-        active: false,
-        error: msg
-      }));
-      showToast('Сбой сетевого вызова: ' + msg, 'error');
-    }
   };
 
   // =========================================
@@ -2879,30 +2682,11 @@ export default function App() {
     );
   };
 
-  // Сбор всех уникальных локальных файлов сцен/вставок/аудио, прикрепленных к слотам и дропзоне
-  const getAttachedLoopFiles = useCallback((): File[] => {
-    const map = new Map<string, File>();
-    Object.values(uploadedLoopAssets).forEach((f: File) => {
-      map.set(f.name, f);
-    });
-    if (loopMedia && !map.has(loopMedia.name)) {
-      map.set(loopMedia.name, loopMedia);
-    }
-    if (loopAudio && !map.has(loopAudio.name)) {
-      map.set(loopAudio.name, loopAudio);
-    }
-    scenes.forEach(sc => {
-      if (sc.file && !map.has(sc.file.name)) {
-        map.set(sc.file.name, sc.file);
-      }
-    });
-    return Array.from(map.values());
-  }, [uploadedLoopAssets, loopMedia, loopAudio, scenes]);
-
-  // Автономная выгрузка прикрепленных файлов в черновик GitHub Release + запуск workflow render_loop.yml
+  // Прямой и чистый запуск облачной сборки (без выгрузки файлов в GitHub Releases)
   const startLoopRender = async () => {
-    if (!ghToken || !ghRepo) {
-      showToast('Настройте подключение к GitHub (Token и owner/repo)!', 'error');
+    const githubToken = ghToken.trim();
+    if (!githubToken) {
+      showToast('Настройте подключение к GitHub (Personal Access Token)!', 'error');
       openConfigModal();
       return;
     }
@@ -2910,151 +2694,70 @@ export default function App() {
       showToast('Длительность лупа должна быть строго от 3 до 10 часов!', 'error');
       return;
     }
-    if (releaseBufferProgress.active) {
-      showToast('Загрузка ассетов в облачный буфер уже выполняется...', 'info');
-      return;
-    }
 
-    const attachedFiles = getAttachedLoopFiles();
     const scaleFlag = getScaleFilter(loopResolution);
     const crfVal = getCrfValue(bitratePreset);
-    const encodedPayload = encodeManifestBase64(currentManifest);
-    let createdReleaseTag = '';
+    const manifestBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(currentManifest))));
 
     try {
-      // 1. Если к слотам прикреплены локальные файлы сцен — создаем черновик релиза через GitHub Releases API
-      if (attachedFiles.length > 0) {
-        const tagName = 'release-' + Date.now();
-        setReleaseBufferProgress({
-          active: true,
-          current: 0,
-          total: attachedFiles.length,
-          currentFileName: 'Создание черновика релиза AetherCombine Assets Buffer...',
-          releaseTag: tagName,
-          completed: false
-        });
-
-        const releaseRes = await fetch(`https://api.github.com/repos/${ghRepo}/releases`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${ghToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            tag_name: tagName,
-            draft: true,
-            name: 'AetherCombine Assets Buffer'
-          })
-        });
-
-        if (!releaseRes.ok) {
-          const errText = await releaseRes.text().catch(() => '');
-          throw new Error(
-            `Не удалось создать черновик релиза (${releaseRes.status}): ${errText || releaseRes.statusText}`
-          );
-        }
-
-        const releaseData = (await releaseRes.json()) as {
-          id: number;
-          upload_url: string;
-          tag_name?: string;
-        };
-        const releaseId = releaseData.id;
-        const uploadUrl = releaseData.upload_url;
-        createdReleaseTag = releaseData.tag_name || tagName;
-
-        // 2. Загружаем каждый прикрепленный файл через прямой стриминг в uploads.github.com
-        for (let i = 0; i < attachedFiles.length; i++) {
-          const file = attachedFiles[i];
-          setReleaseBufferProgress({
-            active: true,
-            current: i + 1,
-            total: attachedFiles.length,
-            currentFileName: file.name,
-            releaseTag: createdReleaseTag,
-            releaseId,
-            uploadUrl,
-            completed: false
-          });
-
-          const assetUploadEndpoint = `https://uploads.github.com/repos/${ghRepo}/releases/${releaseId}/assets?name=${encodeURIComponent(
-            file.name
-          )}`;
-
-          const uploadRes = await fetch(assetUploadEndpoint, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${ghToken}`,
-              Accept: 'application/vnd.github.v3+json',
-              'Content-Type': 'application/octet-stream'
-            },
-            body: file
-          });
-
-          if (!uploadRes.ok) {
-            const errBody = await uploadRes.text().catch(() => '');
-            throw new Error(
-              `Ошибка загрузки ассета ${file.name} (${uploadRes.status}): ${errBody || uploadRes.statusText}`
-            );
-          }
-        }
-
-        setReleaseBufferProgress(prev => ({
-          ...prev,
-          active: false,
-          completed: true
-        }));
-      }
-
-      // 3. Сразу после завершения загрузки последнего ассета вызываем workflow_dispatch render_loop.yml
-      showStatusBar(
-        `Рендер «Метель: 3:00:00» (${videoCodec.toUpperCase()} ${videoFps}fps • AAC ${audioBitrateKbps}k • ${timelineSlots.length} актов • ${totalInsertsCount} вставок • CRF ${crfVal})`,
-        `release_tag: ${createdReleaseTag || 'none'} | manifest_payload (Base64, ${encodedPayload.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | ${scaleFlag}`,
-        ghRepo
-      );
-
-      const dispatchRes = await fetch(
-        `https://api.github.com/repos/${ghRepo}/actions/workflows/render_loop.yml/dispatches`,
+      const response = await fetch(
+        'https://api.github.com/repos/ZermeXX/aetherflow-render/actions/workflows/render_loop.yml/dispatches',
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${ghToken}`,
-            Accept: 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${githubToken}`,
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28'
           },
           body: JSON.stringify({
-            ref: ghBranch || 'main',
+            ref: 'main',
             inputs: {
-              release_tag: createdReleaseTag,
-              manifest_payload: toBase64(JSON.stringify(currentManifest))
+              release_tag: 'none',
+              manifest_payload: manifestBase64
             }
           })
         }
       );
 
-      if (dispatchRes.ok) {
-        showToast(
-          createdReleaseTag
-            ? `🚀 Ассеты (${attachedFiles.length} шт.) загружены в ${createdReleaseTag}! Запущен workflow render_loop.yml`
-            : `🚀 Запущена облачная сборка render_loop.yml (${videoCodec} @ ${videoFps}fps, AAC ${audioBitrateKbps}kbps)!`,
+      if (response.status === 204) {
+        showStatusBar(
+          'Сборка успешно запущена в GitHub Actions!',
+          `release_tag: none | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | CRF ${crfVal} | ${scaleFlag}`,
+          'ZermeXX/aetherflow-render'
+        );
+        appendTerminalLog(
+          '[00:00] ✅ Сборка успешно запущена в GitHub Actions!',
           'success'
         );
+        showToast('Сборка успешно запущена в GitHub Actions!', 'success');
       } else {
-        const errText = await dispatchRes.text().catch(() => '');
-        showToast(
-          `Ошибка запуска render_loop.yml (${dispatchRes.status}): ${errText || dispatchRes.statusText}`,
+        const errText = await response.text().catch(() => '');
+        const exactError = errText.trim() || response.statusText || `HTTP ${response.status}`;
+        setRenderStatus(prev => ({
+          ...prev,
+          visible: true,
+          status: 'failure',
+          title: `❌ Ошибка запуска GitHub Actions (${response.status})`,
+          stepLabel: exactError
+        }));
+        appendTerminalLog(
+          `[00:00] ❌ Ошибка GitHub API (${response.status}): ${exactError}`,
           'error'
         );
+        showToast(`Ошибка GitHub API (${response.status}): ${exactError}`, 'error');
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setReleaseBufferProgress(prev => ({
+      setRenderStatus(prev => ({
         ...prev,
-        active: false,
-        error: msg
+        visible: true,
+        status: 'failure',
+        title: '❌ Сетевой сбой при вызове GitHub API',
+        stepLabel: msg
       }));
-      showToast('Сбой облачной выгрузки/сборки: ' + msg, 'error');
+      appendTerminalLog(`[00:00] ❌ Сбой запуска сборки: ${msg}`, 'error');
+      showToast('Сбой запуска облачной сборки: ' + msg, 'error');
     }
   };
 
@@ -3756,40 +3459,6 @@ export default function App() {
                 </div>
               )}
             </div>
-
-            {/* КОМПАКТНЫЙ СТАТУС ОБЛАЧНОГО БУФЕРА GITHUB RELEASES API */}
-            {(releaseBufferProgress.active || releaseBufferProgress.completed || releaseBufferProgress.error) && (
-              <div
-                className={`rounded-xl px-4 py-3 border text-xs flex flex-wrap items-center justify-between gap-3 ${
-                  releaseBufferProgress.error
-                    ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
-                    : releaseBufferProgress.completed
-                    ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
-                    : 'bg-amber-500/10 border-amber-500/40 text-amber-300'
-                }`}
-              >
-                <div className="flex items-center gap-2.5 font-mono">
-                  <CloudUpload className="w-4 h-4 shrink-0" />
-                  <span>
-                    Отправка ассетов в облачный буфер: [{releaseBufferProgress.current} /{' '}
-                    {releaseBufferProgress.total}] ...
-                    {releaseBufferProgress.currentFileName
-                      ? ` (${releaseBufferProgress.currentFileName})`
-                      : ''}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] font-mono">
-                  {releaseBufferProgress.releaseTag && (
-                    <span className="bg-slate-900/90 border border-slate-700 px-2 py-0.5 rounded text-amber-300">
-                      tag: {releaseBufferProgress.releaseTag}
-                    </span>
-                  )}
-                  {releaseBufferProgress.completed && !releaseBufferProgress.error && (
-                    <span className="text-emerald-400 font-bold">✓ Буфер синхронизирован</span>
-                  )}
-                </div>
-              </div>
-            )}
 
             {/* ЕДИНЫЙ РАБОЧИЙ БЛОК ЗАГРУЗКИ ВИДЕО В GOOGLE DRIVE + АВТОЗАПОЛНЕНИЕ СЛОТОВ ТАЙМЛАЙНА */}
             <GoogleDriveDirectUploader
@@ -4918,23 +4587,14 @@ export default function App() {
                 </div>
 
                 <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-2">
-                  {releaseBufferProgress.active && (
-                    <span className="text-xs font-mono text-amber-300 block">
-                      Отправка ассетов в облачный буфер: [{releaseBufferProgress.current} /{' '}
-                      {releaseBufferProgress.total}] ...
-                    </span>
-                  )}
                   <button
                     onClick={startLoopRender}
-                    disabled={releaseBufferProgress.active}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer disabled:opacity-60 text-xs"
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer text-xs"
                   >
                     <InfinityIcon className="w-4 h-4" />{' '}
-                    {releaseBufferProgress.active
-                      ? `Отправка ассетов в облачный буфер: [${releaseBufferProgress.current} / ${releaseBufferProgress.total}] ...`
-                      : `🚀 Запустить облачную сборку (${videoCodec.toUpperCase()} ${videoFps}fps • ${getResolutionLabel(
-                          loopResolution
-                        )} ~ ${estimatedGb} ГБ)`}
+                    {`🚀 Запустить облачную сборку (${videoCodec.toUpperCase()} ${videoFps}fps • ${getResolutionLabel(
+                      loopResolution
+                    )} ~ ${estimatedGb} ГБ)`}
                   </button>
                 </div>
               </div>
