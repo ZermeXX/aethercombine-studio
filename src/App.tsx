@@ -134,10 +134,17 @@ export interface ContinuousBedConfig {
   enabled: boolean;
   asset_id: string;
   file_name: string;
+  loop_entire_duration?: boolean;
   acrossfade_sec: number;
   veo_native_audio: boolean;
   veo_audio_weight: number;
   bed_audio_weight: number;
+}
+
+export interface LoopMasterAudioConfig {
+  enabled: boolean;
+  file_name: string;
+  weight: number;
 }
 
 export interface AudioMasteringConfig {
@@ -151,6 +158,7 @@ export interface AudioMasteringConfig {
 
 interface LoopBuildManifest {
   version: string;
+  project_name: string;
   spec_profile: string;
   hours: number;
   calculated_project_duration_sec: number;
@@ -162,6 +170,13 @@ interface LoopBuildManifest {
   native_audio_engine: string;
   bitrate_preset: 'standard' | 'cinema' | 'eco';
   crf: number;
+  export_settings: {
+    video_codec: 'libx264' | 'libx265';
+    crf: number;
+    resolution: '1080p' | '2k' | '4k';
+    fps: 24 | 30 | 60;
+    audio_bitrate_kbps: 320 | 256 | 192;
+  };
   act_crossfade_sec: number;
   internal_clip_duration_sec: number;
   internal_loop_crossfade_sec: number;
@@ -180,6 +195,7 @@ interface LoopBuildManifest {
     target_folder_id: string;
   };
   continuous_bed: ContinuousBedConfig;
+  master_audio: LoopMasterAudioConfig;
   timeline_slots: TimelineSlot[];
 }
 
@@ -406,15 +422,12 @@ const COMPLIANCE_DICTIONARY: {
   }
 ];
 
-const WORKFLOW_LOOP_YAML = `name: AetherCombine H.265 Blizzard 3h Builder (Omni 1.2 Flash)
+const WORKFLOW_LOOP_YAML = `name: AetherCombine Universal Loop Builder (H.264 / H.265)
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'GitHub Draft Release Tag with uploaded scene assets (AetherCombine Assets Buffer)'
-        required: false
       manifest_payload:
-        description: 'Base64-encoded JSON Build Manifest (Blizzard 3:00:00 H.265 24fps + Asymmetric Inserts + Loudnorm)'
+        description: 'Base64-encoded JSON Build Manifest (Universal N-Slots + 2-Layer Audio Mixer + Loudnorm)'
         required: true
 
 jobs:
@@ -424,7 +437,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Install FFmpeg (with libx265), Python3, jq & Rclone
+      - name: Install FFmpeg, Python3, jq & Rclone
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3 jq curl
@@ -435,12 +448,11 @@ jobs:
           RCLONE_CONFIG_GDRIVE_SCOPE: drive
           RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: \${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
         run: |
-          echo "Rclone configured for optional output export"
+          echo "Rclone configured for Google Drive stream"
 
-      - name: Parse Blizzard 3:00:00 Manifest & Run H.265 24fps FFmpeg Pipeline
+      - name: Parse Universal Loop Manifest & Run FFmpeg Pipeline
         env:
           MANIFEST_B64: \${{ github.event.inputs.manifest_payload }}
-          RELEASE_TAG: \${{ github.event.inputs.release_tag }}
         run: |
           python3 - << 'EOF'
           import base64, json, subprocess, os, math
@@ -451,15 +463,15 @@ jobs:
               f.write(raw_json)
           cfg = json.loads(raw_json)
 
-          res = cfg.get("resolution", "4k")
-          v_codec = cfg.get("video_codec", "libx265")
-          fps = int(cfg.get("fps", 24))
-          a_bitrate = f"{int(cfg.get('audio_bitrate_kbps', 320))}k"
-          preset = cfg.get("bitrate_preset", "cinema")
+          exp = cfg.get("export_settings") or {}
+          res = exp.get("resolution") or cfg.get("resolution", "4k")
+          v_codec = exp.get("video_codec") or cfg.get("video_codec", "libx264")
+          fps = int(exp.get("fps") or cfg.get("fps", 24))
+          a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps', 320))}k"
           scale_map = {"4k": "3840:2160", "2k": "2560:1440", "1080p": "1920:1080"}
           scale_wh = scale_map.get(res, "3840:2160")
-          crf_map = {"cinema": "18", "standard": "23", "eco": "26"}
-          crf = str(cfg.get("crf") or crf_map.get(preset, "18"))
+          default_crf = "22" if v_codec == "libx265" else "20"
+          crf = str(exp.get("crf") or cfg.get("crf") or default_crf)
           folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
           final_black_enabled = bool(cfg.get("final_black_screen_enabled", True))
@@ -703,11 +715,13 @@ export default function App() {
   const [transferredScript, setTransferredScript] = useState<string>('');
 
   // Loop studio state (Universal dynamic manifest state)
+  const [loopProjectName, setLoopProjectName] = useState<string>('Ambient Loop 4K');
   const [loopMedia, setLoopMedia] = useState<File | null>(null);
   const [loopAudio, setLoopAudio] = useState<File | null>(null);
   const [uploadedLoopAssets, setUploadedLoopAssets] = useState<Record<string, File>>({});
   const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(INITIAL_TIMELINE_SLOTS);
-  const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>('libx265');
+  const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>('libx264');
+  const [videoCrf, setVideoCrf] = useState<number>(20);
   const [videoFps, setVideoFps] = useState<24 | 30 | 60>(24);
   const [audioBitrateKbps, setAudioBitrateKbps] = useState<320 | 256 | 192>(320);
   const [actCrossfadeSec, setActCrossfadeSec] = useState<number>(90.0);
@@ -726,10 +740,16 @@ export default function App() {
     enabled: false,
     asset_id: '',
     file_name: '',
+    loop_entire_duration: true,
     acrossfade_sec: 1.0,
     veo_native_audio: true,
     veo_audio_weight: 0.85,
     bed_audio_weight: 0.55
+  });
+  const [loopMasterAudio, setLoopMasterAudio] = useState<LoopMasterAudioConfig>({
+    enabled: false,
+    file_name: '',
+    weight: 1.0
   });
   const [loopHours, setLoopHours] = useState<number>(3);
   const [loopResolution, setLoopResolution] = useState<'1080p' | '2k' | '4k'>('4k');
@@ -832,6 +852,8 @@ export default function App() {
   const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>([]);
   const seenStepsRef = useRef<Record<string, string>>({});
   const secondsRef = useRef<number>(0);
+  const dispatchTimeRef = useRef<number>(0);
+  const activeRunIdRef = useRef<number | null>(null);
 
   const appendTerminalLog = useCallback(
     (text: string, level: TerminalLogEntry['level'] = 'info') => {
@@ -981,23 +1003,87 @@ export default function App() {
     return () => clearInterval(timer);
   }, [renderStatus.visible, renderStatus.status]);
 
-  // Автоматический опрос GitHub Actions (Polling каждые 3.5 секунды) и трансляция в LiveTerminal
+  // Кнопка отмены текущей сборки в терминале (POST /actions/runs/${activeRunId}/cancel)
+  const cancelActiveRenderRun = useCallback(async () => {
+    const githubToken = ghToken.trim();
+    if (!githubToken) {
+      showToast('Укажите GitHub Personal Access Token для отмены сборки!', 'error');
+      return;
+    }
+
+    let activeRunId = activeRunIdRef.current || renderStatus.runId;
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${githubToken}`,
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
+
+    try {
+      if (!activeRunId) {
+        const runsRes = await fetch(
+          'https://api.github.com/repos/ZermeXX/aetherflow-render/actions/runs?event=workflow_dispatch&per_page=5',
+          { headers }
+        );
+        if (runsRes.ok) {
+          const runsData = (await runsRes.json()) as {
+            workflow_runs?: Array<{ id: number; status: string }>;
+          };
+          const running = (runsData.workflow_runs || []).find(
+            r => r.status === 'in_progress' || r.status === 'queued'
+          );
+          if (running) {
+            activeRunId = running.id;
+            activeRunIdRef.current = running.id;
+          }
+        }
+      }
+
+      if (!activeRunId) {
+        showToast('Активный run_id еще не зарегистрирован на стороне GitHub Actions', 'info');
+        return;
+      }
+
+      await fetch(
+        `https://api.github.com/repos/ZermeXX/aetherflow-render/actions/runs/${activeRunId}/cancel`,
+        {
+          method: 'POST',
+          headers
+        }
+      );
+
+      appendTerminalLog('[ПРЕРВАНО]: Запрос на отмену отправлен в GitHub Actions.', 'error');
+      setRenderStatus(prev => ({
+        ...prev,
+        status: 'failure',
+        title: '⏹ Сборка отменена пользователем',
+        stepLabel: '[ПРЕРВАНО]: Запрос на отмену отправлен в GitHub Actions.'
+      }));
+      showToast('Запрос на отмену отправлен в GitHub Actions', 'info');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendTerminalLog(`[ПРЕРВАНО]: Запрос на отмену отправлен в GitHub Actions (${msg}).`, 'error');
+    }
+  }, [ghToken, renderStatus.runId, appendTerminalLog, showToast]);
+
+  // Автоматический умный опрос GitHub Actions (пауза 4 секунды после старта, защита от ложного cancelled)
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
     const headers: Record<string, string> = {
-      Accept: 'application/vnd.github.v3+json'
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
     };
     if (ghToken) {
-      headers.Authorization = `Bearer ${ghToken}`;
+      headers.Authorization = `Bearer ${ghToken.trim()}`;
     }
 
     let isCancelled = false;
 
     const pollGitHubActions = async () => {
       try {
+        const startTime = dispatchTimeRef.current;
         const runsRes = await fetch(
-          `https://api.github.com/repos/${targetRepo}/actions/runs?event=workflow_dispatch&per_page=1`,
+          `https://api.github.com/repos/${targetRepo}/actions/runs?event=workflow_dispatch&per_page=5`,
           { headers }
         );
         if (!runsRes.ok || isCancelled) return;
@@ -1008,11 +1094,48 @@ export default function App() {
             status: string;
             conclusion: string | null;
             html_url: string;
+            created_at: string;
           }>;
         };
 
-        const latestRun = runsData.workflow_runs?.[0];
+        const rawRuns = runsData.workflow_runs || [];
+        if (rawRuns.length === 0 || isCancelled) return;
+
+        // Игнорируем любые runs со статусом 'cancelled' или 'completed', если они были созданы раньше startTime.
+        // Подхватываем только run_id, который находится в 'queued' или 'in_progress' (или новый run после startTime).
+        const candidateRuns = rawRuns.filter(run => {
+          if (activeRunIdRef.current !== null && run.id === activeRunIdRef.current) {
+            return true;
+          }
+          const runCreatedTime = new Date(run.created_at).getTime();
+          const isCancelledOrCompleted =
+            run.status === 'cancelled' ||
+            run.status === 'completed' ||
+            run.conclusion === 'cancelled';
+
+          if (isCancelledOrCompleted && runCreatedTime < startTime) {
+            return false;
+          }
+
+          if (run.status === 'queued' || run.status === 'in_progress') {
+            return true;
+          }
+
+          return runCreatedTime >= startTime;
+        });
+
+        const latestRun =
+          activeRunIdRef.current !== null
+            ? candidateRuns.find(r => r.id === activeRunIdRef.current) || candidateRuns[0]
+            : candidateRuns[0];
+
+        // Если актуальный запуск еще не появился на стороне GitHub — продолжаем ждать без перехода в FAILED
         if (!latestRun || isCancelled) return;
+
+        // Фиксируем ID найденного актуального запуска
+        if (activeRunIdRef.current === null) {
+          activeRunIdRef.current = latestRun.id;
+        }
 
         const runId = latestRun.id;
         const runUrl = latestRun.html_url || `https://github.com/${targetRepo}/actions`;
@@ -1184,14 +1307,21 @@ export default function App() {
       }
     };
 
-    // Первый опрос через 2 секунды после dispatch и далее каждые 3.5 секунды (3–4 сек)
-    const initialTimeout = setTimeout(pollGitHubActions, 2000);
-    const interval = setInterval(pollGitHubActions, 3500);
+    // Ждем 4 секунды (4000 мс) перед первым запросом к API
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPollingWithDelay = async () => {
+      await new Promise(r => setTimeout(r, 4000));
+      if (isCancelled) return;
+      await pollGitHubActions();
+      if (isCancelled) return;
+      interval = setInterval(pollGitHubActions, 3500);
+    };
+
+    void startPollingWithDelay();
 
     return () => {
       isCancelled = true;
-      clearTimeout(initialTimeout);
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
   }, [
     renderStatus.visible,
@@ -1217,25 +1347,26 @@ export default function App() {
   const charCount = sourceText.length;
   const wordCount = sourceText.trim() ? sourceText.trim().split(/\s+/).length : 0;
 
-  // Dynamic file size calculator for 3-10h loop based on resolution + bitratePreset + hours
+  // Dynamic file size calculator for 3-10h loop based on resolution + codec + hours
   const estimateLoopSizeGb = useCallback(() => {
-    // Base GB per hour for 4K:
-    // cinema (CRF 18, ~35-50 Mbps) => 11.8 GB/h (10h = 118 GB)
-    // standard (CRF 23, ~12-18 Mbps) => 6.4 GB/h (10h = 64 GB)
-    // eco (CRF 26, ~8-10 Mbps) => 3.8 GB/h (10h = 38 GB)
     const base4kGbPerHour =
-      bitratePreset === 'cinema' ? 11.8 : bitratePreset === 'standard' ? 6.4 : 3.8;
+      videoCodec === 'libx264'
+        ? 8.2
+        : bitratePreset === 'cinema'
+        ? 11.8
+        : bitratePreset === 'standard'
+        ? 6.4
+        : 3.8;
     const resMultiplier =
       loopResolution === '4k' ? 1.0 : loopResolution === '2k' ? 0.48 : 0.24;
     const rawGb = loopHours * base4kGbPerHour * resMultiplier;
     return Math.round(rawGb * 10) / 10;
-  }, [loopHours, loopResolution, bitratePreset]);
+  }, [loopHours, loopResolution, bitratePreset, videoCodec]);
 
   const getScaleFilter = (res: '1080p' | '2k' | '4k') =>
     res === '4k' ? 'scale=3840:2160' : res === '2k' ? 'scale=2560:1440' : 'scale=1920:1080';
 
-  const getCrfValue = (preset: 'standard' | 'cinema' | 'eco') =>
-    preset === 'cinema' ? 18 : preset === 'eco' ? 26 : 23;
+  const getCrfValue = (_preset?: 'standard' | 'cinema' | 'eco') => videoCrf;
 
   const getResolutionLabel = (res: '1080p' | '2k' | '4k') =>
     res === '4k' ? '4K' : res === '2k' ? '2K' : '1080p';
@@ -1329,11 +1460,13 @@ export default function App() {
     showToast('Шаблон render_loop.yml скопирован в буфер обмена!', 'success');
   };
 
-  const showStatusBar = (title: string, desc: string, repo: string) => {
+  const showStatusBar = (title: string, desc: string, repo: string, customDispatchTime?: number) => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
     const cleanRepo = (repo || 'ZermeXX/aetherflow-render').trim();
+    dispatchTimeRef.current = customDispatchTime || new Date().getTime();
+    activeRunIdRef.current = null;
     secondsRef.current = 0;
     seenStepsRef.current = {};
     setTerminalLogs([
@@ -1592,7 +1725,8 @@ export default function App() {
       })
     );
     setLoopHours(3);
-    setVideoCodec('libx265');
+    setVideoCodec('libx264');
+    setVideoCrf(20);
     setVideoFps(24);
     setAudioBitrateKbps(320);
     setActCrossfadeSec(90.0);
@@ -1608,7 +1742,7 @@ export default function App() {
       e3_max_peak_over_bed_db: 6
     });
     showToast(
-      'Применены параметры кодирования 3:00:00 (H.265 24fps, AAC 320k, стыки 90с, loudnorm -16 LUFS) с сохранением ваших имен файлов!',
+      'Применены параметры кодирования 3:00:00 (H.264 CRF 20, 24fps, AAC 320k, стыки 90с, loudnorm -16 LUFS) с сохранением ваших имен файлов!',
       'success'
     );
   };
@@ -2030,16 +2164,37 @@ export default function App() {
     }
 
     let preMasterAudio = veoAudioChain;
-    if (continuousBed.enabled && continuousBed.file_name) {
+    const activeMixInputs: string[] = [`[${veoAudioChain}]`];
+    const activeMixWeights: number[] = [continuousBed.veo_audio_weight];
+
+    if (continuousBed.enabled && continuousBed.file_name.trim()) {
       const bedInput = inputIdx++;
+      const loopFlag = continuousBed.loop_entire_duration !== false ? '-stream_loop -1 ' : '';
       inputsArgs.push(
-        `-stream_loop -1 -t ${calculatedProjectDurationSec} -i "${continuousBed.file_name}" # [Непрерывный фоновый слой Omni 1.2 Flash]`
+        `${loopFlag}-t ${calculatedProjectDurationSec} -i "${continuousBed.file_name.trim()}" # [Слой 1: Фоновый эмбиент]`
       );
       filterLines.push(
         `[${bedInput}:a]afade=t=in:st=0:d=${continuousBed.acrossfade_sec},atrim=duration=${calculatedProjectDurationSec},asetpts=PTS-STARTPTS[a_bed]`
       );
+      activeMixInputs.push('[a_bed]');
+      activeMixWeights.push(continuousBed.bed_audio_weight);
+    }
+
+    if (loopMasterAudio.enabled && loopMasterAudio.file_name.trim()) {
+      const masterIn = inputIdx++;
+      inputsArgs.push(
+        `-i "${loopMasterAudio.file_name.trim()}" # [Слой 2: Мастер-аудиодорожка (озвучка / саундтрек)]`
+      );
       filterLines.push(
-        `[${veoAudioChain}][a_bed]amix=inputs=2:duration=first:weights='${continuousBed.veo_audio_weight} ${continuousBed.bed_audio_weight}'[a_mixed]`
+        `[${masterIn}:a]atrim=duration=${calculatedProjectDurationSec},asetpts=PTS-STARTPTS[a_master_track]`
+      );
+      activeMixInputs.push('[a_master_track]');
+      activeMixWeights.push(loopMasterAudio.weight);
+    }
+
+    if (activeMixInputs.length > 1) {
+      filterLines.push(
+        `${activeMixInputs.join('')}amix=inputs=${activeMixInputs.length}:duration=first:weights='${activeMixWeights.join(' ')}'[a_mixed]`
       );
       preMasterAudio = 'a_mixed';
     }
@@ -2063,7 +2218,7 @@ export default function App() {
       finalAudioMap = 'a_master_loudnorm';
     }
 
-    const crfVal = getCrfValue(bitratePreset);
+    const crfVal = videoCrf;
     const codecFlags =
       videoCodec === 'libx265'
         ? `-c:v libx265 -preset medium -crf ${crfVal} -tag:v hvc1 -pix_fmt yuv420p -r ${videoFps}`
@@ -2081,9 +2236,10 @@ export default function App() {
     finalBlackScreenEnabled,
     finalBlackScreenSec,
     continuousBed,
+    loopMasterAudio,
     calculatedProjectDurationSec,
     audioMastering,
-    bitratePreset,
+    videoCrf,
     videoCodec,
     audioBitrateKbps
   ]);
@@ -2093,7 +2249,10 @@ export default function App() {
   // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (без хардкода)
   const currentManifest: LoopBuildManifest = {
     version: '4.0-universal',
-    spec_profile: importedManifestName || `Universal Loop (${videoCodec} ${videoFps}fps • AAC ${audioBitrateKbps}kbps)`,
+    project_name: loopProjectName.trim() || 'Ambient Loop 4K',
+    spec_profile:
+      importedManifestName ||
+      `${loopProjectName.trim() || 'Ambient Loop 4K'} (${videoCodec} CRF ${videoCrf} • ${videoFps}fps • AAC ${audioBitrateKbps}kbps)`,
     hours: loopHours,
     calculated_project_duration_sec: calculatedProjectDurationSec,
     resolution: loopResolution,
@@ -2103,7 +2262,14 @@ export default function App() {
     audio_bitrate_kbps: audioBitrateKbps,
     native_audio_engine: 'Omni 1.2 Flash',
     bitrate_preset: bitratePreset,
-    crf: getCrfValue(bitratePreset),
+    crf: videoCrf,
+    export_settings: {
+      video_codec: videoCodec,
+      crf: videoCrf,
+      resolution: loopResolution,
+      fps: videoFps,
+      audio_bitrate_kbps: audioBitrateKbps
+    },
     crossfade_loop: seamlessStitchEnabled,
     seamless_mode: seamlessTransitionMode,
     act_crossfade_sec: actCrossfadeSec,
@@ -2126,6 +2292,7 @@ export default function App() {
           audio_filename:
             loopAudio?.name ||
             continuousBed.file_name ||
+            loopMasterAudio.file_name ||
             expectedAudioFilename ||
             ''
         }),
@@ -2134,6 +2301,7 @@ export default function App() {
       target_folder_id: gdriveFolderId || ''
     },
     continuous_bed: continuousBed,
+    master_audio: loopMasterAudio,
     timeline_slots: timelineSlots.map(slot => ({
       ...slot,
       act_title: slot.act_title ?? slot.title ?? '',
@@ -2151,7 +2319,7 @@ export default function App() {
     }))
   };
 
-  // Безопасное UTF-8 кодирование строки с кириллицей («Метель», названия актов/сцен) в Base64
+  // Безопасное UTF-8 кодирование строки с кириллицей в Base64
   const toBase64 = (str: string): string => {
     try {
       const bytes = new TextEncoder().encode(str);
@@ -2419,7 +2587,11 @@ export default function App() {
       }
     }
 
-    // 2. Parse continuous_bed config if present
+    if (typeof raw.project_name === 'string' && raw.project_name.trim()) {
+      setLoopProjectName(raw.project_name.trim());
+    }
+
+    // 2. Parse continuous_bed & master_audio config if present
     if (raw.continuous_bed && typeof raw.continuous_bed === 'object') {
       const bedObj = raw.continuous_bed as Record<string, unknown>;
       const bedFileName = String(
@@ -2429,6 +2601,8 @@ export default function App() {
         enabled: typeof bedObj.enabled === 'boolean' ? bedObj.enabled : Boolean(bedFileName),
         asset_id: typeof bedObj.asset_id === 'string' ? bedObj.asset_id : '',
         file_name: bedFileName,
+        loop_entire_duration:
+          typeof bedObj.loop_entire_duration === 'boolean' ? bedObj.loop_entire_duration : true,
         acrossfade_sec:
           typeof bedObj.acrossfade_sec === 'number'
             ? bedObj.acrossfade_sec
@@ -2448,15 +2622,28 @@ export default function App() {
       }));
     }
 
+    if (raw.master_audio && typeof raw.master_audio === 'object') {
+      const maObj = raw.master_audio as Record<string, unknown>;
+      const maFile = String(maObj.file_name || maObj.filename || '').trim();
+      setLoopMasterAudio(prev => ({
+        enabled: typeof maObj.enabled === 'boolean' ? maObj.enabled : Boolean(maFile),
+        file_name: maFile,
+        weight: typeof maObj.weight === 'number' ? maObj.weight : prev.weight
+      }));
+    }
+
     // 2b. Parse codec, fps, audio bitrate, act crossfade, black screen & audio_mastering
     const rawCodec = raw.video_codec ?? exportSettingsObj?.video_codec ?? exportSettingsObj?.codec;
     if (rawCodec === 'libx265' || rawCodec === 'libx264') {
       setVideoCodec(rawCodec);
+      setVideoCrf(rawCodec === 'libx265' ? 22 : 20);
     } else if (typeof rawCodec === 'string') {
       if (rawCodec.toLowerCase().includes('265') || rawCodec.toLowerCase().includes('hevc')) {
         setVideoCodec('libx265');
+        setVideoCrf(22);
       } else if (rawCodec.toLowerCase().includes('264')) {
         setVideoCodec('libx264');
+        setVideoCrf(20);
       }
     }
 
@@ -2536,6 +2723,9 @@ export default function App() {
     // 5. Bitrate Preset & CRF ('cinema' | 'standard' | 'eco')
     const rawPreset = raw.bitrate_preset ?? exportSettingsObj?.bitrate_preset;
     const rawCrf = raw.crf ?? exportSettingsObj?.crf;
+    if (typeof rawCrf === 'number' && rawCrf >= 14 && rawCrf <= 32) {
+      setVideoCrf(rawCrf);
+    }
     if (typeof rawPreset === 'string') {
       const normPreset = rawPreset.toLowerCase();
       if (normPreset === 'cinema' || normPreset === 'standard' || normPreset === 'eco') {
@@ -2682,7 +2872,7 @@ export default function App() {
     );
   };
 
-  // Прямой и чистый запуск облачной сборки (без выгрузки файлов в GitHub Releases)
+  // Прямой и чистый запуск облачной сборки (отправка только manifest_payload в Base64 через dispatch)
   const startLoopRender = async () => {
     const githubToken = ghToken.trim();
     if (!githubToken) {
@@ -2695,8 +2885,10 @@ export default function App() {
       return;
     }
 
+    // 1. Фиксация времени запуска
+    const startTime = Date.now();
     const scaleFlag = getScaleFilter(loopResolution);
-    const crfVal = getCrfValue(bitratePreset);
+    const crfVal = videoCrf;
     const manifestBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(currentManifest))));
 
     try {
@@ -2713,7 +2905,6 @@ export default function App() {
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              release_tag: 'none',
               manifest_payload: manifestBase64
             }
           })
@@ -2723,11 +2914,12 @@ export default function App() {
       if (response.status === 204) {
         showStatusBar(
           'Сборка успешно запущена в GitHub Actions!',
-          `release_tag: none | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | CRF ${crfVal} | ${scaleFlag}`,
-          'ZermeXX/aetherflow-render'
+          `Проект: ${loopProjectName} | Кодек: ${videoCodec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | ${scaleFlag}`,
+          'ZermeXX/aetherflow-render',
+          startTime
         );
         appendTerminalLog(
-          '[00:00] ✅ Сборка успешно запущена в GitHub Actions!',
+          '[00:00] ✅ Сборка успешно запущена в GitHub Actions! Ожидание регистрации нового workflow run (4 сек)...',
           'success'
         );
         showToast('Сборка успешно запущена в GitHub Actions!', 'success');
@@ -3320,11 +3512,12 @@ export default function App() {
             terminalLogs={terminalLogs}
             terminalRunUrl={renderStatus.runUrl}
             onClearTerminalLogs={clearTerminalLogs}
+            onCancelRenderRun={cancelActiveRenderRun}
           />
         </section>
 
         {/* =========================================
-            ЦЕХ 2: СБОРЩИК ПО СПЕЦИФИКАЦИИ «МЕТЕЛЬ: 3:00:00» (H.265 24FPS • АСИММЕТРИЧНЫЕ INSERTS[] • LOUDNORM -16 LUFS)
+            ЦЕХ 2: МНОГОЧАСОВОЙ ЛУП (N-СЛОТОВ) — 4K AMBIENT LOOP BUILDER
            ========================================= */}
         <section
           id="view-loop"
@@ -3332,20 +3525,32 @@ export default function App() {
         >
           <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
+              <div className="space-y-2 flex-1 min-w-[280px]">
                 <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <Repeat className="text-amber-500 w-5 h-5" /> Цех многочасовых лупов — Спецификация «Метель: 3:00:00» (Omni 1.2 Flash)
+                  <Repeat className="text-amber-500 w-5 h-5" /> Многочасовой Луп (N-Слотов) — Динамический конструктор 4K
                 </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                    Project Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={loopProjectName}
+                    onChange={e => setLoopProjectName(e.target.value)}
+                    placeholder="Ambient Loop 4K"
+                    className="bg-slate-900 border border-amber-500/40 focus:border-amber-400 rounded-lg px-3 py-1 text-xs font-semibold text-slate-100 w-64 sm:w-80 outline-none"
+                  />
+                </div>
                 <p className="text-xs text-slate-400">
-                  Экспорт <code className="text-amber-400">{videoCodec}</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов 90с (0:30, 1:00, 1:40, 2:00, 2:40) • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с) • Асимметричные <code className="text-emerald-400">inserts[]</code> (E1, E2, E3) • <code className="text-sky-400">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
+                  Экспорт <code className="text-amber-400">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с) • Асимметричные <code className="text-emerald-400">inserts[]</code> • <code className="text-sky-400">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] bg-sky-500/10 border border-sky-500/30 text-sky-300 px-3 py-1 rounded-lg font-semibold font-mono">
-                  {videoCodec === 'libx265' ? 'H.265 (libx265)' : 'H.264'} • {videoFps}fps • AAC {audioBitrateKbps}k
+                  {videoCodec === 'libx265' ? 'H.265 (libx265)' : 'H.264 (libx264)'} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
                 </span>
                 <span className="text-[11px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg font-semibold">
-                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • Чистый хронометраж: {calculatedProjectDurationSec}s (3:00:00)
+                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • Чистый хронометраж: {calculatedProjectDurationSec}s
                 </span>
                 <span className="text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1 rounded-lg font-semibold">
                   Direct GDrive Stream
@@ -3353,14 +3558,14 @@ export default function App() {
               </div>
             </div>
 
-            {/* МОДУЛЬ ИМПОРТА И ЭКСПОРТА JSON-МАНИФЕСТА + ЭТАЛОН «МЕТЕЛЬ: 3:00:00» */}
+            {/* МОДУЛЬ ИМПОРТА И ЭКСПОРТА JSON-МАНИФЕСТА (УНИВЕРСАЛЬНЫЙ ПАРСЕР N-СЛОТОВ) */}
             <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <FileText className="w-4 h-4 text-amber-500" />
                   <div>
                     <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                      JSON-манифест сборки &amp; Профиль «Метель: 3:00:00» (Универсальный парсер N-Слотов)
+                      JSON-манифест сборки • Проект «{loopProjectName || 'Ambient Loop 4K'}» (Универсальный парсер N-Слотов)
                     </h3>
                     <p className="text-[11px] text-slate-400">
                       Парсит любое число слотов <code className="text-amber-300">timeline_slots</code> (1–50+), кривые <code className="text-amber-300">transition_in / transition_out</code> и мастеринг <code className="text-emerald-300">audio_mastering</code>
@@ -3381,7 +3586,7 @@ export default function App() {
                     onClick={applyBlizzard3HSpecPreset}
                     className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-sky-200 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-sky-500/10"
                   >
-                    ❄️ [ Спецификация «Метель: 3:00:00» ]
+                    ⚡ [ Сбросить к 6 актам (3:00:00) ]
                   </button>
                   <button
                     type="button"
@@ -3405,28 +3610,6 @@ export default function App() {
                   >
                     Пресет 10 слотов (N-сцен)
                   </button>
-                </div>
-              </div>
-
-              {/* Сводка ключевых точек спецификации «Метель: 3:00:00» */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1 text-[11px]">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-2">
-                  <span className="text-amber-400 font-bold block">1. Кодек H.265 &amp; Стыки актов (90 сек):</span>
-                  <span className="text-slate-300">
-                    <code>libx265</code> 24 fps, AAC 320 kbps (Omni 1.2 Flash). Переходы между актами (0:30, 1:00, 1:40, 2:00, 2:40) — crossfade 90с; внутри слота — петля 10с со швом 1.0с.
-                  </span>
-                </div>
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-2">
-                  <span className="text-emerald-400 font-bold block">2. Асимметричные вставки E1 / E2 / E3:</span>
-                  <span className="text-slate-300">
-                    <strong>E1</strong> (1:02 / 3720с): in 1.5с / out 1.5с • <strong>E2</strong> (1:50 / 6600с): in 1.5с / out 3.0с • <strong>E3</strong> (2:56 / 10560с): in 1.5с, <u>БЕЗ fade out</u> + опц. 2с черный экран.
-                  </span>
-                </div>
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-2">
-                  <span className="text-sky-400 font-bold block">3. Мастеринг звука и лимитер E3:</span>
-                  <span className="text-slate-300">
-                    Фильтр <code>loudnorm=I=-16:TP=-3:LRA=11</code> (-18..-14 LUFS, TP &le; -3 dBTP). Треск E3: мягкая атака (soft attack) с пиком не выше <strong>+6 дБ</strong> поверх фона.
-                  </span>
                 </div>
               </div>
 
@@ -3460,7 +3643,7 @@ export default function App() {
               )}
             </div>
 
-            {/* ЕДИНЫЙ РАБОЧИЙ БЛОК ЗАГРУЗКИ ВИДЕО В GOOGLE DRIVE + АВТОЗАПОЛНЕНИЕ СЛОТОВ ТАЙМЛАЙНА */}
+            {/* ЕДИСТВЕННОЕ МЕСТО ЗАГРУЗКИ ФАЙЛОВ НА GOOGLE ДИСК + АВТОЗАПОЛНЕНИЕ СЛОТОВ ТАЙМЛАЙНА */}
             <GoogleDriveDirectUploader
               targetFolderId={gdriveFolderId}
               onTargetFolderIdChange={newFolder => {
@@ -3476,94 +3659,159 @@ export default function App() {
               onFilesSelected={handleLoopFilesSelected}
               onNotify={showToast}
               accentColor="amber"
-              title="1. Единая зона загрузки исходных видеоклипов в Google Drive (Resumable Upload)"
-              subtitle="Перетащите исходные видеоклипы сюда или выберите файлы — их имена сразу заполнят слоты таймлайна, а сами файлы физически выгрузятся в папку Google Drive с прогресс-барами (0–100%)"
+              title="Перетащите исходные видеоклипы сюда или выберите файлы (Прямая выгрузка в Google Drive)"
+              subtitle="Верхняя дропзона — единственное место загрузки файлов на Google Диск. Имена файлов сразу заполняют слоты таймлайна, а сами файлы выгружаются напрямую в целевую папку."
             />
 
-            {/* 2. КОМПАКТНАЯ ПАНЕЛЬ НАСТРОЕК ЗВУКА: НАТИВНЫЙ ЗВУК OMNI / CONTINUOUS_BED (БЕЗ ПСЕВДО-ДРОПЗОНЫ) */}
-            <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* 2-СЛОЙНЫЙ АУДИО-МИКШЕР: А) ФОНОВЫЙ ЭМБИЕНТ + Б) МАСТЕР-АУДИОДОРОЖКА */}
+            <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2.5">
                 <div className="flex items-center gap-2.5">
                   <Headphones className="w-4 h-4 text-amber-400 shrink-0" />
                   <div>
                     <span className="text-xs font-bold text-slate-100 uppercase tracking-wider block">
-                      2. Нативный звук Omni / continuous_bed (Аудио-фильтр манифеста)
+                      2-Слойный Аудио-Микшер (Фоновый эмбиент + Мастер-аудиодорожка)
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      Управляет микшированием звуковой дорожки в <code className="text-amber-300 font-mono">filter_complex</code> (<code className="text-emerald-400 font-mono">acrossfade=d={actCrossfadeSec}</code> + <code className="text-sky-400 font-mono">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>)
+                      Микширование аудиослоев в <code className="text-amber-300 font-mono">filter_complex</code> с финальной нормализацией <code className="text-sky-400 font-mono">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
                     </span>
                   </div>
                 </div>
-
-                <label className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-3.5 py-2 rounded-xl text-xs font-semibold text-amber-300 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={continuousBed.enabled}
-                    onChange={e =>
-                      setContinuousBed(prev => ({ ...prev, enabled: e.target.checked }))
-                    }
-                    className="accent-amber-500 w-4 h-4"
-                  />
-                  <span>Включить непрерывную звуковую подложку (amix)</span>
-                </label>
               </div>
 
-              {continuousBed.enabled && (
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80 text-xs">
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Имя аудиофайла подложки в Google Drive (continuous_bed.file_name):
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                {/* а) Фоновый эмбиент */}
+                <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 font-bold text-amber-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={continuousBed.enabled}
+                        onChange={e =>
+                          setContinuousBed(prev => ({ ...prev, enabled: e.target.checked }))
+                        }
+                        className="accent-amber-500 w-4 h-4"
+                      />
+                      <span>а) Фоновый эмбиент (непрерывный фоновый звук)</span>
                     </label>
-                    <input
-                      type="text"
-                      value={continuousBed.file_name}
-                      onChange={e =>
-                        setContinuousBed(prev => ({ ...prev, file_name: e.target.value }))
-                      }
-                      placeholder="Напр.: ambient_bed.wav (оставьте пустым для нативного звука клипов)"
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
-                    />
+
+                    <label className="flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={continuousBed.loop_entire_duration !== false}
+                        onChange={e =>
+                          setContinuousBed(prev => ({
+                            ...prev,
+                            loop_entire_duration: e.target.checked
+                          }))
+                        }
+                        className="accent-emerald-400 w-3.5 h-3.5"
+                      />
+                      <span>Зациклить на всю длину</span>
+                    </label>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Вес нативного звука (veo_weight):
-                    </label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      max={2.0}
-                      step={0.05}
-                      value={continuousBed.veo_audio_weight}
-                      onChange={e =>
-                        setContinuousBed(prev => ({
-                          ...prev,
-                          veo_audio_weight: Math.max(0.1, Number(e.target.value) || 0.85)
-                        }))
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Вес подложки (bed_weight):
-                    </label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      max={2.0}
-                      step={0.05}
-                      value={continuousBed.bed_audio_weight}
-                      onChange={e =>
-                        setContinuousBed(prev => ({
-                          ...prev,
-                          bed_audio_weight: Math.max(0.1, Number(e.target.value) || 0.55)
-                        }))
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-sky-300 outline-none"
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        Имя файла фонового эмбиента (в Google Drive):
+                      </label>
+                      <input
+                        type="text"
+                        value={continuousBed.file_name}
+                        onChange={e =>
+                          setContinuousBed(prev => ({
+                            ...prev,
+                            enabled: Boolean(e.target.value.trim()) || prev.enabled,
+                            file_name: e.target.value
+                          }))
+                        }
+                        placeholder="ambient_wind_loop.wav"
+                        className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        Громкость (вес):
+                      </label>
+                      <input
+                        type="number"
+                        min={0.1}
+                        max={2.0}
+                        step={0.05}
+                        value={continuousBed.bed_audio_weight}
+                        onChange={e =>
+                          setContinuousBed(prev => ({
+                            ...prev,
+                            bed_audio_weight: Math.max(0.1, Number(e.target.value) || 0.55)
+                          }))
+                        }
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-sky-300 outline-none"
+                      />
+                    </div>
                   </div>
                 </div>
-              )}
+
+                {/* б) Мастер-аудиодорожка */}
+                <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 font-bold text-indigo-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={loopMasterAudio.enabled}
+                        onChange={e =>
+                          setLoopMasterAudio(prev => ({ ...prev, enabled: e.target.checked }))
+                        }
+                        className="accent-indigo-500 w-4 h-4"
+                      />
+                      <span>б) Мастер-аудиодорожка (озвучка / саундтрек)</span>
+                    </label>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Синхронный мастер-трек
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        Имя файла мастер-аудиодорожки (в Google Drive):
+                      </label>
+                      <input
+                        type="text"
+                        value={loopMasterAudio.file_name}
+                        onChange={e =>
+                          setLoopMasterAudio(prev => ({
+                            ...prev,
+                            enabled: Boolean(e.target.value.trim()) || prev.enabled,
+                            file_name: e.target.value
+                          }))
+                        }
+                        placeholder="master_voiceover_or_ost.mp3"
+                        className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-indigo-300 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        Громкость (вес):
+                      </label>
+                      <input
+                        type="number"
+                        min={0.1}
+                        max={2.0}
+                        step={0.05}
+                        value={loopMasterAudio.weight}
+                        onChange={e =>
+                          setLoopMasterAudio(prev => ({
+                            ...prev,
+                            weight: Math.max(0.1, Number(e.target.value) || 1.0)
+                          }))
+                        }
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-300 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* БЛОК ПАРАМЕТРОВ СТЫКОВ АКТОВ (90 СЕК), ШВА ПЕТЛИ (1.0 СЕК), ЧЕРНОГО ЭКРАНА (2 СЕК) И НОРМАЛИЗАЦИИ LOUDNORM */}
@@ -3811,7 +4059,7 @@ export default function App() {
                     onClick={applyBlizzard3HSpecPreset}
                     className="bg-slate-900 hover:bg-slate-800 border border-sky-500/40 text-sky-300 px-3 py-2 rounded-xl text-xs transition cursor-pointer"
                   >
-                    Сбросить к «Метель: 3:00:00» (6 актов)
+                    Сбросить к 6 актам (3:00:00)
                   </button>
                 </div>
               </div>
@@ -4322,7 +4570,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-center">
                 {[
-                  { hours: 3, label: '3 Часа (Метель 3:00:00)' },
+                  { hours: 3, label: '3 Часа (3:00:00)' },
                   { hours: 5, label: '5 Часов' },
                   { hours: 8, label: '8 Часов' },
                   { hours: 10, label: '10 Часов' }
@@ -4358,13 +4606,13 @@ export default function App() {
               </div>
             </div>
 
-            {/* 4. АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ FFmpeg FILTER_COMPLEX (ЖИВОЙ ГРАФ «МЕТЕЛЬ: 3:00:00») */}
+            {/* 4. АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ FFmpeg FILTER_COMPLEX */}
             <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-500" />
                   <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                    4. Граф FFmpeg <code className="text-amber-400">filter_complex</code> ({videoCodec} {videoFps}fps • AAC {audioBitrateKbps}k • loudnorm I={audioMastering.integrated_lufs})
+                    4. Граф FFmpeg <code className="text-amber-400">filter_complex</code> ({videoCodec} CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k • loudnorm I={audioMastering.integrated_lufs})
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
@@ -4393,7 +4641,7 @@ export default function App() {
               {showFilterComplexPreview && (
                 <div className="space-y-2">
                   <div className="text-[11px] text-slate-400">
-                    Входные потоки (<code className="text-amber-300">{ffmpegPreview.inputsArgs.length} входов</code>): 10-сек петли со швом {internalLoopCrossfadeSec.toFixed(1)}с + асимметричные вставки E1/E2/E3 + 90с кроссфейды актов + <code className="text-sky-300">loudnorm</code>:
+                    Входные потоки (<code className="text-amber-300">{ffmpegPreview.inputsArgs.length} входов</code>): 10-сек петли со швом {internalLoopCrossfadeSec.toFixed(1)}с + асимметричные вставки + 90с кроссфейды актов + 2-слойный аудио-микшер + <code className="text-sky-300">loudnorm</code>:
                   </div>
                   <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[10px] font-mono text-emerald-300/90 overflow-x-auto max-h-60 custom-scroll leading-relaxed">
                     {`# Входы FFmpeg:\n${ffmpegPreview.inputsArgs.join(' \\\n  ')}\n\n# filter_complex:\n${ffmpegPreview.filterLines.join(';\n')}\n\n# Кодирование и маппинг:\n-map "[${ffmpegPreview.finalVideoMap}]" -map "[${ffmpegPreview.finalAudioMap}]" ${ffmpegPreview.encodingFlags} -t ${calculatedProjectDurationSec + (finalBlackScreenEnabled ? finalBlackScreenSec : 0)}`}
@@ -4402,35 +4650,44 @@ export default function App() {
               )}
             </div>
 
-            {/* 5. ПАРАМЕТРЫ КОДИРОВАНИЯ H.265 24FPS AAC 320K + КАЛЬКУЛЯТОР И GOOGLE DRIVE */}
+            {/* 5. ПАРАМЕТРЫ ЭКСПОРТА И СЕЛЕКТОР КОДЕКА (H.264 ПРОТИВ H.265) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-1">
               <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-amber-500" /> 5. Параметры кодирования и кодек H.265
+                    <Sliders className="w-4 h-4 text-amber-500" /> 5. Настройки экспорта и выбор видеокодека (H.264 / H.265)
                   </span>
                   <span className="text-[11px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
-                    {videoCodec} • {videoFps}fps • AAC {audioBitrateKbps}k • CRF {getCrfValue(bitratePreset)}
+                    {videoCodec} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
                   </span>
                 </div>
 
                 <div className="space-y-3">
-                  {/* Кодек, FPS и Битрейт аудио */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
-                        Видеокодек:
-                      </label>
-                      <select
-                        value={videoCodec}
-                        onChange={e => setVideoCodec(e.target.value as 'libx265' | 'libx264')}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-amber-300 font-mono outline-none focus:border-amber-500"
-                      >
-                        <option value="libx265">H.265 (libx265 • HEVC)</option>
-                        <option value="libx264">H.264 (libx264 • AVC)</option>
-                      </select>
-                    </div>
+                  {/* Селектор кодека (H.264 по умолчанию CRF 20 против H.265 CRF 22) */}
+                  <div>
+                    <label className="text-[11px] font-semibold text-amber-400 uppercase block mb-1">
+                      Видеокодек (передается в currentManifest.export_settings.video_codec):
+                    </label>
+                    <select
+                      value={videoCodec}
+                      onChange={e => {
+                        const nextCodec = e.target.value as 'libx264' | 'libx265';
+                        setVideoCodec(nextCodec);
+                        setVideoCrf(nextCodec === 'libx264' ? 20 : 22);
+                      }}
+                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-400"
+                    >
+                      <option value="libx264">
+                        H.264 (libx264) — Скоростной рендер (в 3-4 раза быстрее, рекомендуется для YouTube 4K) [CRF 20]
+                      </option>
+                      <option value="libx265">
+                        H.265 (libx265) — Максимальное сжатие (CRF 22)
+                      </option>
+                    </select>
+                  </div>
 
+                  {/* FPS, CRF и Битрейт аудио */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <div>
                       <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
                         Частота кадров (FPS):
@@ -4448,7 +4705,25 @@ export default function App() {
 
                     <div>
                       <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
-                        Аудио (Omni 1.2 Flash):
+                        Качество (CRF):
+                      </label>
+                      <input
+                        type="number"
+                        min={14}
+                        max={30}
+                        value={videoCrf}
+                        onChange={e =>
+                          setVideoCrf(
+                            Math.max(14, Math.min(30, Number(e.target.value) || (videoCodec === 'libx264' ? 20 : 22)))
+                          )
+                        }
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
+                        Битрейт аудио:
                       </label>
                       <select
                         value={audioBitrateKbps}
@@ -4467,7 +4742,7 @@ export default function App() {
                   {/* Выпадающий список разрешения */}
                   <div>
                     <label className="text-[11px] font-semibold text-slate-400 uppercase block mb-1">
-                      Выпадающий список разрешения:
+                      Разрешение рендера:
                     </label>
                     <select
                       value={loopResolution}
@@ -4487,30 +4762,6 @@ export default function App() {
                       </option>
                     </select>
                   </div>
-
-                  {/* Управление битрейтом и сжатием */}
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-400 uppercase block mb-1">
-                      Селектор пресетов битрейта и сжатия:
-                    </label>
-                    <select
-                      value={bitratePreset}
-                      onChange={e =>
-                        setBitratePreset(e.target.value as 'standard' | 'cinema' | 'eco')
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
-                    >
-                      <option value="standard">
-                        «YouTube Standard» (CRF 23, ~12–18 Mbps для 4K) — оптимальный баланс качества и скорости
-                      </option>
-                      <option value="cinema">
-                        «Master Cinema Pro» (CRF 18, ~35–50 Mbps для 4K) — кристальное студийное качество
-                      </option>
-                      <option value="eco">
-                        «Эконом» (CRF 26, ~8–10 Mbps) — для быстрой выгрузки на диск при слабом канале
-                      </option>
-                    </select>
-                  </div>
                 </div>
 
                 {/* ДИНАМИЧЕСКИЙ КАЛЬКУЛЯТОР ИТОГОВОГО ВЕСА */}
@@ -4520,12 +4771,12 @@ export default function App() {
                       Динамический калькулятор итогового веса ({videoCodec.toUpperCase()} {videoFps}fps):
                     </span>
                     <span className="text-sm font-bold text-slate-100">
-                      «{getResolutionLabel(loopResolution)} • {getPresetShortLabel(bitratePreset)} •{' '}
+                      «{getResolutionLabel(loopResolution)} • {videoCodec === 'libx264' ? 'H.264 Fast' : getPresetShortLabel(bitratePreset)} •{' '}
                       {loopHours} {loopHours >= 5 ? 'часов' : 'часа'} ~ {estimatedGb} ГБ»
                     </span>
                   </div>
                   <span className="text-[11px] font-mono text-amber-300 bg-slate-950/80 px-2.5 py-1 rounded border border-amber-500/30">
-                    CRF {getCrfValue(bitratePreset)} • AAC {audioBitrateKbps}k
+                    CRF {videoCrf} • AAC {audioBitrateKbps}k
                   </span>
                 </div>
 
@@ -4561,10 +4812,10 @@ export default function App() {
                   <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                   <div className="space-y-1.5">
                     <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wide">
-                      Двухрежимная передача в GitHub Actions (manifest_payload Base64)
+                      Прямая отправка манифеста в GitHub Actions (manifest_payload Base64)
                     </h4>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      При нажатии <strong>«🚀 Запустить облачную сборку»</strong> весь манифест (<code className="font-mono text-amber-300">{videoCodec} {videoFps}fps</code>, слоты <code className="font-mono text-amber-300">timeline_slots[]</code>, асимметричные <code className="font-mono text-amber-300">inserts[]</code>, <code className="font-mono text-sky-300">loudnorm</code>) кодируется в UTF-8 Base64 и передается в облачный раннер FFmpeg, а ход выполнения отображается в студийном терминале ниже.
+                      При нажатии <strong>«🚀 Запустить облачную сборку»</strong> манифест проекта <strong>«{loopProjectName || 'Ambient Loop 4K'}»</strong> (<code className="font-mono text-amber-300">{videoCodec} CRF {videoCrf} • {videoFps}fps</code>, слоты <code className="font-mono text-amber-300">timeline_slots[]</code>, 2-слойный аудио-микшер, <code className="font-mono text-sky-300">loudnorm</code>) кодируется в UTF-8 Base64 и отправляется напрямую через <code className="font-mono text-emerald-300">workflow_dispatch</code>.
                     </p>
                   </div>
                 </div>
@@ -4592,7 +4843,7 @@ export default function App() {
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer text-xs"
                   >
                     <InfinityIcon className="w-4 h-4" />{' '}
-                    {`🚀 Запустить облачную сборку (${videoCodec.toUpperCase()} ${videoFps}fps • ${getResolutionLabel(
+                    {`🚀 Запустить облачную сборку (${videoCodec === 'libx264' ? 'H.264' : 'H.265'} CRF ${videoCrf} • ${videoFps}fps • ${getResolutionLabel(
                       loopResolution
                     )} ~ ${estimatedGb} ГБ)`}
                   </button>
@@ -4600,7 +4851,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ (на месте бывшего блока JSON-манифеста) */}
+            {/* СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ */}
             <LiveTerminal
               status={terminalRunnerStatus}
               elapsedSeconds={renderStatus.seconds}
@@ -4608,6 +4859,7 @@ export default function App() {
               runUrl={renderStatus.runUrl}
               onClearLogs={clearTerminalLogs}
               onCopyLogs={() => showToast('Лог терминала скопирован в буфер обмена', 'info')}
+              onCancelRun={cancelActiveRenderRun}
             />
           </div>
         </section>

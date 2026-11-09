@@ -53,6 +53,12 @@ export interface MasterAudioConfig {
   fade_out_sec: number;
 }
 
+export interface AmbientAudioConfig {
+  file_name: string;
+  loop_full_duration: boolean;
+  volume: number;
+}
+
 export interface NarrativeExportSettings {
   resolution: '4k' | '1080p';
   aspect_ratio: '16:9' | '9:16';
@@ -66,6 +72,7 @@ export interface NarrativeExportSettings {
 export interface NarrativeMontageManifest {
   schema_version: '3.0';
   project_type: 'narrative_scenes_montage';
+  project_name: string;
   manifest_name?: string;
   total_scenes: number;
   total_duration_sec: number;
@@ -73,6 +80,7 @@ export interface NarrativeMontageManifest {
     target_folder_id: string;
   };
   gdrive_folder_id: string;
+  ambient_audio: AmbientAudioConfig;
   master_audio: MasterAudioConfig;
   export_settings: NarrativeExportSettings;
   scenes: NarrativeSceneItem[];
@@ -90,7 +98,8 @@ interface MontageCombineViewProps {
   transferredScript: string;
   onClearTransferredScript: () => void;
   onOpenConfigModal: () => void;
-  onStartRenderStatus: (title: string, desc: string, repo: string) => void;
+  onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
+  onCancelRenderRun: () => void;
   onNotify: (message: string, type: 'info' | 'error' | 'success') => void;
   encodeManifestBase64: (manifestObj: unknown) => string;
   terminalStatus: TerminalRunnerState;
@@ -143,6 +152,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onClearTransferredScript,
   onOpenConfigModal,
   onStartRenderStatus,
+  onCancelRenderRun,
   onNotify,
   encodeManifestBase64,
   terminalStatus,
@@ -151,6 +161,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   terminalRunUrl,
   onClearTerminalLogs
 }) => {
+  // Редактируемое имя проекта (по умолчанию: "Narrative Movie 4K")
+  const [projectName, setProjectName] = useState<string>('Narrative Movie 4K');
+
   // Динамический массив сцен любой длины (80, 120, 160, 200+ сцен без лимитов и без тестовых заглушек)
   const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() =>
     Array.from({ length: 12 }, (_, idx) => ({
@@ -173,7 +186,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [customScenesCountInput, setCustomScenesCountInput] = useState<number>(120);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Общая мастер-аудиодорожка (.mp3 / .wav)
+  // Двухслойный аудио-микшер:
+  // а) Фоновый эмбиент (непрерывный фоновый звук, чекбокс «Зациклить на всю длину»)
+  const [ambientAudio, setAmbientAudio] = useState<AmbientAudioConfig>({
+    file_name: '',
+    loop_full_duration: true,
+    volume: 0.45
+  });
+
+  // б) Мастер-аудиодорожка (озвучка / саундтрек)
   const [masterAudio, setMasterAudio] = useState<MasterAudioConfig>({
     file_name: '',
     volume: 1.0,
@@ -192,13 +213,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     uploaded: false
   });
 
-  // Параметры кодирования для N-сцен
+  // Параметры кодирования для N-сцен (по умолчанию H.264 libx264, CRF 20 — скоростной рендер)
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
     resolution: '4k',
     aspect_ratio: '16:9',
-    video_codec: 'libx265',
+    video_codec: 'libx264',
     bitrate_mbps: 35,
-    crf: 18,
+    crf: 20,
     fps: 24,
     audio_bitrate_kbps: 320
   });
@@ -706,13 +727,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     () => ({
       schema_version: '3.0',
       project_type: 'narrative_scenes_montage',
-      manifest_name: importedScenarioName || undefined,
+      project_name: projectName.trim() || 'Narrative Movie 4K',
+      manifest_name: importedScenarioName || projectName.trim() || 'Narrative Movie 4K',
       total_scenes: narrativeScenes.length,
       total_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
       cloud_export: {
         target_folder_id: gdriveFolderId.trim()
       },
       gdrive_folder_id: gdriveFolderId.trim(),
+      ambient_audio: {
+        file_name: ambientAudio.file_name.trim(),
+        loop_full_duration: ambientAudio.loop_full_duration,
+        volume: ambientAudio.volume
+      },
       master_audio: {
         file_name: masterAudio.file_name.trim(),
         volume: masterAudio.volume,
@@ -731,10 +758,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       }))
     }),
     [
+      projectName,
       importedScenarioName,
       narrativeScenes,
       totalNarrativeDurationSec,
       gdriveFolderId,
+      ambientAudio,
       masterAudio,
       exportSettings
     ]
@@ -763,6 +792,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       return;
     }
 
+    const dispatchTime = new Date().getTime();
     const encodedPayload = btoa(unescape(encodeURIComponent(JSON.stringify(narrativeManifest))));
 
     setIsDispatching(true);
@@ -790,7 +820,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         onStartRenderStatus(
           'Сборка успешно запущена в GitHub Actions!',
           `Workflow: render_scenes.yml (${narrativeScenes.length} сцен • ${calcTotalDuration(narrativeScenes)}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
-          'ZermeXX/aetherflow-render'
+          'ZermeXX/aetherflow-render',
+          dispatchTime
         );
         onNotify('Сборка успешно запущена в GitHub Actions!', 'success');
       } else {
@@ -839,17 +870,27 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
       {/* Шапка вкладки «Повествовательный монтаж (8–16 мин / 100+ сцен)» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-        <div>
+        <div className="space-y-1.5">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2.5">
             <Clapperboard className="text-indigo-400 w-5 h-5 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]" />
             <span>
               Повествовательный монтаж (8–16 мин / 100–200+ сцен) — Комбайн монтажа (N-Сцен)
             </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Динамический таймлайн без лимитов (80, 120, 160, 200+ сцен) • Виртуализированная строчная сетка • Прямая выгрузка в Google Drive &amp;{' '}
-            <code className="text-indigo-300 font-mono">render_scenes.yml</code>
-          </p>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400 font-semibold">Project Name:</span>
+            <input
+              type="text"
+              value={projectName}
+              onChange={e => setProjectName(e.target.value)}
+              placeholder="Narrative Movie 4K"
+              className="bg-slate-900 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-xs font-mono text-indigo-200 outline-none w-56"
+            />
+            <span className="text-slate-500">
+              • Динамический таймлайн • Прямая выгрузка в Google Drive &amp;{' '}
+              <code className="text-indigo-300 font-mono">render_scenes.yml</code>
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -913,26 +954,78 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         subtitle="Перетащите любое количество исходных видеоклипов (80, 120, 200+ файлов) — они выгружаются напрямую в target_folder_id (Resumable Upload), а их точные имена автоматически заполняют сцены таймлайна"
       />
 
-      {/* 2. БЛОК ВЫБОРА / ЗАГРУЗКИ ОБЩЕЙ МАСТЕР-АУДИОДОРОЖКИ (.MP3 / .WAV) И ПАРАМЕТРОВ КОДИРОВАНИЯ */}
+      {/* 2. ДВУХСЛОЙНЫЙ АУДИО-МИКШЕР И СЕЛЕКТОР ВИДЕОКОДЕКА (H.264 vs H.265) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Левая карточка: Общая мастер-аудиодорожка (.mp3 или .wav) */}
+        {/* Левая карточка: Двухслойный аудио-микшер */}
         <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Music className="w-4 h-4 text-amber-400" />
               <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                2. Общая мастер-аудиодорожка (.mp3 / .wav)
+                2. Двухслойный аудио-микшер (Эмбиент + Мастер-дорожка)
               </h3>
             </div>
             <span className="text-[10px] font-mono bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded">
-              master_audio
+              2-Layer Audio Mixer
             </span>
           </div>
 
-          <div className="space-y-3">
-            <div>
-              <label className="text-[11px] font-semibold text-slate-400 block mb-1">
-                Имя файла мастер-фонограммы в папке Google Drive:
+          <div className="space-y-4">
+            {/* а) Фоновый эмбиент (непрерывный фоновый звук, чекбокс "Зациклить на всю длину") */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-[11px] font-bold text-emerald-300">
+                  а) Фоновый эмбиент (непрерывный фоновый звук):
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] text-emerald-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={ambientAudio.loop_full_duration}
+                    onChange={e =>
+                      setAmbientAudio(prev => ({
+                        ...prev,
+                        loop_full_duration: e.target.checked
+                      }))
+                    }
+                    className="accent-emerald-400 w-3.5 h-3.5"
+                  />
+                  <span>Зациклить на всю длину</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <input
+                  type="text"
+                  value={ambientAudio.file_name}
+                  onChange={e =>
+                    setAmbientAudio(prev => ({ ...prev, file_name: e.target.value }))
+                  }
+                  placeholder="Имя файла эмбиента в GDrive (напр. ambient_wind.wav)"
+                  className="sm:col-span-3 bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-300 outline-none"
+                />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400 shrink-0">Vol:</span>
+                  <input
+                    type="number"
+                    min={0.05}
+                    max={2.0}
+                    step={0.05}
+                    value={ambientAudio.volume}
+                    onChange={e =>
+                      setAmbientAudio(prev => ({
+                        ...prev,
+                        volume: Math.max(0.05, Number(e.target.value) || 0.45)
+                      }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-200 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* б) Мастер-аудиодорожка (озвучка / саундтрек) */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <label className="text-[11px] font-bold text-amber-300 block">
+                б) Мастер-аудиодорожка (озвучка / саундтрек):
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -941,8 +1034,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   onChange={e =>
                     setMasterAudio(prev => ({ ...prev, file_name: e.target.value }))
                   }
-                  placeholder="Напр.: master_voiceover_12min.wav или выберите локальный файл →"
-                  className="flex-1 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-mono text-amber-300 outline-none"
+                  placeholder="Напр.: master_voiceover.wav или выберите локальный файл →"
+                  className="flex-1 bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
                 />
                 <input
                   ref={masterAudioInputRef}
@@ -954,217 +1047,217 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <button
                   type="button"
                   onClick={() => masterAudioInputRef.current?.click()}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition"
+                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
                 >
                   🎵 Выбрать .mp3 / .wav
                 </button>
               </div>
-            </div>
 
-            {masterAudioFile && (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="text-slate-300 font-mono truncate">
-                    Локальный файл: <strong className="text-amber-300">{masterAudioFile.name}</strong>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleUploadMasterAudioToDrive}
-                    disabled={masterAudioUploadProgress.uploading}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition"
-                  >
-                    <CloudUpload className="w-3.5 h-3.5" />
-                    {masterAudioUploadProgress.uploading
-                      ? `Загрузка ${masterAudioUploadProgress.progress}%...`
-                      : masterAudioUploadProgress.uploaded
-                      ? '✓ Выгружено в GDrive'
-                      : 'Загрузить фонограмму в Google Drive'}
-                  </button>
-                </div>
-
-                {(masterAudioUploadProgress.uploading || masterAudioUploadProgress.uploaded) && (
-                  <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-400 transition-all duration-150"
-                      style={{ width: `${masterAudioUploadProgress.progress}%` }}
-                    />
+              {masterAudioFile && (
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-300 font-mono truncate">
+                      Локальный файл: <strong className="text-amber-300">{masterAudioFile.name}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleUploadMasterAudioToDrive}
+                      disabled={masterAudioUploadProgress.uploading}
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition"
+                    >
+                      <CloudUpload className="w-3.5 h-3.5" />
+                      {masterAudioUploadProgress.uploading
+                        ? `Загрузка ${masterAudioUploadProgress.progress}%...`
+                        : masterAudioUploadProgress.uploaded
+                        ? '✓ Выгружено в GDrive'
+                        : 'Загрузить в Google Drive'}
+                    </button>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
 
-            <div className="grid grid-cols-3 gap-3 pt-1">
-              <div>
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Громкость (Volume):
-                </label>
-                <input
-                  type="number"
-                  min={0.1}
-                  max={2.0}
-                  step={0.05}
-                  value={masterAudio.volume}
-                  onChange={e =>
-                    setMasterAudio(prev => ({
-                      ...prev,
-                      volume: Math.max(0.1, Number(e.target.value) || 1.0)
-                    }))
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Fade-In (сек):
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={15}
-                  step={0.5}
-                  value={masterAudio.fade_in_sec}
-                  onChange={e =>
-                    setMasterAudio(prev => ({
-                      ...prev,
-                      fade_in_sec: Math.max(0, Number(e.target.value) || 0)
-                    }))
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Fade-Out (сек):
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={15}
-                  step={0.5}
-                  value={masterAudio.fade_out_sec}
-                  onChange={e =>
-                    setMasterAudio(prev => ({
-                      ...prev,
-                      fade_out_sec: Math.max(0, Number(e.target.value) || 0)
-                    }))
-                  }
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-400 outline-none"
-                />
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                    Громкость:
+                  </label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={2.0}
+                    step={0.05}
+                    value={masterAudio.volume}
+                    onChange={e =>
+                      setMasterAudio(prev => ({
+                        ...prev,
+                        volume: Math.max(0.1, Number(e.target.value) || 1.0)
+                      }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-slate-200 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                    Fade-In (с):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={15}
+                    step={0.5}
+                    value={masterAudio.fade_in_sec}
+                    onChange={e =>
+                      setMasterAudio(prev => ({
+                        ...prev,
+                        fade_in_sec: Math.max(0, Number(e.target.value) || 0)
+                      }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-emerald-400 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                    Fade-Out (с):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={15}
+                    step={0.5}
+                    value={masterAudio.fade_out_sec}
+                    onChange={e =>
+                      setMasterAudio(prev => ({
+                        ...prev,
+                        fade_out_sec: Math.max(0, Number(e.target.value) || 0)
+                      }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-amber-400 outline-none"
+                  />
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Правая карточка: Параметры кодирования для сцен (4K/1080p, битрейт, CRF, FPS) */}
+        {/* Правая карточка: Параметры кодирования для сцен (H.264 vs H.265, 4K/1080p, CRF, FPS) */}
         <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                3. Параметры кодирования сцен (export_settings)
+                3. Параметры экспорта и селектор видеокодека (export_settings)
               </h3>
             </div>
             <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
-              {exportSettings.resolution.toUpperCase()} • {exportSettings.video_codec} • {exportSettings.fps}fps
+              {exportSettings.resolution.toUpperCase()} • {exportSettings.video_codec} (CRF {exportSettings.crf}) • {exportSettings.fps}fps
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+          <div className="space-y-3 text-xs">
+            {/* Селектор видеокодека (H.264 по умолчанию CRF 20 vs H.265 CRF 22) */}
             <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Разрешение:
-              </label>
-              <select
-                value={exportSettings.resolution}
-                onChange={e =>
-                  setExportSettings(prev => ({
-                    ...prev,
-                    resolution: e.target.value as '4k' | '1080p'
-                  }))
-                }
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
-              >
-                <option value="4k">4K Ultra HD (3840×2160)</option>
-                <option value="1080p">1080p Full HD (1920×1080)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Формат кадра:
-              </label>
-              <select
-                value={exportSettings.aspect_ratio}
-                onChange={e =>
-                  setExportSettings(prev => ({
-                    ...prev,
-                    aspect_ratio: e.target.value as '16:9' | '9:16'
-                  }))
-                }
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
-              >
-                <option value="16:9">16:9 Горизонтальный</option>
-                <option value="9:16">9:16 Shorts / Reels</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Видеокодек:
+              <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
+                Селектор видеокодека (H.264 vs H.265):
               </label>
               <select
                 value={exportSettings.video_codec}
-                onChange={e =>
+                onChange={e => {
+                  const codec = e.target.value as 'libx264' | 'libx265';
                   setExportSettings(prev => ({
                     ...prev,
-                    video_codec: e.target.value as 'libx265' | 'libx264'
-                  }))
-                }
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-400"
+                    video_codec: codec,
+                    crf: codec === 'libx264' ? 20 : 22
+                  }));
+                }}
+                className="w-full bg-slate-900 border border-indigo-500/40 rounded-lg px-3 py-2 text-xs font-mono text-indigo-200 outline-none focus:border-indigo-400"
               >
-                <option value="libx265">H.265 (libx265)</option>
-                <option value="libx264">H.264 (libx264)</option>
+                <option value="libx264">
+                  H.264 (libx264) — Скоростной рендер (в 3-4 раза быстрее, рекомендуется для YouTube 4K) [CRF 20]
+                </option>
+                <option value="libx265">
+                  H.265 (libx265) — Максимальное сжатие (CRF 22)
+                </option>
               </select>
             </div>
 
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Битрейт (Mbps):
-              </label>
-              <input
-                type="number"
-                min={4}
-                max={120}
-                step={2}
-                value={exportSettings.bitrate_mbps}
-                onChange={e =>
-                  setExportSettings(prev => ({
-                    ...prev,
-                    bitrate_mbps: Math.max(4, Number(e.target.value) || 25)
-                  }))
-                }
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 font-bold outline-none"
-              />
-            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Разрешение:
+                </label>
+                <select
+                  value={exportSettings.resolution}
+                  onChange={e =>
+                    setExportSettings(prev => ({
+                      ...prev,
+                      resolution: e.target.value as '4k' | '1080p'
+                    }))
+                  }
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
+                >
+                  <option value="4k">4K Ultra HD (3840×2160)</option>
+                  <option value="1080p">1080p Full HD (1920×1080)</option>
+                </select>
+              </div>
 
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Качество CRF (14–28):
-              </label>
-              <input
-                type="number"
-                min={14}
-                max={28}
-                step={1}
-                value={exportSettings.crf}
-                onChange={e =>
-                  setExportSettings(prev => ({
-                    ...prev,
-                    crf: Math.max(14, Math.min(28, Number(e.target.value) || 18))
-                  }))
-                }
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold outline-none"
-              />
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Формат кадра:
+                </label>
+                <select
+                  value={exportSettings.aspect_ratio}
+                  onChange={e =>
+                    setExportSettings(prev => ({
+                      ...prev,
+                      aspect_ratio: e.target.value as '16:9' | '9:16'
+                    }))
+                  }
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
+                >
+                  <option value="16:9">16:9 Горизонтальный</option>
+                  <option value="9:16">9:16 Shorts / Reels</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Битрейт (Mbps):
+                </label>
+                <input
+                  type="number"
+                  min={4}
+                  max={120}
+                  step={2}
+                  value={exportSettings.bitrate_mbps}
+                  onChange={e =>
+                    setExportSettings(prev => ({
+                      ...prev,
+                      bitrate_mbps: Math.max(4, Number(e.target.value) || 25)
+                    }))
+                  }
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 font-bold outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Качество CRF (14–28):
+                </label>
+                <input
+                  type="number"
+                  min={14}
+                  max={28}
+                  step={1}
+                  value={exportSettings.crf}
+                  onChange={e =>
+                    setExportSettings(prev => ({
+                      ...prev,
+                      crf: Math.max(14, Math.min(28, Number(e.target.value) || 20))
+                    }))
+                  }
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold outline-none"
+                />
+              </div>
             </div>
 
             <div>
@@ -1517,6 +1610,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           runUrl={terminalRunUrl}
           onClearLogs={onClearTerminalLogs}
           onCopyLogs={() => onNotify('Лог терминала скопирован в буфер обмена', 'info')}
+          onCancelRun={onCancelRenderRun}
         />
       </div>
     </div>

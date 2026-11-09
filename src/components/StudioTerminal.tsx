@@ -21,6 +21,7 @@ interface StudioTerminalProps {
   runUrl?: string;
   onClearLogs: () => void;
   onCopyLogs?: () => void;
+  onCancelRun?: () => void;
 }
 
 export const formatTerminalTime = (totalSeconds: number): string => {
@@ -36,7 +37,8 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
   logs,
   runUrl,
   onClearLogs,
-  onCopyLogs
+  onCopyLogs,
+  onCancelRun
 }) => {
   const [copied, setCopied] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -61,7 +63,7 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
     <div className="bg-[#080c14] border border-[#1e293b] rounded-2xl overflow-hidden shadow-2xl flex flex-col">
       {/* Верхняя панель окна терминала */}
       <div className="bg-[#0b101b] border-b border-[#1e293b] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Terminal className="w-4 h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
           <span className="text-xs font-bold tracking-wider uppercase text-slate-100 font-mono">
             💻 ТЕРМИНАЛ ОБЛАЧНОГО РАННЕРА
@@ -87,6 +89,23 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
             <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-md bg-rose-500/15 border border-rose-500/50 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.3)]">
               ● FAILED
             </span>
+          )}
+
+          {/* Кнопка отмены сборки в шапке рядом с бейджем статуса (активна только при RUNNING) */}
+          {onCancelRun && (
+            <button
+              type="button"
+              onClick={onCancelRun}
+              disabled={status !== 'running'}
+              className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
+                status === 'running'
+                  ? 'bg-rose-500/15 hover:bg-rose-500/25 border-rose-500/50 text-rose-300 cursor-pointer shadow-[0_0_10px_rgba(244,63,94,0.2)]'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
+              }`}
+              title="Отправить запрос на отмену текущего запуска GitHub Actions"
+            >
+              <span>⏹ Отменить сборку</span>
+            </button>
           )}
         </div>
 
