@@ -88,6 +88,7 @@ export interface SlotInsertItem {
   insert_id: string;
   asset_id: string;
   file_name: string;
+  filename?: string;
   timecode_label?: string;
   trigger_at_sec: number;
   duration_sec: number;
@@ -112,10 +113,17 @@ export interface SlotTransitionOut {
 export interface TimelineSlot {
   slot_index: number;
   slot_id: string;
+  act_title?: string;
   act_timecode?: string;
   title: string;
   asset_id: string;
   file_name: string;
+  base_content?: {
+    file_name: string;
+    [key: string]: unknown;
+  };
+  start_sec?: number;
+  end_sec?: number;
   source_clip_duration_sec: number;
   internal_loop_crossfade_sec: number;
   slot_duration_sec: number;
@@ -169,6 +177,9 @@ interface LoopBuildManifest {
   video_filename?: string;
   audio_filename?: string;
   gdrive_folder_id: string;
+  cloud_export: {
+    target_folder_id: string;
+  };
   continuous_bed: ContinuousBedConfig;
   timeline_slots: TimelineSlot[];
 }
@@ -179,15 +190,19 @@ interface ToastMessage {
   type: 'info' | 'error' | 'success';
 }
 
-// Спецификация «Метель: 3:00:00» (6 актов: стыки 0:30, 1:00, 1:40, 2:00, 2:40 с crossfade 90с, внутри 10с исходники со швом 1.0с, вставки E1, E2, E3)
-const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
+// Универсальная начальная структура слотов (без захардкоженных имен видеофайлов)
+const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
   {
     slot_index: 1,
-    slot_id: 'ACT_01',
-    act_timecode: '0:00:00 – 0:30:00 (Стык #1 на 0:30)',
-    title: 'Акт 1 (0:00–0:30) — Белая мгла: Начало шторма (Omni 1.2 Flash 10с луп)',
-    asset_id: 'omni_blizzard_act1',
-    file_name: 'act_01_blizzard_onset_10s.mp4',
+    slot_id: 'SLOT_01',
+    act_title: 'Акт 1 (0:00–0:30)',
+    act_timecode: '0:00:00 – 0:30:00',
+    title: 'Акт 1 (0:00–0:30)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 0,
+    end_sec: 1800,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1800,
@@ -199,11 +214,15 @@ const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
   },
   {
     slot_index: 2,
-    slot_id: 'ACT_02',
-    act_timecode: '0:30:00 – 1:00:00 (Стык #2 на 1:00)',
-    title: 'Акт 2 (0:30–1:00) — Замерзающий периметр метеостанции',
-    asset_id: 'omni_blizzard_act2',
-    file_name: 'act_02_station_frost_10s.mp4',
+    slot_id: 'SLOT_02',
+    act_title: 'Акт 2 (0:30–1:00)',
+    act_timecode: '0:30:00 – 1:00:00',
+    title: 'Акт 2 (0:30–1:00)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 1800,
+    end_sec: 3690,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1890,
@@ -215,27 +234,19 @@ const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
   },
   {
     slot_index: 3,
-    slot_id: 'ACT_03',
-    act_timecode: '1:00:00 – 1:40:00 (Стык #3 на 1:40)',
-    title: 'Акт 3 (1:00–1:40) — Ледяной ветер + Вставка E1 (1:02 / 3720с)',
-    asset_id: 'omni_blizzard_act3',
-    file_name: 'act_03_heavy_gale_10s.mp4',
+    slot_id: 'SLOT_03',
+    act_title: 'Акт 3 (1:00–1:40)',
+    act_timecode: '1:00:00 – 1:40:00',
+    title: 'Акт 3 (1:00–1:40)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 3600,
+    end_sec: 6090,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 2490,
-    inserts: [
-      {
-        insert_id: 'E1',
-        asset_id: 'omni_insert_e1',
-        file_name: 'insert_E1_ice_gust_3720s.mp4',
-        timecode_label: '1:02:00 (3720 сек)',
-        trigger_at_sec: 3720,
-        duration_sec: 10,
-        transition_in: { type: 'dissolve', duration_sec: 1.5 },
-        transition_out: { type: 'dissolve', duration_sec: 1.5 },
-        hold_until_end: false
-      }
-    ],
+    inserts: [],
     slot_transition_out: {
       type: 'xfade',
       duration_sec: 90.0
@@ -243,27 +254,19 @@ const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
   },
   {
     slot_index: 4,
-    slot_id: 'ACT_04',
-    act_timecode: '1:40:00 – 2:00:00 (Стык #4 на 2:00)',
-    title: 'Акт 4 (1:40–2:00) — Пик бури + Асимметричная вставка E2 (1:50 / 6600с)',
-    asset_id: 'omni_blizzard_act4',
-    file_name: 'act_04_vortex_peak_10s.mp4',
+    slot_id: 'SLOT_04',
+    act_title: 'Акт 4 (1:40–2:00)',
+    act_timecode: '1:40:00 – 2:00:00',
+    title: 'Акт 4 (1:40–2:00)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 6000,
+    end_sec: 7290,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1290,
-    inserts: [
-      {
-        insert_id: 'E2',
-        asset_id: 'omni_insert_e2',
-        file_name: 'insert_E2_frost_shadow_6600s.mp4',
-        timecode_label: '1:50:00 (6600 сек)',
-        trigger_at_sec: 6600,
-        duration_sec: 10,
-        transition_in: { type: 'dissolve', duration_sec: 1.5 },
-        transition_out: { type: 'fade', duration_sec: 3.0 },
-        hold_until_end: false
-      }
-    ],
+    inserts: [],
     slot_transition_out: {
       type: 'xfade',
       duration_sec: 90.0
@@ -271,11 +274,15 @@ const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
   },
   {
     slot_index: 5,
-    slot_id: 'ACT_05',
-    act_timecode: '2:00:00 – 2:40:00 (Стык #5 на 2:40)',
-    title: 'Акт 5 (2:00–2:40) — Глубокая полярная ночь (чистый луп)',
-    asset_id: 'omni_blizzard_act5',
-    file_name: 'act_05_polar_abyss_10s.mp4',
+    slot_id: 'SLOT_05',
+    act_title: 'Акт 5 (2:00–2:40)',
+    act_timecode: '2:00:00 – 2:40:00',
+    title: 'Акт 5 (2:00–2:40)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 7200,
+    end_sec: 9690,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 2490,
@@ -287,37 +294,25 @@ const BLIZZARD_3H_SLOTS: TimelineSlot[] = [
   },
   {
     slot_index: 6,
-    slot_id: 'ACT_06',
-    act_timecode: '2:40:00 – 3:00:00 (Финал 10800с)',
-    title: 'Акт 6 (2:40–3:00) — Финал + Трещина E3 (2:56 / 10560с, БЕЗ fade out)',
-    asset_id: 'omni_blizzard_act6',
-    file_name: 'act_06_final_drift_10s.mp4',
+    slot_id: 'SLOT_06',
+    act_title: 'Акт 6 (2:40–3:00)',
+    act_timecode: '2:40:00 – 3:00:00',
+    title: 'Акт 6 (2:40–3:00)',
+    asset_id: '',
+    file_name: '',
+    base_content: { file_name: '' },
+    start_sec: 9600,
+    end_sec: 10890,
     source_clip_duration_sec: 10,
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1290,
-    inserts: [
-      {
-        insert_id: 'E3',
-        asset_id: 'omni_insert_e3_crack',
-        file_name: 'insert_E3_ice_crack_10560s.mp4',
-        timecode_label: '2:56:00 (10560 сек)',
-        trigger_at_sec: 10560,
-        duration_sec: 240,
-        transition_in: { type: 'fade', duration_sec: 1.5 },
-        transition_out: { type: 'none', duration_sec: 0 },
-        hold_until_end: true,
-        audio_soft_compressor: true,
-        max_peak_over_bed_db: 6
-      }
-    ],
+    inserts: [],
     slot_transition_out: {
       type: 'none',
       duration_sec: 0
     }
   }
 ];
-
-const DEFAULT_TIMELINE_SLOTS: TimelineSlot[] = BLIZZARD_3H_SLOTS;
 
 const COMPLIANCE_DICTIONARY: {
   pattern: RegExp;
@@ -484,7 +479,7 @@ jobs:
           scale_wh = scale_map.get(res, "3840:2160")
           crf_map = {"cinema": "18", "standard": "23", "eco": "26"}
           crf = str(cfg.get("crf") or crf_map.get(preset, "18"))
-          folder_id = cfg.get("gdrive_folder_id", "")
+          folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
           final_black_enabled = bool(cfg.get("final_black_screen_enabled", True))
           final_black_sec = float(cfg.get("final_black_screen_sec", 2.0)) if final_black_enabled else 0.0
@@ -494,18 +489,18 @@ jobs:
           tp_limit = min(-3.0, float(mastering.get("true_peak_dbtp", -3.0)))
           lra_val = float(mastering.get("lra", 11.0))
 
-          slots = cfg.get("timeline_slots") or []
+          slots = cfg.get("timeline_slots") or cfg.get("slots") or []
           bed = cfg.get("continuous_bed") or {}
 
-          # Вычисляем длительность таймлайна: сумма slot_duration_sec минус 90-сек кроссфейды между актами
+          # Вычисляем длительность таймлайна: сумма slot_duration_sec минус кроссфейды между актами
           total_duration = 0.0
           for idx, sl in enumerate(slots):
-              s_dur = float(sl.get("slot_duration_sec", 1800))
+              s_dur = float(sl.get("slot_duration_sec") or ((sl.get("end_sec", 1800) - sl.get("start_sec", 0)) if ("end_sec" in sl and "start_sec" in sl) else 1800))
               t_out = sl.get("slot_transition_out") or {"type": "none", "duration_sec": 0}
               overlap = float(t_out.get("duration_sec", 90.0)) if (idx < len(slots) - 1 and t_out.get("type") != "none") else 0.0
               total_duration += (s_dur - overlap)
 
-          # 2. Предварительная сборка бесшовных 10-сек петель внутри каждого слота (шов video+audio crossfade 1.0 сек)
+          # 2. Предварительная сборка бесшовных петель внутри каждого слота
           ffmpeg_inputs = []
           filter_parts = []
           input_idx = 0
@@ -514,14 +509,22 @@ jobs:
           insert_overlays = []
 
           for s_i, slot in enumerate(slots):
-              base_file = slot.get("file_name") or f"act_{s_i+1}.mp4"
-              slot_dur = float(slot.get("slot_duration_sec", 1800))
+              base_content = slot.get("base_content") if isinstance(slot.get("base_content"), dict) else {}
+              base_file = (
+                  base_content.get("file_name")
+                  or slot.get("file_name")
+                  or slot.get("filename")
+                  or slot.get("asset_name")
+                  or slot.get("video_file")
+                  or ""
+              )
+              slot_dur = float(slot.get("slot_duration_sec") or ((slot.get("end_sec", 1800) - slot.get("start_sec", 0)) if ("end_sec" in slot and "start_sec" in slot) else 1800))
               clip_dur = max(2.0, float(slot.get("source_clip_duration_sec", 10.0)))
               loop_xfade = float(slot.get("internal_loop_crossfade_sec", 1.0))
               eff_step = max(1.0, clip_dur - loop_xfade)
               loops_count = max(1, int(math.ceil(slot_dur / eff_step)) + 1)
 
-              # Генерируем бесшовное ядро 10-секундного исходника со швом 1.0 сек (xfade + acrossfade d=1.0)
+              # Генерируем бесшовное ядро исходника со швом (xfade + acrossfade)
               seamless_unit = f"unit_slot_{s_i}.mp4"
               unit_offset = max(0.5, clip_dur - loop_xfade)
               unit_fc = (
@@ -553,11 +556,11 @@ jobs:
               slot_audio_labels.append(f"[{cur_a}]")
               slot_video_labels.append((cur_v, slot_dur, slot.get("slot_transition_out") or {"type": "none", "duration_sec": 0}))
 
-              # Сохраняем вставки (E1, E2, E3) для наложения по глобальному таймкоду
+              # Сохраняем вставки для наложения по таймкоду
               for ins in (slot.get("inserts") or []):
                   insert_overlays.append(ins)
 
-          # 3. Сшиваем акты (0:30, 1:00, 1:40, 2:00, 2:40) через 90-секундный xfade и синхронный acrossfade
+          # 3. Сшиваем акты через xfade и синхронный acrossfade
           accum_offset = slot_video_labels[0][1]
           prev_v = slot_video_labels[0][0]
           prev_a = slot_audio_labels[0].strip("[]")
@@ -592,11 +595,11 @@ jobs:
           cur_timeline_a = prev_a
           e3_audio_nodes = []
 
-          # 4. Точная асимметричная анимация вставок E1 (in 1.5 / out 1.5), E2 (in 1.5 / out 3.0), E3 (in 1.5 / БЕЗ fade out)
+          # 4. Точная асимметричная анимация вставок
           for ins_i, ins in enumerate(insert_overlays):
               ins_id = ins.get("insert_id") or f"E{ins_i+1}"
-              ins_file = ins.get("file_name") or f"insert_{ins_id}.mp4"
-              trig = float(ins.get("trigger_at_sec", 3720))
+              ins_file = ins.get("file_name") or ins.get("filename") or ins.get("asset_name") or ins.get("video_file") or ""
+              trig = float(ins.get("trigger_at_sec", 0))
               ins_dur = float(ins.get("duration_sec", 10))
               hold_end = bool(ins.get("hold_until_end", False))
 
@@ -684,7 +687,7 @@ jobs:
           with open("filter_complex.txt", "w", encoding="utf-8") as f:
               f.write(filter_complex_str)
 
-          out_name = f"blizzard_3h_{res}_h265_24fps.mp4"
+          out_name = cfg.get("output_filename") or f"render_output_{res}_{v_codec}_{fps}fps.mp4"
           cmd = [
               "ffmpeg", "-y",
               *ffmpeg_inputs,
@@ -718,11 +721,11 @@ export default function App() {
   const [filmResolution, setFilmResolution] = useState<string>('4k');
   const [transferredScript, setTransferredScript] = useState<string>('');
 
-  // Loop studio state («Метель: 3:00:00» H.265 24fps, AAC 320kbps, Omni 1.2 Flash, 90s act crossfades, Asymmetric Inserts E1-E3, Loudnorm)
+  // Loop studio state (Universal dynamic manifest state)
   const [loopMedia, setLoopMedia] = useState<File | null>(null);
   const [loopAudio, setLoopAudio] = useState<File | null>(null);
   const [uploadedLoopAssets, setUploadedLoopAssets] = useState<Record<string, File>>({});
-  const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(DEFAULT_TIMELINE_SLOTS);
+  const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(INITIAL_TIMELINE_SLOTS);
   const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>('libx265');
   const [videoFps, setVideoFps] = useState<24 | 30 | 60>(24);
   const [audioBitrateKbps, setAudioBitrateKbps] = useState<320 | 256 | 192>(320);
@@ -739,9 +742,9 @@ export default function App() {
     e3_max_peak_over_bed_db: 6
   });
   const [continuousBed, setContinuousBed] = useState<ContinuousBedConfig>({
-    enabled: true,
-    asset_id: 'omni_blizzard_bed_01',
-    file_name: 'omni_blizzard_native_bed_320k.wav',
+    enabled: false,
+    asset_id: '',
+    file_name: '',
     acrossfade_sec: 1.0,
     veo_native_audio: true,
     veo_audio_weight: 0.85,
@@ -758,7 +761,7 @@ export default function App() {
   const [useEmbeddedAudio, setUseEmbeddedAudio] = useState<boolean>(true);
   const [expectedVideoFilename, setExpectedVideoFilename] = useState<string>('');
   const [expectedAudioFilename, setExpectedAudioFilename] = useState<string>('');
-  const [importedManifestName, setImportedManifestName] = useState<string>('Спецификация «Метель: 3:00:00»');
+  const [importedManifestName, setImportedManifestName] = useState<string>('');
   const [showFilterComplexPreview, setShowFilterComplexPreview] = useState<boolean>(true);
 
   // Thumbnail studio state
@@ -1170,19 +1173,27 @@ export default function App() {
   // Проверка привязки ассета (по file_name или asset_id) среди загруженных пользователем файлов
   const isAssetMatched = useCallback(
     (fileName?: string, assetId?: string): boolean => {
-      if (!fileName && !assetId) return false;
       const fn = (fileName || '').trim().toLowerCase();
       const aid = (assetId || '').trim().toLowerCase();
-      if (loopMedia && (loopMedia.name.toLowerCase() === fn || loopMedia.name.toLowerCase().includes(aid))) {
+      if (!fn && !aid) return false;
+      if (
+        loopMedia &&
+        ((fn && loopMedia.name.toLowerCase() === fn) ||
+          (aid && loopMedia.name.toLowerCase().includes(aid)))
+      ) {
         return true;
       }
-      if (loopAudio && (loopAudio.name.toLowerCase() === fn || loopAudio.name.toLowerCase().includes(aid))) {
+      if (
+        loopAudio &&
+        ((fn && loopAudio.name.toLowerCase() === fn) ||
+          (aid && loopAudio.name.toLowerCase().includes(aid)))
+      ) {
         return true;
       }
       return Object.keys(uploadedLoopAssets).some(key => {
         const k = key.toLowerCase();
         const baseNoExt = k.replace(/\.[^.]+$/, '');
-        return (fn && k === fn) || (aid && (baseNoExt === aid || k.includes(aid)));
+        return Boolean((fn && k === fn) || (aid && (baseNoExt === aid || k.includes(aid))));
       });
     },
     [loopMedia, loopAudio, uploadedLoopAssets]
@@ -1252,9 +1263,24 @@ export default function App() {
     });
   };
 
-  // Быстрое применение эталонной спецификации «Метель: 3:00:00»
+  // Сброс структуры к чистым 6 актам (3:00:00) без подмены пользовательских имен файлов
   const applyBlizzard3HSpecPreset = () => {
-    setTimelineSlots(BLIZZARD_3H_SLOTS);
+    setTimelineSlots(prev =>
+      INITIAL_TIMELINE_SLOTS.map((baseSlot, idx) => {
+        const existing = prev[idx];
+        const preservedFile = existing?.file_name || '';
+        return {
+          ...baseSlot,
+          file_name: preservedFile,
+          base_content: {
+            ...(existing?.base_content || {}),
+            file_name: preservedFile
+          },
+          asset_id: existing?.asset_id || '',
+          inserts: existing?.inserts ? [...existing.inserts] : []
+        };
+      })
+    );
     setLoopHours(3);
     setVideoCodec('libx265');
     setVideoFps(24);
@@ -1271,23 +1297,13 @@ export default function App() {
       e3_soft_attack_compressor: true,
       e3_max_peak_over_bed_db: 6
     });
-    setContinuousBed({
-      enabled: true,
-      asset_id: 'blizzard_omni12_bed_master',
-      file_name: 'blizzard_omni12_wind_bed_3h.wav',
-      acrossfade_sec: 1.0,
-      veo_native_audio: true,
-      veo_audio_weight: 0.8,
-      bed_audio_weight: 0.85
-    });
-    setExpectedVideoFilename('act_01_blizzard_10s.mp4');
     showToast(
-      'Применена спецификация «Метель: 3:00:00»: H.265 24fps, AAC 320k, стыки актов 90с, петли 10с (шов 1.0с), асимметричные E1/E2/E3 и loudnorm -16 LUFS!',
+      'Применены параметры кодирования 3:00:00 (H.265 24fps, AAC 320k, стыки 90с, loudnorm -16 LUFS) с сохранением ваших имен файлов!',
       'success'
     );
   };
 
-  // Добавление нового слота (поддержка от 1 до 50+ сцен)
+  // Добавление нового слота (поддержка от 1 до 50+ сцен, без захардкоженных имен файлов)
   const addTimelineSlot = () => {
     setTimelineSlots(prev => {
       const nextIdx = prev.length + 1;
@@ -1302,10 +1318,12 @@ export default function App() {
         {
           slot_index: nextIdx,
           slot_id: `SLOT_${padded}`,
-          title: `Акт ${nextIdx} — Снежная буря (Omni 1.2 Flash 10с петля)`,
+          act_title: `Акт ${nextIdx}`,
+          title: `Акт ${nextIdx}`,
           act_timecode: `Акт #${nextIdx}`,
-          asset_id: `omni12_act_${padded}`,
-          file_name: `act_${padded}_blizzard_10s.mp4`,
+          asset_id: '',
+          file_name: '',
+          base_content: { file_name: '' },
           source_clip_duration_sec: 10,
           internal_loop_crossfade_sec: internalLoopCrossfadeSec,
           slot_duration_sec: 1800,
@@ -1317,109 +1335,45 @@ export default function App() {
         }
       ];
     });
-    showToast('Добавлен новый слот в таймлайн (N-сцен, исходник 10с со швом 1.0с)', 'info');
+    showToast('Добавлен новый слот в таймлайн', 'info');
   };
 
-  // Генератор произвольного числа N слотов (напр. 10 или 20 сцен)
+  // Генератор произвольного числа N слотов (без захардкоженных имен файлов)
   const generateNSlotsPreset = (count: number) => {
     const totalSec = loopHours * 3600;
     const perSlotSec = Math.max(120, Math.round((totalSec + (count - 1) * actCrossfadeSec) / count));
-    const generated: TimelineSlot[] = Array.from({ length: count }, (_, idx) => {
-      const num = idx + 1;
-      const pad = String(num).padStart(2, '0');
-      const isLast = idx === count - 1;
-      // Чередуем: чистые лупы (inserts: []) и слоты с асимметричными вставками (E1..E3)
-      const dynamicInserts: SlotInsertItem[] =
-        idx % 3 === 0
-          ? []
-          : idx % 2 === 0
-          ? [
-              {
-                insert_id: 'E1',
-                timecode_label: 'E1 • Асимметричная вставка',
-                asset_id: `omni12_s${pad}_e1`,
-                file_name: `slot_${pad}_event_E1.mp4`,
-                trigger_at_sec: Math.min(perSlotSec - 20, 120),
-                duration_sec: 10,
-                transition_in: { type: 'dissolve', duration_sec: 1.5 },
-                transition_out: { type: 'dissolve', duration_sec: 1.5 },
-                hold_until_end: false
-              },
-              {
-                insert_id: 'E2',
-                timecode_label: 'E2 • Удлиненный хвост растворения',
-                asset_id: `omni12_s${pad}_e2`,
-                file_name: `slot_${pad}_event_E2.mp4`,
-                trigger_at_sec: Math.min(perSlotSec - 15, Math.round(perSlotSec * 0.5)),
-                duration_sec: 10,
-                transition_in: { type: 'dissolve', duration_sec: 1.5 },
-                transition_out: { type: 'dissolve', duration_sec: 3.0 },
-                hold_until_end: false
-              },
-              {
-                insert_id: 'E3',
-                timecode_label: 'E3 • Финальный треск (БЕЗ fade out)',
-                asset_id: `omni12_s${pad}_e3`,
-                file_name: `slot_${pad}_event_E3_crack.mp4`,
-                trigger_at_sec: Math.min(perSlotSec - 12, Math.round(perSlotSec * 0.82)),
-                duration_sec: 10,
-                transition_in: { type: 'fade', duration_sec: 1.5 },
-                transition_out: { type: 'none', duration_sec: 0 },
-                hold_until_end: true,
-                audio_soft_compressor: true,
-                max_peak_over_bed_db: 6
-              }
-            ]
-          : [
-              {
-                insert_id: 'E1',
-                timecode_label: 'E1 • in 1.5с / out 1.5с',
-                asset_id: `omni12_s${pad}_e1`,
-                file_name: `slot_${pad}_event_E1.mp4`,
-                trigger_at_sec: Math.min(perSlotSec - 15, 180),
-                duration_sec: 10,
-                transition_in: { type: 'dissolve', duration_sec: 1.5 },
-                transition_out: { type: 'dissolve', duration_sec: 1.5 },
-                hold_until_end: false
-              },
-              {
-                insert_id: 'E2',
-                timecode_label: 'E2 • in 1.5с / out 3.0с',
-                asset_id: `omni12_s${pad}_e2`,
-                file_name: `slot_${pad}_event_E2.mp4`,
-                trigger_at_sec: Math.min(perSlotSec - 15, Math.round(perSlotSec * 0.65)),
-                duration_sec: 10,
-                transition_in: { type: 'dissolve', duration_sec: 1.5 },
-                transition_out: { type: 'dissolve', duration_sec: 3.0 },
-                hold_until_end: false
-              }
-            ];
+    setTimelineSlots(prev =>
+      Array.from({ length: count }, (_, idx) => {
+        const num = idx + 1;
+        const pad = String(num).padStart(2, '0');
+        const isLast = idx === count - 1;
+        const existing = prev[idx];
+        const preservedFileName = existing?.file_name || '';
 
-      return {
-        slot_index: num,
-        slot_id: `SLOT_${pad}`,
-        title:
-          dynamicInserts.length === 0
-            ? `Слот ${num} — Чистый фоновый луп 10с (шов ${internalLoopCrossfadeSec}с)`
-            : `Слот ${num} — Луп 10с + ${dynamicInserts.length} вставки (${dynamicInserts
-                .map(i => i.insert_id)
-                .join(', ')})`,
-        act_timecode: `Слот #${num}`,
-        asset_id: `omni12_base_${pad}`,
-        file_name: `slot_${pad}_base_10s.mp4`,
-        source_clip_duration_sec: 10,
-        internal_loop_crossfade_sec: internalLoopCrossfadeSec,
-        slot_duration_sec: perSlotSec,
-        inserts: dynamicInserts,
-        slot_transition_out: isLast
-          ? { type: 'none', duration_sec: 0 }
-          : { type: 'xfade', duration_sec: actCrossfadeSec }
-      };
-    });
-
-    setTimelineSlots(generated);
+        return {
+          slot_index: num,
+          slot_id: existing?.slot_id || `SLOT_${pad}`,
+          act_title: existing?.act_title || existing?.title || `Слот ${num}`,
+          title: existing?.title || existing?.act_title || `Слот ${num}`,
+          act_timecode: existing?.act_timecode || `Слот #${num}`,
+          asset_id: existing?.asset_id || '',
+          file_name: preservedFileName,
+          base_content: {
+            ...(existing?.base_content || {}),
+            file_name: preservedFileName
+          },
+          source_clip_duration_sec: existing?.source_clip_duration_sec ?? 10,
+          internal_loop_crossfade_sec: existing?.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec,
+          slot_duration_sec: perSlotSec,
+          inserts: existing?.inserts ? [...existing.inserts] : [],
+          slot_transition_out: isLast
+            ? { type: 'none', duration_sec: 0 }
+            : { type: 'xfade', duration_sec: actCrossfadeSec }
+        };
+      })
+    );
     showToast(
-      `Сформирован таймлайн на ${count} слотов со стыками актов ${actCrossfadeSec}с и петлями 10с (шов ${internalLoopCrossfadeSec}с)!`,
+      `Сформирован таймлайн на ${count} слотов со стыками актов ${actCrossfadeSec}с!`,
       'success'
     );
   };
@@ -1434,8 +1388,7 @@ export default function App() {
         .filter((_, idx) => idx !== slotIdx)
         .map((s, idx) => ({
           ...s,
-          slot_index: idx + 1,
-          slot_id: `SLOT_${String(idx + 1).padStart(2, '0')}`
+          slot_index: idx + 1
         }));
     });
   };
@@ -1446,11 +1399,27 @@ export default function App() {
     value: TimelineSlot[K]
   ) => {
     setTimelineSlots(prev =>
-      prev.map((s, idx) => (idx === slotIdx ? { ...s, [field]: value } : s))
+      prev.map((s, idx) => {
+        if (idx !== slotIdx) return s;
+        const updated: TimelineSlot = { ...s, [field]: value };
+        if (field === 'file_name') {
+          updated.base_content = {
+            ...(s.base_content || {}),
+            file_name: String(value ?? '')
+          };
+        }
+        if (field === 'title') {
+          updated.act_title = String(value ?? '');
+        }
+        if (field === 'act_title') {
+          updated.title = String(value ?? '');
+        }
+        return updated;
+      })
     );
   };
 
-  // Добавление новой вставки E(n) в массив slot.inserts с поддержкой асимметричных fade_in / fade_out
+  // Добавление новой вставки E(n) в массив slot.inserts (без захардкоженных имен файлов)
   const addInsertToSlot = (slotIdx: number) => {
     setTimelineSlots(prev =>
       prev.map((slot, idx) => {
@@ -1473,8 +1442,8 @@ export default function App() {
             : isE2Style
             ? `E${nextNum} • in 1.5с / out 3.0с`
             : `E${nextNum} • in 1.5с / out 1.5с`,
-          asset_id: `omni12_s${slot.slot_index}_e${nextNum}`,
-          file_name: `insert_E${nextNum}_omni12.mp4`,
+          asset_id: '',
+          file_name: '',
           trigger_at_sec: suggestedTrigger,
           duration_sec: 10,
           transition_in: {
@@ -1526,9 +1495,14 @@ export default function App() {
     setTimelineSlots(prev =>
       prev.map((slot, sIdx) => {
         if (sIdx !== slotIdx) return slot;
-        const nextInserts = slot.inserts.map((ins, iIdx) =>
-          iIdx === insertIdx ? { ...ins, ...patch } : ins
-        );
+        const nextInserts = slot.inserts.map((ins, iIdx) => {
+          if (iIdx !== insertIdx) return ins;
+          const updated: SlotInsertItem = { ...ins, ...patch };
+          if (patch.file_name !== undefined) {
+            updated.filename = patch.file_name;
+          }
+          return updated;
+        });
         return { ...slot, inserts: nextInserts };
       })
     );
@@ -1806,10 +1780,10 @@ export default function App() {
 
   const ffmpegPreview = buildFFmpegFilterComplexPreview();
 
-  // Current structured Loop Build Manifest («Метель: 3:00:00» H.265 24fps AAC 320k + Asymmetric Inserts + Loudnorm)
+  // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (без хардкода)
   const currentManifest: LoopBuildManifest = {
-    version: '3.5-blizzard-3h',
-    spec_profile: 'Метель: 3:00:00 (Omni 1.2 Flash • H.265 24fps • AAC 320kbps)',
+    version: '4.0-universal',
+    spec_profile: importedManifestName || `Universal Loop (${videoCodec} ${videoFps}fps • AAC ${audioBitrateKbps}kbps)`,
     hours: loopHours,
     calculated_project_duration_sec: calculatedProjectDurationSec,
     resolution: loopResolution,
@@ -1823,7 +1797,7 @@ export default function App() {
     crossfade_loop: seamlessStitchEnabled,
     seamless_mode: seamlessTransitionMode,
     act_crossfade_sec: actCrossfadeSec,
-    internal_clip_duration_sec: 10,
+    internal_clip_duration_sec: timelineSlots[0]?.source_clip_duration_sec ?? 10,
     internal_loop_crossfade_sec: internalLoopCrossfadeSec,
     video_crossfade_sec: crossfadeDuration,
     audio_crossfade_sec: audioCrossfadeEnabled ? audioCrossfadeDuration : 0,
@@ -1833,21 +1807,38 @@ export default function App() {
     audio_mastering: audioMastering,
     video_filename:
       loopMedia?.name ||
-      expectedVideoFilename ||
       timelineSlots[0]?.file_name ||
-      'act_01_blizzard_10s.mp4',
+      expectedVideoFilename ||
+      '',
     ...(useEmbeddedAudio
       ? {}
       : {
           audio_filename:
             loopAudio?.name ||
-            expectedAudioFilename ||
             continuousBed.file_name ||
-            'blizzard_omni12_wind_bed_3h.wav'
+            expectedAudioFilename ||
+            ''
         }),
     gdrive_folder_id: gdriveFolderId || '',
+    cloud_export: {
+      target_folder_id: gdriveFolderId || ''
+    },
     continuous_bed: continuousBed,
-    timeline_slots: timelineSlots
+    timeline_slots: timelineSlots.map(slot => ({
+      ...slot,
+      act_title: slot.act_title ?? slot.title ?? '',
+      title: slot.title ?? slot.act_title ?? '',
+      file_name: slot.file_name ?? '',
+      base_content: {
+        ...(slot.base_content || {}),
+        file_name: slot.file_name ?? ''
+      },
+      inserts: slot.inserts.map(ins => ({
+        ...ins,
+        file_name: ins.file_name ?? '',
+        filename: ins.file_name ?? ''
+      }))
+    }))
   };
 
   const encodeManifestBase64 = (manifestObj: LoopBuildManifest): string => {
@@ -1859,10 +1850,28 @@ export default function App() {
     }
   };
 
-  // Нормализация слота из любого входного JSON (включая индивидуальные кривые fade_in / fade_out для inserts[])
+  // 100% универсальный динамический парсер слота из любого входного JSON (без подстановки фейковых имен)
   const normalizeTimelineSlot = (rawSlot: Record<string, unknown>, idx: number): TimelineSlot => {
     const num = idx + 1;
     const pad = String(num).padStart(2, '0');
+
+    const baseContent =
+      rawSlot.base_content && typeof rawSlot.base_content === 'object'
+        ? (rawSlot.base_content as Record<string, unknown>)
+        : undefined;
+
+    // Универсальная цепочка чтения имени файла слота (без дефолтного fallback-значения)
+    const rawFileName = String(
+      baseContent?.file_name ||
+        baseContent?.filename ||
+        baseContent?.asset_name ||
+        baseContent?.video_file ||
+        rawSlot.file_name ||
+        rawSlot.filename ||
+        rawSlot.asset_name ||
+        rawSlot.video_file ||
+        ''
+    ).trim();
 
     let rawInserts: unknown[] = [];
     if (Array.isArray(rawSlot.inserts)) {
@@ -1877,6 +1886,22 @@ export default function App() {
         const insertId = String(item.insert_id || item.id || `E${insIdx + 1}`);
         const isE3 = insertId.toUpperCase() === 'E3';
         const isE2 = insertId.toUpperCase() === 'E2';
+
+        const itemBaseContent =
+          item.base_content && typeof item.base_content === 'object'
+            ? (item.base_content as Record<string, unknown>)
+            : undefined;
+
+        // Реальное имя файла вставки без подстановки тестовых заглушек
+        const rawInsertFileName = String(
+          item.file_name ||
+            item.filename ||
+            item.asset_name ||
+            item.video_file ||
+            itemBaseContent?.file_name ||
+            itemBaseContent?.filename ||
+            ''
+        ).trim();
 
         const transInObj =
           item.transition_in && typeof item.transition_in === 'object'
@@ -1905,16 +1930,29 @@ export default function App() {
 
         const holdUntilEnd = Boolean(item.hold_until_end ?? (tOutType === 'none' || isE3));
 
+        const insStartSec = typeof item.start_sec === 'number' ? item.start_sec : undefined;
+        const insEndSec = typeof item.end_sec === 'number' ? item.end_sec : undefined;
+        const insComputedDur =
+          insStartSec !== undefined && insEndSec !== undefined && insEndSec > insStartSec
+            ? insEndSec - insStartSec
+            : undefined;
+
         return {
           insert_id: insertId,
           timecode_label:
-            typeof item.timecode_label === 'string' ? item.timecode_label : undefined,
-          asset_id: String(item.asset_id || `omni12_s${num}_e${insIdx + 1}`),
-          file_name: String(
-            item.file_name || item.video_filename || `insert_${insertId}_omni12.mp4`
+            typeof item.timecode_label === 'string'
+              ? item.timecode_label
+              : typeof item.title === 'string'
+              ? item.title
+              : undefined,
+          asset_id: String(item.asset_id ?? item.id ?? ''),
+          file_name: rawInsertFileName,
+          filename: rawInsertFileName,
+          trigger_at_sec: Math.max(
+            0,
+            Number(item.trigger_at_sec ?? item.start_sec ?? 0) || 0
           ),
-          trigger_at_sec: Math.max(0, Number(item.trigger_at_sec ?? (insIdx + 1) * 180) || 0),
-          duration_sec: Math.max(1, Number(item.duration_sec ?? 10) || 10),
+          duration_sec: Math.max(1, Number(item.duration_sec ?? insComputedDur ?? 10) || 10),
           transition_in: {
             type: tInType,
             duration_sec: tInDur
@@ -1932,6 +1970,8 @@ export default function App() {
     const rawTransOut =
       rawSlot.slot_transition_out && typeof rawSlot.slot_transition_out === 'object'
         ? (rawSlot.slot_transition_out as Record<string, unknown>)
+        : rawSlot.transition_out && typeof rawSlot.transition_out === 'object'
+        ? (rawSlot.transition_out as Record<string, unknown>)
         : {};
     const outTypeRaw = String(rawTransOut.type ?? 'xfade').toLowerCase();
     const outType: SlotTransitionOut['type'] =
@@ -1945,30 +1985,65 @@ export default function App() {
     const outDur =
       outType === 'none' ? 0 : Math.max(0, Number(rawTransOut.duration_sec ?? 90.0) || 90.0);
 
+    // Вычисление длительности слота: slot.slot_duration_sec ?? (slot.end_sec - slot.start_sec)
+    const startSec = typeof rawSlot.start_sec === 'number' ? rawSlot.start_sec : undefined;
+    const endSec = typeof rawSlot.end_sec === 'number' ? rawSlot.end_sec : undefined;
+    const rangeDurationSec =
+      startSec !== undefined && endSec !== undefined && endSec >= startSec
+        ? endSec - startSec
+        : undefined;
+    const resolvedDurationSec = Number(
+      rawSlot.slot_duration_sec ??
+        baseContent?.slot_duration_sec ??
+        rawSlot.duration_sec ??
+        rangeDurationSec ??
+        1800
+    );
+
+    const resolvedActTitle = String(rawSlot.act_title || rawSlot.title || '');
+    const resolvedSlotId = String(rawSlot.slot_id ?? `SLOT_${pad}`);
+    const resolvedAssetId = String(
+      rawSlot.asset_id || baseContent?.asset_id || ''
+    );
+
     return {
       slot_index: Number(rawSlot.slot_index ?? num) || num,
-      slot_id: String(rawSlot.slot_id || `SLOT_${pad}`),
-      title: String(
-        rawSlot.title ||
-          (parsedInserts.length === 0
-            ? `Акт ${num} — Чистый фоновый луп 10с`
-            : `Акт ${num} — Фоновый луп + вставки (${parsedInserts.length})`)
-      ),
+      slot_id: resolvedSlotId,
+      act_title: resolvedActTitle,
+      title: resolvedActTitle,
       act_timecode:
-        typeof rawSlot.act_timecode === 'string' ? rawSlot.act_timecode : undefined,
-      asset_id: String(rawSlot.asset_id || `omni12_act_${pad}`),
-      file_name: String(
-        rawSlot.file_name || rawSlot.video_filename || `act_${pad}_blizzard_10s.mp4`
-      ),
+        typeof rawSlot.act_timecode === 'string'
+          ? rawSlot.act_timecode
+          : startSec !== undefined && endSec !== undefined
+          ? `${startSec}s – ${endSec}s`
+          : undefined,
+      asset_id: resolvedAssetId,
+      file_name: rawFileName,
+      base_content: {
+        ...(baseContent || {}),
+        file_name: rawFileName
+      },
+      ...(startSec !== undefined ? { start_sec: startSec } : {}),
+      ...(endSec !== undefined ? { end_sec: endSec } : {}),
       source_clip_duration_sec: Math.max(
         1,
-        Number(rawSlot.source_clip_duration_sec ?? 10) || 10
+        Number(
+          rawSlot.source_clip_duration_sec ??
+            baseContent?.source_clip_duration_sec ??
+            baseContent?.clip_duration_sec ??
+            10
+        ) || 10
       ),
       internal_loop_crossfade_sec: Math.max(
         0.1,
-        Number(rawSlot.internal_loop_crossfade_sec ?? 1.0) || 1.0
+        Number(
+          rawSlot.internal_loop_crossfade_sec ??
+            baseContent?.internal_loop_crossfade_sec ??
+            baseContent?.loop_crossfade_sec ??
+            1.0
+        ) || 1.0
       ),
-      slot_duration_sec: Math.max(10, Number(rawSlot.slot_duration_sec ?? 1800) || 1800),
+      slot_duration_sec: Math.max(1, resolvedDurationSec || 1800),
       inserts: parsedInserts,
       slot_transition_out: {
         type: outType,
@@ -1977,13 +2052,32 @@ export default function App() {
     };
   };
 
-  // Apply parsed JSON manifest object and validate fields (including H.265 24fps, asymmetric inserts, and loudnorm)
+  // Прямой маппинг всех полей любого валидного JSON-манифеста 1 в 1 в состояние приложения
   const applyManifestObject = (raw: Record<string, unknown>, sourceLabel: string) => {
-    // 1. Parse unlimited timeline_slots (from 1 to 50+ scenes)
+    const timelineObj =
+      raw.timeline && typeof raw.timeline === 'object'
+        ? (raw.timeline as Record<string, unknown>)
+        : undefined;
+    const exportSettingsObj =
+      raw.export_settings && typeof raw.export_settings === 'object'
+        ? (raw.export_settings as Record<string, unknown>)
+        : raw.encoding && typeof raw.encoding === 'object'
+        ? (raw.encoding as Record<string, unknown>)
+        : undefined;
+    const cloudExportObj =
+      raw.cloud_export && typeof raw.cloud_export === 'object'
+        ? (raw.cloud_export as Record<string, unknown>)
+        : undefined;
+
+    // 1. Parse unlimited timeline_slots / slots
     const rawSlots = Array.isArray(raw.timeline_slots)
       ? raw.timeline_slots
       : Array.isArray(raw.slots)
       ? raw.slots
+      : Array.isArray(timelineObj?.timeline_slots)
+      ? (timelineObj?.timeline_slots as unknown[])
+      : Array.isArray(timelineObj?.slots)
+      ? (timelineObj?.slots as unknown[])
       : null;
 
     if (rawSlots && rawSlots.length > 0) {
@@ -2005,19 +2099,20 @@ export default function App() {
         if (raw.hours === undefined) {
           setLoopHours(derivedHours);
         }
-        if (normalized[0]?.file_name) {
-          setExpectedVideoFilename(normalized[0].file_name);
-        }
+        setExpectedVideoFilename(normalized[0]?.file_name || '');
       }
     }
 
     // 2. Parse continuous_bed config if present
     if (raw.continuous_bed && typeof raw.continuous_bed === 'object') {
       const bedObj = raw.continuous_bed as Record<string, unknown>;
+      const bedFileName = String(
+        bedObj.file_name || bedObj.filename || bedObj.asset_name || ''
+      ).trim();
       setContinuousBed(prev => ({
-        enabled: typeof bedObj.enabled === 'boolean' ? bedObj.enabled : prev.enabled,
-        asset_id: typeof bedObj.asset_id === 'string' ? bedObj.asset_id : prev.asset_id,
-        file_name: typeof bedObj.file_name === 'string' ? bedObj.file_name : prev.file_name,
+        enabled: typeof bedObj.enabled === 'boolean' ? bedObj.enabled : Boolean(bedFileName),
+        asset_id: typeof bedObj.asset_id === 'string' ? bedObj.asset_id : '',
+        file_name: bedFileName,
         acrossfade_sec:
           typeof bedObj.acrossfade_sec === 'number'
             ? bedObj.acrossfade_sec
@@ -2037,20 +2132,30 @@ export default function App() {
       }));
     }
 
-    // 2b. Parse H.265 codec, 24fps, AAC 320k, act crossfade, black screen & audio_mastering
-    if (raw.video_codec === 'libx265' || raw.video_codec === 'libx264') {
-      setVideoCodec(raw.video_codec);
+    // 2b. Parse codec, fps, audio bitrate, act crossfade, black screen & audio_mastering
+    const rawCodec = raw.video_codec ?? exportSettingsObj?.video_codec ?? exportSettingsObj?.codec;
+    if (rawCodec === 'libx265' || rawCodec === 'libx264') {
+      setVideoCodec(rawCodec);
+    } else if (typeof rawCodec === 'string') {
+      if (rawCodec.toLowerCase().includes('265') || rawCodec.toLowerCase().includes('hevc')) {
+        setVideoCodec('libx265');
+      } else if (rawCodec.toLowerCase().includes('264')) {
+        setVideoCodec('libx264');
+      }
     }
-    if (Number(raw.fps) === 24 || Number(raw.fps) === 30 || Number(raw.fps) === 60) {
-      setVideoFps(Number(raw.fps) as 24 | 30 | 60);
+
+    const rawFps = Number(raw.fps ?? exportSettingsObj?.fps);
+    if (rawFps === 24 || rawFps === 30 || rawFps === 60) {
+      setVideoFps(rawFps as 24 | 30 | 60);
     }
-    if (
-      Number(raw.audio_bitrate_kbps) === 320 ||
-      Number(raw.audio_bitrate_kbps) === 256 ||
-      Number(raw.audio_bitrate_kbps) === 192
-    ) {
-      setAudioBitrateKbps(Number(raw.audio_bitrate_kbps) as 320 | 256 | 192);
+
+    const rawAudioBitrate = Number(
+      raw.audio_bitrate_kbps ?? exportSettingsObj?.audio_bitrate_kbps
+    );
+    if (rawAudioBitrate === 320 || rawAudioBitrate === 256 || rawAudioBitrate === 192) {
+      setAudioBitrateKbps(rawAudioBitrate as 320 | 256 | 192);
     }
+
     if (typeof raw.act_crossfade_sec === 'number' && raw.act_crossfade_sec > 0) {
       setActCrossfadeSec(raw.act_crossfade_sec);
     }
@@ -2098,16 +2203,25 @@ export default function App() {
     }
 
     // 4. Resolution ('1080p' | '2k' | '4k')
-    if (typeof raw.resolution === 'string') {
-      const normRes = raw.resolution.toLowerCase();
+    const rawRes = raw.resolution ?? exportSettingsObj?.resolution;
+    if (typeof rawRes === 'string') {
+      const normRes = rawRes.toLowerCase();
       if (normRes === '1080p' || normRes === '2k' || normRes === '4k') {
         setLoopResolution(normRes);
+      } else if (normRes.includes('3840') || normRes.includes('2160')) {
+        setLoopResolution('4k');
+      } else if (normRes.includes('2560') || normRes.includes('1440')) {
+        setLoopResolution('2k');
+      } else if (normRes.includes('1920') || normRes.includes('1080')) {
+        setLoopResolution('1080p');
       }
     }
 
     // 5. Bitrate Preset & CRF ('cinema' | 'standard' | 'eco')
-    if (typeof raw.bitrate_preset === 'string') {
-      const normPreset = raw.bitrate_preset.toLowerCase();
+    const rawPreset = raw.bitrate_preset ?? exportSettingsObj?.bitrate_preset;
+    const rawCrf = raw.crf ?? exportSettingsObj?.crf;
+    if (typeof rawPreset === 'string') {
+      const normPreset = rawPreset.toLowerCase();
       if (normPreset === 'cinema' || normPreset === 'standard' || normPreset === 'eco') {
         setBitratePreset(normPreset);
       } else if (normPreset.includes('cinema') || normPreset.includes('master')) {
@@ -2117,9 +2231,9 @@ export default function App() {
       } else {
         setBitratePreset('standard');
       }
-    } else if (typeof raw.crf === 'number') {
-      if (raw.crf <= 19) setBitratePreset('cinema');
-      else if (raw.crf >= 25) setBitratePreset('eco');
+    } else if (typeof rawCrf === 'number') {
+      if (rawCrf <= 19) setBitratePreset('cinema');
+      else if (rawCrf >= 25) setBitratePreset('eco');
       else setBitratePreset('standard');
     }
 
@@ -2157,18 +2271,25 @@ export default function App() {
       setUseEmbeddedAudio(raw.use_embedded_audio);
     }
 
-    // 8. Target Google Drive Folder ID
-    if (typeof raw.gdrive_folder_id === 'string' && raw.gdrive_folder_id.trim()) {
-      const folder = raw.gdrive_folder_id.trim();
-      setGdriveFolderId(folder);
-      localStorage.setItem('ac_gdrive_folder_id', folder);
+    // 8. Target Google Drive Folder ID (from cloud_export.target_folder_id or gdrive_folder_id)
+    const resolvedFolderId = String(
+      cloudExportObj?.target_folder_id ||
+        cloudExportObj?.gdrive_folder_id ||
+        cloudExportObj?.folder_id ||
+        raw.target_folder_id ||
+        raw.gdrive_folder_id ||
+        ''
+    ).trim();
+    if (resolvedFolderId) {
+      setGdriveFolderId(resolvedFolderId);
+      localStorage.setItem('ac_gdrive_folder_id', resolvedFolderId);
     }
 
-    // 9. Bound filenames
-    if (typeof raw.video_filename === 'string' && raw.video_filename.trim()) {
+    // 9. Bound top-level filenames if explicitly provided
+    if (typeof raw.video_filename === 'string') {
       setExpectedVideoFilename(raw.video_filename.trim());
     }
-    if (typeof raw.audio_filename === 'string' && raw.audio_filename.trim()) {
+    if (typeof raw.audio_filename === 'string') {
       setExpectedAudioFilename(raw.audio_filename.trim());
     }
 
@@ -2209,13 +2330,14 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `blizzard_3h_manifest_${videoCodec}_${videoFps}fps_${loopResolution}.json`;
+    const baseName = importedManifestName
+      ? importedManifestName.replace(/\.json$/i, '')
+      : `project_manifest_${videoCodec}_${videoFps}fps_${loopResolution}`;
+    const exportFileName = `${baseName}.json`;
+    link.download = exportFileName;
     link.click();
     URL.revokeObjectURL(url);
-    showToast(
-      `Манифест blizzard_3h_manifest_${videoCodec}_${videoFps}fps_${loopResolution}.json экспортирован!`,
-      'success'
-    );
+    showToast(`Манифест ${exportFileName} экспортирован!`, 'success');
   };
 
   // Прикрепление локального видеофайла напрямую к конкретному слоту
@@ -3647,7 +3769,8 @@ export default function App() {
                           )}
                           <input
                             type="text"
-                            value={slot.title}
+                            value={slot.act_title ?? slot.title}
+                            placeholder="Название акта / слота"
                             onChange={e =>
                               updateTimelineSlotField(sIdx, 'title', e.target.value)
                             }
@@ -3660,7 +3783,11 @@ export default function App() {
                                 : 'bg-slate-900 border-slate-700 text-slate-400'
                             }`}
                           >
-                            {slotMatched ? '✓ Ассет в дропзоне' : `Ожидается: ${slot.file_name}`}
+                            {slotMatched
+                              ? '✓ Ассет в дропзоне'
+                              : slot.file_name
+                              ? `Ожидается: ${slot.file_name}`
+                              : 'Имя файла не задано'}
                           </span>
                         </div>
 
@@ -3682,12 +3809,13 @@ export default function App() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                            Базовый файл 10с (file_name):
+                            Базовый файл (file_name):
                           </label>
                           <div className="flex items-center gap-1.5">
                             <input
                               type="text"
                               value={slot.file_name}
+                              placeholder="Из JSON или прикрепите 📎"
                               onChange={e =>
                                 updateTimelineSlotField(sIdx, 'file_name', e.target.value)
                               }
@@ -3922,6 +4050,7 @@ export default function App() {
                                         <input
                                           type="text"
                                           value={ins.file_name}
+                                          placeholder="Из JSON или прикрепите 📎"
                                           onChange={e =>
                                             updateSlotInsert(sIdx, insIdx, {
                                               file_name: e.target.value
