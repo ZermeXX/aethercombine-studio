@@ -64,6 +64,35 @@ export interface AmbientAudioConfig {
   volume: number;
 }
 
+export type SubtitleTargetLanguage =
+  | 'en-US'
+  | 'ru-RU'
+  | 'es-ES'
+  | 'de-DE'
+  | 'original';
+
+export interface SubtitlesFlexibleConfig {
+  enabled: boolean;
+  burn_in: boolean;       // вшивать ли через FFmpeg фильтр (Hardsub)
+  upload_srt: boolean;    // сохранять ли файл на Google Диск (Softsub)
+  language: string;       // "en", "ru", "es", "de", "original"
+  target_language?: SubtitleTargetLanguage;
+  srt_filename?: string;
+  srt_content: string;    // полный текст сгенерированных таймкодов
+}
+
+export interface BurnInSrtConfig {
+  enabled: boolean;
+  burn_in: boolean;
+  upload_srt: boolean;
+  language: string;
+  target_language: SubtitleTargetLanguage;
+  srt_filename: string;
+  srt_content: string;
+  srt_content_base64: string;
+  ffmpeg_filter: string;
+}
+
 export interface NarrativeExportSettings {
   resolution: '4k' | '1080p';
   aspect_ratio: '16:9' | '9:16';
@@ -73,21 +102,7 @@ export interface NarrativeExportSettings {
   crf: number;
   fps: 24 | 30 | 60;
   audio_bitrate_kbps: 320 | 256 | 192;
-}
-
-export type SubtitleTargetLanguage =
-  | 'en-US'
-  | 'ru-RU'
-  | 'es-ES'
-  | 'de-DE'
-  | 'original';
-
-export interface BurnInSrtConfig {
-  enabled: boolean;
-  target_language: SubtitleTargetLanguage;
-  srt_filename: string;
-  srt_content_base64: string;
-  ffmpeg_filter: string;
+  subtitles?: SubtitlesFlexibleConfig;
 }
 
 export interface NarrativeMontageManifest {
@@ -104,6 +119,7 @@ export interface NarrativeMontageManifest {
   ambient_audio: AmbientAudioConfig;
   master_audio: MasterAudioConfig;
   export_settings: NarrativeExportSettings;
+  subtitles: SubtitlesFlexibleConfig;
   subtitles_burn_in?: BurnInSrtConfig;
   drift_guard?: {
     video_duration_sec: number;
@@ -256,10 +272,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     uploaded: false
   });
 
-  // Автоматический генератор титров (Burn-in SRT) + Селектор языка субтитров (по умолчанию: English (US))
+  // Гибкая система субтитров: Hardsub (burn_in) / Softsub (upload_srt на Google Диск) / Скачивание .SRT
   const [burnInSrtEnabled, setBurnInSrtEnabled] = useState<boolean>(false);
+  const [uploadSrtToDriveEnabled, setUploadSrtToDriveEnabled] = useState<boolean>(true);
   const [subtitleLanguage, setSubtitleLanguage] = useState<SubtitleTargetLanguage>('en-US');
-  const [srtFilename, setSrtFilename] = useState<string>('subtitles_en_us_4k.srt');
+  const [srtFilename, setSrtFilename] = useState<string>('subtitles_en.srt');
   const [srtTextContent, setSrtTextContent] = useState<string>('');
   const srtFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -601,6 +618,44 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       });
     }
 
+    // Маппинг subtitles / export_settings.subtitles / subtitles_burn_in
+    const rawSubs =
+      (raw.subtitles && typeof raw.subtitles === 'object'
+        ? (raw.subtitles as Record<string, unknown>)
+        : undefined) ||
+      (exp?.subtitles && typeof exp.subtitles === 'object'
+        ? (exp.subtitles as Record<string, unknown>)
+        : undefined) ||
+      (raw.subtitles_burn_in && typeof raw.subtitles_burn_in === 'object'
+        ? (raw.subtitles_burn_in as Record<string, unknown>)
+        : undefined);
+
+    if (rawSubs) {
+      if (typeof rawSubs.burn_in === 'boolean') {
+        setBurnInSrtEnabled(rawSubs.burn_in);
+      } else if (typeof rawSubs.enabled === 'boolean') {
+        setBurnInSrtEnabled(rawSubs.enabled);
+      }
+      if (typeof rawSubs.upload_srt === 'boolean') {
+        setUploadSrtToDriveEnabled(rawSubs.upload_srt);
+      }
+      const rawLang = String(rawSubs.target_language || rawSubs.language || '').trim();
+      if (rawLang) {
+        const l = rawLang.toLowerCase();
+        if (l.startsWith('ru')) setSubtitleLanguage('ru-RU');
+        else if (l.startsWith('es')) setSubtitleLanguage('es-ES');
+        else if (l.startsWith('de')) setSubtitleLanguage('de-DE');
+        else if (l.startsWith('orig')) setSubtitleLanguage('original');
+        else setSubtitleLanguage('en-US');
+      }
+      if (typeof rawSubs.srt_content === 'string' && rawSubs.srt_content.trim()) {
+        setSrtTextContent(rawSubs.srt_content);
+      }
+      if (typeof rawSubs.srt_filename === 'string' && rawSubs.srt_filename.trim()) {
+        setSrtFilename(rawSubs.srt_filename.trim());
+      }
+    }
+
     setImportedScenarioName(fileNameLabel);
     onNotify(
       `JSON-сценарий «${fileNameLabel}» успешно загружен (${
@@ -863,8 +918,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     return clean || enFallbacks[(sceneIndex - 1) % enFallbacks.length];
   };
 
-  // Генерация .SRT титров с автоматическим переводом на выбранный целевой язык
-  const generateSrtFromScenesWithLang = (targetLang: SubtitleTargetLanguage = subtitleLanguage) => {
+  const getShortSubtitleLangCode = (lang: SubtitleTargetLanguage): string => {
+    const map: Record<SubtitleTargetLanguage, string> = {
+      'en-US': 'en',
+      'ru-RU': 'ru',
+      'es-ES': 'es',
+      'de-DE': 'de',
+      original: 'original'
+    };
+    return map[lang] || 'en';
+  };
+
+  // Построение полного текста .SRT таймкодов из текущих сцен
+  const buildSrtStringFromScenes = (targetLang: SubtitleTargetLanguage = subtitleLanguage): string => {
     let cursor = 0;
     const blocks: string[] = [];
     const scriptLines = transferredScript
@@ -888,22 +954,21 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       );
     });
 
-    const langSuffixMap: Record<SubtitleTargetLanguage, string> = {
-      'en-US': 'en_us',
-      'ru-RU': 'ru',
-      'es-ES': 'es',
-      'de-DE': 'de',
-      original: 'orig'
-    };
-    const nextFileName = `subtitles_${langSuffixMap[targetLang]}_4k.srt`;
-    const resultSrt = blocks.join('\n\n');
+    return blocks.join('\n\n');
+  };
+
+  // Генерация .SRT титров с автоматическим переводом на выбранный целевой язык
+  const generateSrtFromScenesWithLang = (targetLang: SubtitleTargetLanguage = subtitleLanguage): string => {
+    const shortLang = getShortSubtitleLangCode(targetLang);
+    const nextFileName = `subtitles_${shortLang}.srt`;
+    const resultSrt = buildSrtStringFromScenes(targetLang);
     setSrtFilename(nextFileName);
     setSrtTextContent(resultSrt);
-    setBurnInSrtEnabled(true);
     onNotify(
-      `Субтитры ${nextFileName} (${narrativeScenes.length} сцен • язык: ${targetLang}) переведены и готовы для Burn-in 4K!`,
+      `Субтитры ${nextFileName} (${narrativeScenes.length} сцен • язык: ${shortLang}) сгенерированы!`,
       'success'
     );
+    return resultSrt;
   };
 
   const generateSrtFromScenes = () => {
@@ -917,6 +982,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     const reader = new FileReader();
     reader.onload = ev => {
       const content = String(ev.target?.result || '');
+      const shortLang = getShortSubtitleLangCode(subtitleLanguage);
       if (file.name.toLowerCase().endsWith('.srt') && subtitleLanguage === 'original') {
         setSrtFilename(file.name);
         setSrtTextContent(content);
@@ -933,12 +999,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           cur += step;
           return block;
         });
-        setSrtFilename(file.name.replace(/\.[^.]+$/, '') + `_${subtitleLanguage}.srt`);
+        setSrtFilename(`subtitles_${shortLang}.srt`);
         setSrtTextContent(srtBlocks.join('\n\n'));
       }
-      setBurnInSrtEnabled(true);
       onNotify(
-        `Титры «${file.name}» переведены (${subtitleLanguage}) и включены в Burn-in SRT!`,
+        `Титры «${file.name}» переведены (${shortLang}) и загружены в редактор субтитров!`,
         'success'
       );
     };
@@ -946,19 +1011,27 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     e.target.value = '';
   };
 
+  // Моментальная генерация и прямое скачивание файла subtitles_[lang].srt через браузер
   const handleDownloadSrtFile = () => {
+    const shortLang = getShortSubtitleLangCode(subtitleLanguage);
+    const downloadFileName = `subtitles_${shortLang}.srt`;
+    const finalSrtContent = srtTextContent.trim()
+      ? srtTextContent
+      : buildSrtStringFromScenes(subtitleLanguage);
+
     if (!srtTextContent.trim()) {
-      generateSrtFromScenesWithLang(subtitleLanguage);
-      return;
+      setSrtFilename(downloadFileName);
+      setSrtTextContent(finalSrtContent);
     }
-    const blob = new Blob([srtTextContent], { type: 'text/plain;charset=utf-8' });
+
+    const blob = new Blob([finalSrtContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = srtFilename || 'subtitles_en_us_4k.srt';
+    a.download = downloadFileName;
     a.click();
     URL.revokeObjectURL(url);
-    onNotify(`Файл ${srtFilename} (${subtitleLanguage}) скачан!`, 'success');
+    onNotify(`Файл ${downloadFileName} скачан на устройство!`, 'success');
   };
 
   const handleUploadMasterAudioToDrive = async () => {
@@ -1027,7 +1100,32 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   );
   const isDriftWithinTolerance = Math.abs(driftDiffSec) <= 2;
 
-  const burnInFfmpegFilter = `subtitles=${srtFilename || 'subtitles_4k.srt'}:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'`;
+  const burnInFfmpegFilter = `subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'`;
+
+  const resolvedSrtContentForManifest = useMemo(
+    () => (srtTextContent.trim() ? srtTextContent : buildSrtStringFromScenes(subtitleLanguage)),
+    [srtTextContent, narrativeScenes, subtitleLanguage, transferredScript]
+  );
+
+  const subtitlesConfigObject: SubtitlesFlexibleConfig = useMemo(() => {
+    const shortLang = getShortSubtitleLangCode(subtitleLanguage);
+    const isSubtitlesActive = Boolean(burnInSrtEnabled || uploadSrtToDriveEnabled);
+    return {
+      enabled: isSubtitlesActive,
+      burn_in: burnInSrtEnabled,
+      upload_srt: uploadSrtToDriveEnabled,
+      language: shortLang,
+      target_language: subtitleLanguage,
+      srt_filename: srtFilename.trim() || `subtitles_${shortLang}.srt`,
+      srt_content: isSubtitlesActive ? resolvedSrtContentForManifest : ''
+    };
+  }, [
+    burnInSrtEnabled,
+    uploadSrtToDriveEnabled,
+    subtitleLanguage,
+    srtFilename,
+    resolvedSrtContentForManifest
+  ]);
 
   // Полный JSON-манифест для N-сцен (собирает весь массив scenes[] любой длины без урезания)
   const narrativeManifest: NarrativeMontageManifest = useMemo(
@@ -1057,14 +1155,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       },
       export_settings: {
         ...exportSettings,
-        preset: exportSettings.video_codec === 'libx264' ? 'veryfast' : 'medium'
+        preset: exportSettings.video_codec === 'libx264' ? 'veryfast' : 'medium',
+        subtitles: subtitlesConfigObject
       },
+      subtitles: subtitlesConfigObject,
       subtitles_burn_in: {
-        enabled: burnInSrtEnabled,
+        enabled: subtitlesConfigObject.enabled,
+        burn_in: burnInSrtEnabled,
+        upload_srt: uploadSrtToDriveEnabled,
+        language: subtitlesConfigObject.language,
         target_language: subtitleLanguage,
-        srt_filename: srtFilename.trim() || 'subtitles_en_us_4k.srt',
-        srt_content_base64: burnInSrtEnabled && srtTextContent.trim()
-          ? encodeManifestBase64(srtTextContent)
+        srt_filename: subtitlesConfigObject.srt_filename || 'subtitles.srt',
+        srt_content: subtitlesConfigObject.srt_content,
+        srt_content_base64: subtitlesConfigObject.enabled && subtitlesConfigObject.srt_content
+          ? encodeManifestBase64(subtitlesConfigObject.srt_content)
           : '',
         ffmpeg_filter: burnInSrtEnabled ? burnInFfmpegFilter : ''
       },
@@ -1094,10 +1198,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       masterAudio,
       masterAudioDurationSec,
       exportSettings,
+      subtitlesConfigObject,
       burnInSrtEnabled,
+      uploadSrtToDriveEnabled,
       subtitleLanguage,
-      srtFilename,
-      srtTextContent,
       burnInFfmpegFilter,
       driftDiffSec,
       isDriftWithinTolerance,
@@ -1730,30 +1834,47 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
         </div>
 
-        {/* Автоматический генератор титров (Burn-in SRT) + Селектор языка субтитров */}
+        {/* Гибкая система субтитров: Hardsub / Softsub (Google Drive) / Скачивание .SRT */}
         <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Subtitles className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                Автоматический генератор титров (Burn-in Subtitles / SRT 4K)
+                Система субтитров: Гибкие режимы (Hardsub / Softsub / .SRT)
               </h3>
             </div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-300 cursor-pointer">
+            <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
+              subtitles_{getShortSubtitleLangCode(subtitleLanguage)}.srt
+            </span>
+          </div>
+
+          {/* 2 ЧЕКБОКСА УПРАВЛЕНИЯ РЕЖИМАМИ СУБТИТРОВ (HARDSUB & SOFTSUB GOOGLE DRIVE) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <label className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl px-3 py-2.5 text-xs font-semibold text-indigo-200 cursor-pointer select-none transition">
               <input
                 type="checkbox"
                 checked={burnInSrtEnabled}
                 onChange={e => setBurnInSrtEnabled(e.target.checked)}
-                className="accent-indigo-500 w-3.5 h-3.5"
+                className="accent-indigo-500 w-4 h-4 shrink-0"
               />
-              <span>Вшить кинематографичные титры в 4K видео</span>
+              <span>Вшить субтитры в видеоряд (Hardsub)</span>
+            </label>
+
+            <label className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs font-semibold text-emerald-300 cursor-pointer select-none transition">
+              <input
+                type="checkbox"
+                checked={uploadSrtToDriveEnabled}
+                onChange={e => setUploadSrtToDriveEnabled(e.target.checked)}
+                className="accent-emerald-500 w-4 h-4 shrink-0"
+              />
+              <span>Выгрузить файл субтитров (.srt) на Google Диск</span>
             </label>
           </div>
 
           {/* СЕЛЕКТОР ЯЗЫКА СУБТИТРОВ (SUBTITLE LANGUAGE SELECTOR) */}
           <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2">
             <label className="text-[11px] font-bold text-amber-300 uppercase">
-              Целевой язык субтитров (Subtitle Language):
+              Целевой язык субтитров (language: &quot;{getShortSubtitleLangCode(subtitleLanguage)}&quot;):
             </label>
             <select
               value={subtitleLanguage}
@@ -1764,11 +1885,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               }}
               className="bg-slate-950 border border-indigo-500/40 rounded-lg px-3 py-1.5 text-xs font-semibold text-indigo-200 outline-none focus:border-indigo-400"
             >
-              <option value="en-US">English (US) [по умолчанию]</option>
-              <option value="ru-RU">Русский</option>
-              <option value="es-ES">Español</option>
-              <option value="de-DE">Deutsch</option>
-              <option value="original">Оригинальный язык сценария</option>
+              <option value="en-US">English (US) [en — по умолчанию]</option>
+              <option value="ru-RU">Русский [ru]</option>
+              <option value="es-ES">Español [es]</option>
+              <option value="de-DE">Deutsch [de]</option>
+              <option value="original">Оригинальный язык сценария [original]</option>
             </select>
           </div>
 
@@ -1792,30 +1913,37 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               onClick={generateSrtFromScenes}
               className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
             >
-              ⚡ Перевести и сгенерировать .SRT ({subtitleLanguage})
+              ⚡ Перевести и сгенерировать .SRT ({getShortSubtitleLangCode(subtitleLanguage)})
             </button>
             <button
               type="button"
               onClick={handleDownloadSrtFile}
-              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+              className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
             >
-              <Download className="w-3.5 h-3.5" /> Скачать .SRT
+              📥 Скачать .SRT файл
             </button>
           </div>
 
           <div className="text-[11px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 truncate">
-            FFmpeg фильтр: <code className="text-indigo-300">{burnInFfmpegFilter}</code>
+            {burnInSrtEnabled ? (
+              <>
+                Режим Hardsub активен (<code className="text-indigo-300">-vf &quot;{burnInFfmpegFilter}&quot;</code>)
+              </>
+            ) : (
+              <>
+                Режим Softsub / Clean Video: <span className="text-emerald-400">видео рендерится чистым без вшивания титров</span>
+                {uploadSrtToDriveEnabled ? ' • ./output/subtitles.srt выгружается в Google Drive' : ''}
+              </>
+            )}
           </div>
 
-          {srtTextContent && (
-            <textarea
-              rows={3}
-              value={srtTextContent}
-              onChange={e => setSrtTextContent(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] font-mono text-slate-300 outline-none custom-scroll"
-              placeholder="Содержимое .SRT файла титров..."
-            />
-          )}
+          <textarea
+            rows={3}
+            value={srtTextContent || resolvedSrtContentForManifest}
+            onChange={e => setSrtTextContent(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] font-mono text-slate-300 outline-none custom-scroll"
+            placeholder="Содержимое .SRT файла титров..."
+          />
         </div>
       </div>
 

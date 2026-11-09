@@ -35,12 +35,17 @@ import {
   FileText,
   Sliders,
   CheckCircle2,
-  CloudUpload
+  CloudUpload,
+  Subtitles
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
 import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
-import { MontageCombineView, NarrativeSceneItem } from './components/MontageCombineView';
+import {
+  MontageCombineView,
+  NarrativeSceneItem,
+  SubtitlesFlexibleConfig
+} from './components/MontageCombineView';
 import { VerbaFlowStudioView } from './components/VerbaFlowStudioView';
 import { ThumbnailStudioView } from './components/ThumbnailStudioView';
 import {
@@ -185,7 +190,9 @@ interface LoopBuildManifest {
     resolution: '1080p' | '2k' | '4k';
     fps: 24 | 30 | 60;
     audio_bitrate_kbps: 320 | 256 | 192;
+    subtitles: SubtitlesFlexibleConfig;
   };
+  subtitles: SubtitlesFlexibleConfig;
   act_crossfade_sec: number;
   internal_clip_duration_sec: number;
   internal_loop_crossfade_sec: number;
@@ -656,6 +663,31 @@ jobs:
               cur_timeline_v = "v_final"
               total_duration += final_black_sec
 
+          # 5.5. Гибкая система субтитров (assemble_scenes.py / assemble_pipeline.py: Hardsub / Softsub / .SRT)
+          subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
+          subs_enabled = bool(subs_cfg.get("enabled", False))
+          burn_in = bool(subs_cfg.get("burn_in", False))
+          upload_srt = bool(subs_cfg.get("upload_srt", False))
+          srt_content = (subs_cfg.get("srt_content") or "").strip()
+          if not srt_content and subs_cfg.get("srt_content_base64"):
+              srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
+
+          os.makedirs("./output", exist_ok=True)
+          output_srt_path = "./output/subtitles.srt"
+          if (upload_srt or burn_in) and srt_content:
+              with open(output_srt_path, "w", encoding="utf-8") as sf:
+                  sf.write(srt_content)
+              with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
+                  sf_root.write(srt_content)
+
+          # Если subtitles.burn_in === true: FFmpeg применяет фильтр subtitles=subtitles.srt:...
+          # Если subtitles.burn_in === false: видео рендерится чистым без наложения титров
+          if subs_enabled and burn_in and srt_content:
+              filter_parts.append(
+                  f"[{cur_timeline_v}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled]"
+              )
+              cur_timeline_v = "v_subtitled"
+
           # 6. Аудио-микс (Omni 1.2 Flash + continuous_bed + E3 crack) и финальный loudnorm=I=-16:TP=-3:LRA=11
           mix_inputs = [f"[{cur_timeline_a}]"]
           mix_weights = [str(bed.get("veo_audio_weight", 0.85))]
@@ -691,7 +723,7 @@ jobs:
           with open("filter_complex.txt", "w", encoding="utf-8") as f:
               f.write(filter_complex_str)
 
-          out_name = cfg.get("output_filename") or f"render_output_{res}_{v_codec}_{fps}fps.mp4"
+          out_name = cfg.get("output_filename") or f"./output/render_output_{res}_{v_codec}_{fps}fps.mp4"
           cmd = [
               "ffmpeg", "-y",
               *ffmpeg_inputs,
@@ -704,7 +736,7 @@ jobs:
               "-c:a", "aac", "-b:a", a_bitrate,
               "-movflags", "+faststart", out_name
           ]
-          print("Running H.265 24fps FFmpeg command:", " ".join(cmd))
+          print("Running FFmpeg command:", " ".join(cmd))
           subprocess.run(cmd, check=True)
 
           if folder_id:
@@ -712,6 +744,12 @@ jobs:
                   "rclone", "copy", out_name, "gdrive:",
                   "--drive-root-folder-id", folder_id, "-P"
               ], check=True)
+              # Если subtitles.upload_srt === true: Rclone выгружает ./output/subtitles.srt на Google Диск вместе с готовым видео
+              if subs_enabled and upload_srt and os.path.exists(output_srt_path):
+                  subprocess.run([
+                      "rclone", "copy", output_srt_path, "gdrive:",
+                      "--drive-root-folder-id", folder_id, "-P"
+                  ], check=True)
           EOF`;
 
 export default function App() {
@@ -781,6 +819,12 @@ export default function App() {
   const [expectedAudioFilename, setExpectedAudioFilename] = useState<string>('');
   const [importedManifestName, setImportedManifestName] = useState<string>('');
   const [showFilterComplexPreview, setShowFilterComplexPreview] = useState<boolean>(true);
+
+  // Гибкая система субтитров для текущего манифеста (Hardsub / Softsub / Скачивание .SRT)
+  const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
+  const [loopUploadSrtToDrive, setLoopUploadSrtToDrive] = useState<boolean>(true);
+  const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'original'>('en');
+  const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>('');
 
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
@@ -2194,6 +2238,13 @@ export default function App() {
       finalVideoMap = 'v_master_out';
     }
 
+    if (loopBurnInSubtitles) {
+      filterLines.push(
+        `[${finalVideoMap}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled] # Hardsub (burn_in: true)`
+      );
+      finalVideoMap = 'v_subtitled';
+    }
+
     // 5) Синхронный аудиокроссфейд между актами (90 сек) + continuous_bed + loudnorm=I=-16:TP=-3:LRA=11
     let veoAudioChain = slotAudioLabels[0] || '0:a';
     if (slotAudioLabels.length > 1) {
@@ -2285,6 +2336,7 @@ export default function App() {
     actCrossfadeSec,
     finalBlackScreenEnabled,
     finalBlackScreenSec,
+    loopBurnInSubtitles,
     continuousBed,
     loopMasterAudio,
     calculatedProjectDurationSec,
@@ -2295,6 +2347,118 @@ export default function App() {
   ]);
 
   const ffmpegPreview = buildFFmpegFilterComplexPreview();
+
+  const formatSrtTimeFromSeconds = (sec: number): string => {
+    const safe = Math.max(0, sec);
+    const hrs = Math.floor(safe / 3600);
+    const mins = Math.floor((safe % 3600) / 60);
+    const secs = Math.floor(safe % 60);
+    const ms = Math.round((safe - Math.floor(safe)) * 1000);
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+  };
+
+  const buildLoopSrtContent = useCallback(
+    (lang: 'en' | 'ru' | 'es' | 'de' | 'original' = loopSubtitleLanguage): string => {
+      let cursor = 0;
+      const localizedDefaults: Record<'en' | 'ru' | 'es' | 'de' | 'original', string[]> = {
+        en: [
+          'Act I: The Frozen Perimeter & Distant Wind',
+          'Act II: Deepening Blizzard & Sub-Zero Resonance',
+          'Act III: Whiteout Horizon & Midnight Pulse',
+          'Act IV: Eye of the Storm & Silent Telemetry',
+          'Act V: Glacial Echoes & Heavy Snowfall',
+          'Act VI: Final Embers & Dawn Stillness'
+        ],
+        ru: [
+          'Акт I: Замерзший периметр и далекий шторм',
+          'Акт II: Усиливающаяся метель и низкочастотный гул',
+          'Акт III: Белый горизонт и полуночный импульс',
+          'Акт IV: Эпицентр бури и тихая телеметрия',
+          'Акт V: Ледниковое эхо и густой снегопад',
+          'Акт VI: Финальные искры и предрассветный штиль'
+        ],
+        es: [
+          'Acto I: El perímetro helado y el viento lejano',
+          'Acto II: Tormenta intensa y resonancia bajo cero',
+          'Acto III: Horizonte blanco y pulso de medianoche',
+          'Acto IV: El ojo de la tormenta y telemetría silenciosa',
+          'Acto V: Ecos glaciares y nevada intensa',
+          'Acto VI: Brasas finales y calma del amanecer'
+        ],
+        de: [
+          'Akt I: Der gefrorene Perimeter und ferner Wind',
+          'Akt II: Zunehmender Schneesturm und Sub-Zero-Resonanz',
+          'Akt III: Weißer Horizont und Mitternachtspuls',
+          'Akt IV: Auge des Sturms und stille Telemetrie',
+          'Akt V: Gletscherechos und starker Schneefall',
+          'Akt VI: Letzte Glut und Morgendämmerung'
+        ],
+        original: [
+          'Act I: The Frozen Perimeter & Distant Wind',
+          'Act II: Deepening Blizzard & Sub-Zero Resonance',
+          'Act III: Whiteout Horizon & Midnight Pulse',
+          'Act IV: Eye of the Storm & Silent Telemetry',
+          'Act V: Glacial Echoes & Heavy Snowfall',
+          'Act VI: Final Embers & Dawn Stillness'
+        ]
+      };
+
+      const blocks = timelineSlots.map((slot, idx) => {
+        const isLast = idx === timelineSlots.length - 1;
+        const overlap =
+          !isLast && slot.slot_transition_out.type !== 'none'
+            ? slot.slot_transition_out.duration_sec
+            : 0;
+        const effectiveDur = Math.max(5, slot.slot_duration_sec - overlap);
+        const start = cursor;
+        const end = cursor + effectiveDur - 0.5;
+        cursor += effectiveDur;
+
+        const rawTitle = (slot.act_title || slot.title || '').trim();
+        const fallbackList = localizedDefaults[lang] || localizedDefaults.en;
+        const lineText =
+          lang === 'original' && rawTitle
+            ? rawTitle
+            : fallbackList[idx % fallbackList.length];
+
+        return `${idx + 1}\n${formatSrtTimeFromSeconds(start)} --> ${formatSrtTimeFromSeconds(end)}\n${lineText}`;
+      });
+
+      return blocks.join('\n\n');
+    },
+    [timelineSlots, loopSubtitleLanguage]
+  );
+
+  const resolvedLoopSrtContent = loopSrtCustomContent.trim()
+    ? loopSrtCustomContent
+    : buildLoopSrtContent(loopSubtitleLanguage);
+
+  const handleDownloadLoopSrtFile = () => {
+    const fileName = `subtitles_${loopSubtitleLanguage}.srt`;
+    const srtPayload = loopSrtCustomContent.trim()
+      ? loopSrtCustomContent
+      : buildLoopSrtContent(loopSubtitleLanguage);
+    if (!loopSrtCustomContent.trim()) {
+      setLoopSrtCustomContent(srtPayload);
+    }
+    const blob = new Blob([srtPayload], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Файл ${fileName} скачан на устройство!`, 'success');
+  };
+
+  const loopSubtitlesManifestObj: SubtitlesFlexibleConfig = {
+    enabled: Boolean(loopBurnInSubtitles || loopUploadSrtToDrive),
+    burn_in: loopBurnInSubtitles,
+    upload_srt: loopUploadSrtToDrive,
+    language: loopSubtitleLanguage,
+    srt_filename: `subtitles_${loopSubtitleLanguage}.srt`,
+    srt_content: loopBurnInSubtitles || loopUploadSrtToDrive ? resolvedLoopSrtContent : ''
+  };
 
   // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (без хардкода)
   const currentManifest: LoopBuildManifest = {
@@ -2319,8 +2483,10 @@ export default function App() {
       crf: videoCrf,
       resolution: loopResolution,
       fps: videoFps,
-      audio_bitrate_kbps: audioBitrateKbps
+      audio_bitrate_kbps: audioBitrateKbps,
+      subtitles: loopSubtitlesManifestObj
     },
+    subtitles: loopSubtitlesManifestObj,
     crossfade_loop: seamlessStitchEnabled,
     seamless_mode: seamlessTransitionMode,
     act_crossfade_sec: actCrossfadeSec,
@@ -2861,6 +3027,34 @@ export default function App() {
     }
     if (typeof raw.audio_filename === 'string') {
       setExpectedAudioFilename(raw.audio_filename.trim());
+    }
+
+    // 10. Parse subtitles config from raw.subtitles or raw.export_settings.subtitles
+    const rawSubsObj =
+      (raw.subtitles && typeof raw.subtitles === 'object'
+        ? (raw.subtitles as Record<string, unknown>)
+        : undefined) ||
+      (exportSettingsObj?.subtitles && typeof exportSettingsObj.subtitles === 'object'
+        ? (exportSettingsObj.subtitles as Record<string, unknown>)
+        : undefined);
+    if (rawSubsObj) {
+      if (typeof rawSubsObj.burn_in === 'boolean') {
+        setLoopBurnInSubtitles(rawSubsObj.burn_in);
+      }
+      if (typeof rawSubsObj.upload_srt === 'boolean') {
+        setLoopUploadSrtToDrive(rawSubsObj.upload_srt);
+      }
+      if (typeof rawSubsObj.language === 'string') {
+        const l = rawSubsObj.language.toLowerCase();
+        if (l.startsWith('ru')) setLoopSubtitleLanguage('ru');
+        else if (l.startsWith('es')) setLoopSubtitleLanguage('es');
+        else if (l.startsWith('de')) setLoopSubtitleLanguage('de');
+        else if (l.startsWith('orig')) setLoopSubtitleLanguage('original');
+        else setLoopSubtitleLanguage('en');
+      }
+      if (typeof rawSubsObj.srt_content === 'string' && rawSubsObj.srt_content.trim()) {
+        setLoopSrtCustomContent(rawSubsObj.srt_content);
+      }
     }
 
     setImportedManifestName(sourceLabel);
@@ -4967,6 +5161,68 @@ export default function App() {
                   <span className="text-[11px] font-mono text-amber-300 bg-slate-950/80 px-2.5 py-1 rounded border border-amber-500/30">
                     CRF {videoCrf} • AAC {audioBitrateKbps}k
                   </span>
+                </div>
+
+                {/* ГИБКИЕ РЕЖИМЫ СУБТИТРОВ В ЦЕХЕ ЛУПОВ (currentManifest.export_settings.subtitles / subtitles) */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-indigo-300 uppercase flex items-center gap-1.5">
+                      <Subtitles className="w-3.5 h-3.5 text-indigo-400" /> Настройки субтитров (Hardsub / Softsub / .SRT):
+                    </span>
+                    <select
+                      value={loopSubtitleLanguage}
+                      onChange={e =>
+                        setLoopSubtitleLanguage(
+                          e.target.value as 'en' | 'ru' | 'es' | 'de' | 'original'
+                        )
+                      }
+                      className="bg-slate-900 border border-indigo-500/40 rounded-lg px-2 py-1 text-[11px] font-mono text-indigo-200 outline-none"
+                    >
+                      <option value="en">Lang: en (US English)</option>
+                      <option value="ru">Lang: ru (Русский)</option>
+                      <option value="es">Lang: es (Español)</option>
+                      <option value="de">Lang: de (Deutsch)</option>
+                      <option value="original">Lang: original</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-indigo-200 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={loopBurnInSubtitles}
+                        onChange={e => setLoopBurnInSubtitles(e.target.checked)}
+                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0"
+                      />
+                      <span>Вшить субтитры в видеоряд (Hardsub)</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-emerald-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={loopUploadSrtToDrive}
+                        onChange={e => setLoopUploadSrtToDrive(e.target.checked)}
+                        className="accent-emerald-500 w-3.5 h-3.5 shrink-0"
+                      />
+                      <span>Выгрузить файл субтитров (.srt) на Google Диск</span>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {loopBurnInSubtitles
+                        ? 'FFmpeg: -vf "subtitles=subtitles.srt:..."'
+                        : 'Чистый рендер без вшивания титров'}{' '}
+                      {loopUploadSrtToDrive ? '• Rclone -> ./output/subtitles.srt' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleDownloadLoopSrtFile}
+                      className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                    >
+                      📥 Скачать .SRT файл
+                    </button>
+                  </div>
                 </div>
 
                 {/* Быстрое поле ID папки Google Drive прямо в цехе */}
