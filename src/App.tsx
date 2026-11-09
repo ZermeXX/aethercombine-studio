@@ -37,6 +37,10 @@ import {
   CheckCircle2,
   CloudUpload
 } from 'lucide-react';
+import type { User } from 'firebase/auth';
+import { initDriveAuth } from './googleDriveAuth';
+import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
+import { MontageCombineView } from './components/MontageCombineView';
 interface ReleaseBufferProgress {
   active: boolean;
   current: number;
@@ -789,7 +793,9 @@ export default function App() {
 
   // GitHub & Google Drive Runner Configuration state
   const [ghToken, setGhToken] = useState<string>(() => localStorage.getItem('ac_gh_token') || '');
-  const [ghRepo, setGhRepo] = useState<string>(() => localStorage.getItem('ac_gh_repo') || '');
+  const [ghRepo, setGhRepo] = useState<string>(
+    () => localStorage.getItem('ac_gh_repo') || 'ZermeXX/aetherflow-render'
+  );
   const [ghBranch, setGhBranch] = useState<string>(() => localStorage.getItem('ac_gh_branch') || 'main');
   const [gdriveFolderId, setGdriveFolderId] = useState<string>(
     () => localStorage.getItem('ac_gdrive_folder_id') || ''
@@ -807,19 +813,42 @@ export default function App() {
   const [modalGdriveFolderId, setModalGdriveFolderId] = useState<string>('');
   const [modalGdriveSaKey, setModalGdriveSaKey] = useState<string>('');
 
-  // Cloud Render status bar state
+  // Состояние авторизации Google Drive (OAuth 2.0 Resumable Upload в текущую папку)
+  const [driveUser, setDriveUser] = useState<User | null>(null);
+  const [driveToken, setDriveToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = initDriveAuth(
+      (user, token) => {
+        setDriveUser(user);
+        setDriveToken(token);
+      },
+      () => {
+        setDriveUser(null);
+        setDriveToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Cloud Render status bar & GitHub Actions Polling state
   const [renderStatus, setRenderStatus] = useState<{
     visible: boolean;
+    status: 'idle' | 'running' | 'success' | 'failure';
     title: string;
     desc: string;
+    stepLabel: string;
     seconds: number;
     runUrl: string;
+    runId?: number;
   }>({
     visible: false,
+    status: 'idle',
     title: 'Облачный рендер запущен...',
     desc: 'GitHub Actions FFmpeg выполняет компиляцию кадров',
-    seconds: 15,
-    runUrl: '#'
+    stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
+    seconds: 0,
+    runUrl: 'https://github.com/ZermeXX/aetherflow-render/actions'
   });
 
   // Toast notifications
@@ -849,9 +878,105 @@ export default function App() {
     }, 4000);
   }, []);
 
-  // Timer effect when render status bar is active
+  // Двухтональный аккорд завершения через Web Audio API (без внешних mp3)
+  const playRenderSuccessChime = useCallback(() => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Первый тон аккорда (C5 + E5)
+      const playTone = (freq: number, startTime: number, duration: number, peakGain: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(peakGain, startTime + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.02);
+      };
+
+      playTone(523.25, now, 0.35, 0.16); // C5
+      playTone(659.25, now, 0.35, 0.12); // E5
+      // Второй тон аккорда (G5 + C6)
+      playTone(783.99, now + 0.16, 0.55, 0.18); // G5
+      playTone(1046.5, now + 0.16, 0.65, 0.14); // C6
+    } catch {
+      // Игнорируем блокировку автовоспроизведения браузером
+    }
+  }, []);
+
+  // Системное браузерное уведомление Notification API
+  const triggerBrowserRenderNotification = useCallback(() => {
+    try {
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'granted') {
+        new Notification('Рендер завершен', {
+          body: 'Видео успешно выгружено в вашу папку Google Drive'
+        });
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            new Notification('Рендер завершен', {
+              body: 'Видео успешно выгружено в вашу папку Google Drive'
+            });
+          }
+        });
+      }
+    } catch {
+      // Игнорируем ограничения iframe/браузера для Notification
+    }
+  }, []);
+
+  // Перевод имени шага GitHub Actions на понятный русский статус для нижней панели
+  const mapGitHubStepToRussian = useCallback((rawStepName?: string, stepIdx?: number): string => {
+    if (!rawStepName) {
+      return 'Шаг: Скачивание клипов из Google Drive...';
+    }
+    const lower = rawStepName.toLowerCase();
+    if (
+      lower.includes('upload') ||
+      lower.includes('выгруз') ||
+      (lower.includes('rclone') && (stepIdx ?? 0) > 4)
+    ) {
+      return 'Шаг: Выгрузка готового 4K мастера в Google Drive...';
+    }
+    if (
+      lower.includes('ffmpeg') ||
+      lower.includes('render') ||
+      lower.includes('autonomous') ||
+      lower.includes('loop') ||
+      lower.includes('сборк') ||
+      lower.includes('таймлайн')
+    ) {
+      return 'Шаг: Рендеринг и сборка таймлайна в FFmpeg...';
+    }
+    if (
+      lower.includes('download') ||
+      lower.includes('release') ||
+      lower.includes('asset') ||
+      lower.includes('checkout') ||
+      lower.includes('python') ||
+      lower.includes('install') ||
+      lower.includes('rclone') ||
+      lower.includes('drive') ||
+      lower.includes('скачив')
+    ) {
+      return 'Шаг: Скачивание клипов из Google Drive...';
+    }
+    return `Шаг: ${rawStepName}...`;
+  }, []);
+
+  // Динамический таймер прошедшего времени (ММ:СС), пока идет сборка
   useEffect(() => {
-    if (!renderStatus.visible) return;
+    if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const timer = setInterval(() => {
       setRenderStatus(prev => ({
         ...prev,
@@ -859,7 +984,151 @@ export default function App() {
       }));
     }, 1000);
     return () => clearInterval(timer);
-  }, [renderStatus.visible]);
+  }, [renderStatus.visible, renderStatus.status]);
+
+  // Автоматический опрос GitHub Actions (Polling каждые 6 секунд) после запуска сборки
+  useEffect(() => {
+    if (!renderStatus.visible || renderStatus.status !== 'running') return;
+    const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github.v3+json'
+    };
+    if (ghToken) {
+      headers.Authorization = `Bearer ${ghToken}`;
+    }
+
+    let isCancelled = false;
+
+    const pollGitHubActions = async () => {
+      try {
+        const runsRes = await fetch(
+          `https://api.github.com/repos/${targetRepo}/actions/runs?event=workflow_dispatch&per_page=1`,
+          { headers }
+        );
+        if (!runsRes.ok || isCancelled) return;
+
+        const runsData = (await runsRes.json()) as {
+          workflow_runs?: Array<{
+            id: number;
+            status: string;
+            conclusion: string | null;
+            html_url: string;
+          }>;
+        };
+
+        const latestRun = runsData.workflow_runs?.[0];
+        if (!latestRun || isCancelled) return;
+
+        const runId = latestRun.id;
+        const runUrl = latestRun.html_url || `https://github.com/${targetRepo}/actions`;
+
+        // Запрашиваем текущие шаги активного запуска
+        const jobsRes = await fetch(
+          `https://api.github.com/repos/${targetRepo}/actions/runs/${runId}/jobs`,
+          { headers }
+        );
+
+        let activeStepText = 'Шаг: Скачивание клипов из Google Drive...';
+        let failedStepName = '';
+
+        if (jobsRes.ok) {
+          const jobsData = (await jobsRes.json()) as {
+            jobs?: Array<{
+              steps?: Array<{
+                name: string;
+                status: string;
+                conclusion: string | null;
+                number?: number;
+              }>;
+            }>;
+          };
+          const steps = jobsData.jobs?.[0]?.steps || [];
+          const inProgressStep = steps.find(s => s.status === 'in_progress');
+          const failedStep = steps.find(s => s.conclusion === 'failure');
+
+          if (inProgressStep) {
+            activeStepText = mapGitHubStepToRussian(inProgressStep.name, inProgressStep.number);
+          } else if (steps.length > 0) {
+            const completedCount = steps.filter(s => s.status === 'completed').length;
+            if (completedCount >= steps.length - 1) {
+              activeStepText = 'Шаг: Выгрузка готового 4K мастера в Google Drive...';
+            } else if (completedCount >= 3) {
+              activeStepText = 'Шаг: Рендеринг и сборка таймлайна в FFmpeg...';
+            }
+          }
+
+          if (failedStep) {
+            failedStepName = failedStep.name;
+          }
+        }
+
+        if (isCancelled) return;
+
+        if (latestRun.status === 'completed') {
+          if (latestRun.conclusion === 'success') {
+            setRenderStatus(prev => ({
+              ...prev,
+              status: 'success',
+              runId,
+              runUrl,
+              title: '✅ Готово! 4K мастер успешно собран и выгружен на Google Drive',
+              stepLabel: 'Шаг: Выгрузка готового 4K мастера в Google Drive завершена (100%)'
+            }));
+            playRenderSuccessChime();
+            triggerBrowserRenderNotification();
+            showToast(
+              '✅ Готово! 4K мастер успешно собран и выгружен на Google Drive',
+              'success'
+            );
+          } else {
+            const errStepInfo = failedStepName
+              ? `на шаге «${failedStepName}»`
+              : `(статус: ${latestRun.conclusion || 'failure'})`;
+            setRenderStatus(prev => ({
+              ...prev,
+              status: 'failure',
+              runId,
+              runUrl,
+              title: `❌ Сбой облачной сборки ${errStepInfo}`,
+              stepLabel: failedStepName
+                ? `Ошибка на шаге: ${failedStepName}`
+                : 'Шаг завершился с ошибкой выполнения в GitHub Actions'
+            }));
+            showToast(`Ошибка рендера в GitHub Actions ${errStepInfo}`, 'error');
+          }
+        } else {
+          setRenderStatus(prev => ({
+            ...prev,
+            status: 'running',
+            runId,
+            runUrl,
+            stepLabel: activeStepText
+          }));
+        }
+      } catch {
+        // Сетевые задержки при опросе не прерывают таймер
+      }
+    };
+
+    // Первый опрос через 2 секунды после dispatch и далее каждые 6 секунд
+    const initialTimeout = setTimeout(pollGitHubActions, 2000);
+    const interval = setInterval(pollGitHubActions, 6000);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [
+    renderStatus.visible,
+    renderStatus.status,
+    ghRepo,
+    ghToken,
+    mapGitHubStepToRussian,
+    playRenderSuccessChime,
+    triggerBrowserRenderNotification,
+    showToast
+  ]);
 
   const formatTime = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -986,12 +1255,18 @@ export default function App() {
   };
 
   const showStatusBar = (title: string, desc: string, repo: string) => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    const cleanRepo = (repo || 'ZermeXX/aetherflow-render').trim();
     setRenderStatus({
       visible: true,
+      status: 'running',
       title,
       desc,
-      seconds: 15,
-      runUrl: repo ? `https://github.com/${repo}/actions` : '#'
+      stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
+      seconds: 0,
+      runUrl: `https://github.com/${cleanRepo}/actions`
     });
   };
 
@@ -1199,26 +1474,85 @@ export default function App() {
     [loopMedia, loopAudio, uploadedLoopAssets]
   );
 
+  // Автоматическая подстановка точных имен выбранных/загруженных файлов в свободные слоты таймлайна (без тестовых заглушек)
+  const handleLoopFilesSelected = useCallback(
+    (files: File[]) => {
+      if (!files.length) return;
+      const videoFiles: File[] = [];
+      const audioFiles: File[] = [];
+
+      files.forEach(f => {
+        const lower = f.name.toLowerCase();
+        if (
+          f.type.startsWith('audio/') ||
+          lower.endsWith('.mp3') ||
+          lower.endsWith('.wav') ||
+          lower.endsWith('.aac') ||
+          lower.endsWith('.flac')
+        ) {
+          audioFiles.push(f);
+        } else {
+          videoFiles.push(f);
+        }
+      });
+
+      if (videoFiles.length > 0) {
+        setLoopMedia(videoFiles[0]);
+      }
+      if (audioFiles.length > 0) {
+        setLoopAudio(audioFiles[0]);
+        setContinuousBed(prev => ({
+          ...prev,
+          enabled: true,
+          file_name: audioFiles[0].name
+        }));
+      }
+
+      setUploadedLoopAssets(prev => {
+        const next = { ...prev };
+        files.forEach(f => {
+          next[f.name] = f;
+        });
+        return next;
+      });
+
+      // Автоматически заполняем свободные слоты (где file_name пустой '') реальными именами выбранных видеофайлов
+      if (videoFiles.length > 0) {
+        setTimelineSlots(prev => {
+          const next = [...prev];
+          let qIdx = 0;
+          for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
+            if (!next[i].file_name.trim()) {
+              const exactName = videoFiles[qIdx].name;
+              next[i] = {
+                ...next[i],
+                file_name: exactName,
+                base_content: {
+                  ...(next[i].base_content || {}),
+                  file_name: exactName
+                }
+              };
+              qIdx += 1;
+            }
+          }
+          return next;
+        });
+      }
+
+      showToast(
+        `Файлы добавлены (${files.length} шт.) — их точные имена автоматически подставлены в свободные слоты!`,
+        'success'
+      );
+    },
+    [showToast]
+  );
+
   // Пакетная загрузка файлов в дропзону (слоты + вставки E1..En + фоновый звук)
   const handleLoopMedia = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || !fileList.length) return;
     const files: File[] = Array.from(fileList);
-    setLoopMedia(files[0]);
-
-    setUploadedLoopAssets(prev => {
-      const next = { ...prev };
-      files.forEach(f => {
-        next[f.name] = f;
-      });
-      return next;
-    });
-
-    if (expectedVideoFilename && files.some(f => f.name === expectedVideoFilename)) {
-      showToast(`Файл «${expectedVideoFilename}» успешно сопоставлен с манифестом!`, 'success');
-    } else {
-      showToast(`В пул ассетов таймлайна загружено файлов: ${files.length}`, 'success');
-    }
+    handleLoopFilesSelected(files);
     e.target.value = '';
   };
 
@@ -1841,7 +2175,7 @@ export default function App() {
     }))
   };
 
-  const encodeManifestBase64 = (manifestObj: LoopBuildManifest): string => {
+  const encodeManifestBase64 = (manifestObj: unknown): string => {
     const jsonStr = JSON.stringify(manifestObj);
     try {
       return btoa(jsonStr);
@@ -2927,16 +3261,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#0b0f17] text-[#e2e8f0]">
-      {/* ШАПКА ПРИЛОЖЕНИЯ */}
-      <header className="bg-[#111622] border-b border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50">
+      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar с цветными акцентными иконками) */}
+      <header className="bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg shadow-black/40">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/10">
-            <Layers className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20">
+            <Layers className="w-6 h-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-wider text-slate-100 flex items-center gap-2">
-              AETHER<span className="text-amber-500">COMBINE</span>
-              <span className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold px-2 py-0.5 rounded">
+              AETHER<span className="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]">COMBINE</span>
+              <span className="text-[10px] bg-amber-500/15 border border-amber-400/40 text-amber-300 font-semibold px-2 py-0.5 rounded shadow-sm shadow-amber-500/10">
                 PRO 4K • ARGON
               </span>
             </h1>
@@ -2946,79 +3280,124 @@ export default function App() {
           </div>
         </div>
 
-        {/* Вкладки студии */}
-        <nav className="flex flex-wrap items-center bg-[#0b0f17] p-1 rounded-xl border border-slate-800">
+        {/* Верхнее навигационное меню с цветными акцентами */}
+        <nav className="flex flex-wrap items-center gap-1 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner">
+          {/* 1. Комбайн монтажа (60+ сцен): кинематографичный фиолетово-синий акцент (#818cf8 / text-indigo-400) */}
           <button
             onClick={() => setActiveTab('combine')}
             id="tab-combine"
-            className={`tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'combine'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-400/50 shadow-[0_0_15px_rgba(129,140,248,0.28)]'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
             }`}
           >
-            <Clapperboard className="w-4 h-4" /> Комбайн монтажа (60+ сцен)
+            <Clapperboard
+              className={`w-4 h-4 text-indigo-400 transition-transform duration-200 group-hover:scale-110 ${
+                activeTab === 'combine'
+                  ? 'drop-shadow-[0_0_8px_rgba(129,140,248,0.85)]'
+                  : 'drop-shadow-[0_0_4px_rgba(129,140,248,0.45)]'
+              }`}
+            />
+            <span>Комбайн монтажа (60+ сцен)</span>
           </button>
+
+          {/* 2. Многочасовой Луп (N-Слотов): яркий янтарно-оранжевый (#fbbf24 / text-amber-400 с эффектом свечения) */}
           <button
             onClick={() => setActiveTab('loop')}
             id="tab-loop"
-            className={`tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'loop'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-500/20 text-amber-200 border border-amber-400/60 shadow-[0_0_18px_rgba(251,191,36,0.35)]'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
             }`}
           >
-            <Repeat className="w-4 h-4" /> Многочасовой Луп (N-Слотов)
+            <Repeat
+              className={`w-4 h-4 text-amber-400 transition-transform duration-200 group-hover:scale-110 ${
+                activeTab === 'loop'
+                  ? 'drop-shadow-[0_0_10px_rgba(251,191,36,0.95)]'
+                  : 'drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]'
+              }`}
+            />
+            <span>Многочасовой Луп (N-Слотов)</span>
           </button>
+
+          {/* 3. Студия 4K Превью: неоновый изумрудно-бирюзовый (#34d399 / text-emerald-400) */}
           <button
             onClick={() => setActiveTab('thumb')}
             id="tab-thumb"
-            className={`tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'thumb'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/50 shadow-[0_0_15px_rgba(52,211,153,0.3)]'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
             }`}
           >
-            <ImageIcon className="w-4 h-4" /> Студия 4K Превью
+            <ImageIcon
+              className={`w-4 h-4 text-emerald-400 transition-transform duration-200 group-hover:scale-110 ${
+                activeTab === 'thumb'
+                  ? 'drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]'
+                  : 'drop-shadow-[0_0_4px_rgba(52,211,153,0.45)]'
+              }`}
+            />
+            <span>Студия 4K Превью</span>
           </button>
+
+          {/* 4. Вирусный Текст & Хуки: яркий электрический жёлтый / молния (#fde047 / text-yellow-300) */}
           <button
             onClick={() => setActiveTab('hooks')}
             id="tab-hooks"
-            className={`tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
               activeTab === 'hooks'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-yellow-400/20 text-yellow-100 border border-yellow-300/60 shadow-[0_0_16px_rgba(253,224,71,0.32)]'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
             }`}
           >
-            <Zap className="w-4 h-4" /> 🪝 Вирусный Текст &amp; Хуки
+            <Zap
+              className={`w-4 h-4 text-yellow-300 fill-yellow-300/25 transition-transform duration-200 group-hover:scale-110 ${
+                activeTab === 'hooks'
+                  ? 'drop-shadow-[0_0_9px_rgba(253,224,71,0.95)]'
+                  : 'drop-shadow-[0_0_5px_rgba(253,224,71,0.55)]'
+              }`}
+            />
+            <span>Вирусный Текст &amp; Хуки</span>
           </button>
         </nav>
 
-        {/* GitHub Связь */}
+        {/* Информационная строка статуса GitHub («ZermeXX/aetherflow-render») и «GDrive Ready» */}
         <div className="flex flex-wrap items-center gap-2.5">
-
           <button
             onClick={openConfigModal}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer"
+            className="group flex items-center gap-2.5 bg-[#0f172a] hover:bg-slate-800/90 border border-slate-700/90 hover:border-purple-400/50 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-200 transition-all duration-200 cursor-pointer shadow-md"
           >
-            <Github className="w-4 h-4 text-amber-500" />
+            <span className="relative flex items-center justify-center w-5 h-5 rounded-md bg-gradient-to-br from-amber-400/20 via-orange-500/20 to-purple-500/25 border border-amber-400/40 shadow-[0_0_10px_rgba(245,158,11,0.25)]">
+              <Github className="w-3.5 h-3.5 text-amber-400 group-hover:text-purple-300 transition-colors drop-shadow-[0_0_6px_rgba(251,191,36,0.75)]" />
+            </span>
             <span
               id="gh-status-indicator"
               className={`w-2 h-2 rounded-full ${
-                isGhConnected ? 'bg-emerald-500' : 'bg-rose-500'
+                isGhConnected
+                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
+                  : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
               }`}
             />
-            <span id="gh-status-text">
-              {isGhConnected ? ghRepo : 'GitHub не настроен'}
+            <span
+              id="gh-status-text"
+              className="font-mono text-[11px] bg-gradient-to-r from-amber-300 via-orange-200 to-purple-300 bg-clip-text text-transparent font-semibold"
+            >
+              {ghRepo || 'ZermeXX/aetherflow-render'}
             </span>
-            <span className="text-slate-600">|</span>
-            <HardDrive
-              className={`w-3.5 h-3.5 ${
-                isGdriveConfigured ? 'text-emerald-400' : 'text-slate-500'
-              }`}
-            />
-            <span className="text-[11px] text-slate-400">
-              {isGdriveConfigured ? 'GDrive Ready' : 'GDrive Off'}
+            <span className="text-slate-700">|</span>
+            <span className="flex items-center gap-1.5">
+              <HardDrive
+                className={`w-4 h-4 ${
+                  isGdriveConfigured
+                    ? 'text-emerald-400 drop-shadow-[0_0_7px_rgba(52,211,153,0.8)]'
+                    : 'text-emerald-400/75 drop-shadow-[0_0_4px_rgba(52,211,153,0.4)]'
+                }`}
+              />
+              <span className="text-[11px] font-semibold text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.35)]">
+                GDrive Ready
+              </span>
             </span>
           </button>
         </div>
@@ -3027,212 +3406,34 @@ export default function App() {
       {/* ОСНОВНОЙ КОНТЕНТ */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
         {/* =========================================
-            ЦЕХ 1: КОМБАЙН МОНТАЖА ИЗ СЦЕН
+            ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
            ========================================= */}
         <section
           id="view-combine"
           className={`studio-view space-y-6 ${activeTab === 'combine' ? '' : 'hidden'}`}
         >
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <Film className="text-amber-500 w-5 h-5" /> Сборка ролика из отдельных сцен
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Пакетная склейка анимированных кадров со звуковой дорожкой через GitHub Actions FFmpeg
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <select
-                  id="film-format"
-                  value={filmFormat}
-                  onChange={e => setFilmFormat(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2 outline-none focus:border-amber-500"
-                >
-                  <option value="16:9">Горизонтальный 16:9 (YouTube 4K)</option>
-                  <option value="9:16">Вертикальный 9:16 (Shorts/Reels)</option>
-                </select>
-                <select
-                  id="film-resolution"
-                  value={filmResolution}
-                  onChange={e => setFilmResolution(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2 outline-none focus:border-amber-500"
-                >
-                  <option value="4k">4K Ultra HD (3840x2160)</option>
-                  <option value="1080p">Full HD (1920x1080)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Привязанный сценарий из VerbaFlow (если перенесен) */}
-            {transferredScript && (
-              <div className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-400 flex items-center gap-2">
-                    <FileText className="w-4 h-4" /> Сценарий из модуля VerbaFlow синхронизирован с таймлайном
-                  </span>
-                  <button
-                    onClick={() => setTransferredScript('')}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
-                    Скрыть текст
-                  </button>
-                </div>
-                <pre className="text-xs text-slate-300 whitespace-pre-wrap font-sans max-h-28 overflow-y-auto custom-scroll leading-relaxed">
-                  {transferredScript}
-                </pre>
-              </div>
-            )}
-
-            {/* Дропзона файлов сцен */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div
-                onClick={() => scenesInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-6 text-center cursor-pointer transition bg-[#0b0f17]/50"
-              >
-                <input
-                  ref={scenesInputRef}
-                  type="file"
-                  id="scenes-files"
-                  multiple
-                  accept="video/*,image/*"
-                  className="hidden"
-                  onChange={handleSceneFiles}
-                />
-                <FolderUp className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-                <p className="text-sm font-semibold text-slate-200">
-                  Загрузите пачку сцен (до 100 файлов)
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  MP4, WebM или статичные 4K кадры (авто-применение Ken Burns FX)
-                </p>
-              </div>
-
-              <div
-                onClick={() => audioInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-6 text-center cursor-pointer transition bg-[#0b0f17]/50"
-              >
-                <input
-                  ref={audioInputRef}
-                  type="file"
-                  id="audio-file"
-                  accept="audio/*"
-                  className="hidden"
-                  onChange={handleAudioFile}
-                />
-                <Music className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-                <p className="text-sm font-semibold text-slate-200" id="audio-label">
-                  {audioFile
-                    ? `🎵 ${audioFile.name}`
-                    : 'Загрузите аудиодорожку (Голос / SFX)'}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  MP3, WAV, AAC или голосовой мастер-трек
-                </p>
-              </div>
-            </div>
-
-            {/* Визуальная лента таймлайна (Film Strip) */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                  <LayoutGrid className="w-3.5 h-3.5" /> Лента сцен (
-                  <span id="scenes-count">{scenes.length}</span>):
-                </span>
-                <button
-                  onClick={clearScenes}
-                  className="text-xs text-rose-400 hover:text-rose-300 cursor-pointer"
-                >
-                  Очистить ленту
-                </button>
-              </div>
-              <div
-                id="film-strip"
-                className="flex gap-3 overflow-x-auto custom-scroll pb-3 min-h-[120px] bg-[#0b0f17] p-3 rounded-xl border border-slate-800"
-              >
-                {scenes.length === 0 ? (
-                  <div className="text-xs text-slate-600 flex items-center justify-center w-full">
-                    Лента пуста. Добавьте видеофрагменты, изображения или перенесите сценарий из вкладки «Вирусный Текст &amp; Хуки».
-                  </div>
-                ) : (
-                  scenes.map((sc, idx) => (
-                    <div
-                      key={sc.id}
-                      className="relative flex-shrink-0 w-40 h-24 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 group"
-                    >
-                      {sc.type === 'video' ? (
-                        <>
-                          <video
-                            src={sc.url}
-                            className="w-full h-full object-cover"
-                            muted
-                          />
-                          <span className="absolute bottom-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-[10px] text-amber-400">
-                            #{idx + 1} 🎬 {sc.duration}s
-                          </span>
-                        </>
-                      ) : sc.type === 'image' ? (
-                        <>
-                          <img
-                            src={sc.url}
-                            alt={sc.name}
-                            className="w-full h-full object-cover"
-                          />
-                          <span className="absolute bottom-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-[10px] text-sky-400">
-                            #{idx + 1} 📸 KenBurns
-                          </span>
-                        </>
-                      ) : (
-                        <div className="w-full h-full p-2 flex flex-col justify-between bg-gradient-to-br from-slate-900 to-slate-950">
-                          <p className="text-[10px] text-slate-300 line-clamp-3 leading-tight">
-                            {sc.subtitle}
-                          </p>
-                          <span className="bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 rounded text-[9px] text-amber-300 self-start">
-                            #{idx + 1} 📝 Сцена {sc.duration}s
-                          </span>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => removeScene(idx)}
-                        className="absolute top-1 right-1 w-5 h-5 bg-rose-500/80 hover:bg-rose-600 text-white rounded flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Нижняя панель запуска */}
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
-              <div className="space-y-1">
-                <div className="text-xs text-slate-400">
-                  Расчетный хронометраж ролика:{' '}
-                  <span id="total-duration" className="font-bold text-amber-400">
-                    {formatTime(totalDurationSec)}
-                  </span>
-                </div>
-                {(releaseBufferProgress.active || releaseBufferProgress.completed) && (
-                  <div className="text-xs font-mono text-amber-300">
-                    Отправка ассетов в облачный буфер: [{releaseBufferProgress.current} /{' '}
-                    {releaseBufferProgress.total}] ...
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={startFilmRender}
-                disabled={releaseBufferProgress.active}
-                className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer disabled:opacity-60"
-              >
-                <Play className="w-4 h-4 fill-current" />{' '}
-                {releaseBufferProgress.active
-                  ? `Отправка ассетов в облачный буфер: [${releaseBufferProgress.current} / ${releaseBufferProgress.total}] ...`
-                  : 'Запустить облачную сборку (GitHub Actions)'}
-              </button>
-            </div>
-          </div>
+          <MontageCombineView
+            ghToken={ghToken}
+            ghRepo={ghRepo}
+            ghBranch={ghBranch}
+            gdriveFolderId={gdriveFolderId}
+            onGdriveFolderIdChange={newFolder => {
+              setGdriveFolderId(newFolder);
+              localStorage.setItem('ac_gdrive_folder_id', newFolder);
+            }}
+            driveUser={driveUser}
+            driveToken={driveToken}
+            onDriveAuthChange={(u, t) => {
+              setDriveUser(u);
+              setDriveToken(t);
+            }}
+            transferredScript={transferredScript}
+            onClearTransferredScript={() => setTransferredScript('')}
+            onOpenConfigModal={openConfigModal}
+            onStartRenderStatus={showStatusBar}
+            onNotify={showToast}
+            encodeManifestBase64={encodeManifestBase64}
+          />
         </section>
 
         {/* =========================================
@@ -3405,6 +3606,26 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* ПРЯМАЯ DRAG-AND-DROP ВЫГРУЗКА ИСХОДНИКОВ СЛОТОВ В ТЕКУЩУЮ ПАПКУ GOOGLE DRIVE (RESUMABLE UPLOAD) */}
+            <GoogleDriveDirectUploader
+              targetFolderId={gdriveFolderId}
+              onTargetFolderIdChange={newFolder => {
+                setGdriveFolderId(newFolder);
+                localStorage.setItem('ac_gdrive_folder_id', newFolder);
+              }}
+              driveUser={driveUser}
+              driveToken={driveToken}
+              onAuthChange={(u, t) => {
+                setDriveUser(u);
+                setDriveToken(t);
+              }}
+              onFilesSelected={handleLoopFilesSelected}
+              onNotify={showToast}
+              accentColor="amber"
+              title="Прямая загрузка исходных видеоклипов в текущую папку Google Drive (Resumable Upload)"
+              subtitle="Перетащите исходные видеоклипы сюда или выберите файлы — они выгружаются строго в указанную папку Google Drive, а их точные имена автоматически подставляются в свободные слоты таймлайна"
+            />
 
             {/* 1 & 2. ДРОПЗОНА ПАКЕТНОЙ ПРИВЯЗКИ АССЕТОВ (СЛОТЫ 10С + ВСТАВКИ E1..E3 + OMNI 1.2 FLASH BED) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -4973,38 +5194,144 @@ export default function App() {
           </div>
         </section>
 
-        {/* СТАТУС БАР ОБЛАЧНОГО РЕНДЕРА (НИЖНЯЯ ПЛАШКА) */}
+        {/* СТАТУС БАР ОБЛАЧНОГО РЕНДЕРА (НИЖНЯЯ ПЛАШКА С POLLING GITHUB ACTIONS) */}
         {renderStatus.visible && (
           <div
             id="render-status-bar"
-            className="bg-[#111622] border border-amber-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xl"
+            className={`bg-[#0f172a] border rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xl transition-all duration-300 ${
+              renderStatus.status === 'success'
+                ? 'border-emerald-400/60 shadow-[0_0_25px_rgba(52,211,153,0.18)]'
+                : renderStatus.status === 'failure'
+                ? 'border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.18)]'
+                : 'border-amber-400/50 shadow-[0_0_25px_rgba(251,191,36,0.14)]'
+            }`}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-amber-500 animate-ping" />
-              <div>
-                <p className="text-xs font-bold text-slate-200" id="render-status-title">
+            <div className="flex items-center gap-3.5">
+              {/* Цветовой индикатор состояния: янтарно-индиговый пульс при рендере, зеленый при успехе, красный при сбое */}
+              <div className="relative flex items-center justify-center w-4 h-4">
+                {renderStatus.status === 'running' && (
+                  <>
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-gradient-to-tr from-amber-400 to-indigo-400 shadow-[0_0_10px_#fbbf24]" />
+                  </>
+                )}
+                {renderStatus.status === 'success' && (
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-400 shadow-[0_0_12px_#34d399]" />
+                )}
+                {renderStatus.status === 'failure' && (
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500 shadow-[0_0_12px_#f43f5e]" />
+                )}
+              </div>
+
+              <div className="space-y-0.5">
+                <p
+                  className={`text-xs font-bold ${
+                    renderStatus.status === 'success'
+                      ? 'text-emerald-300'
+                      : renderStatus.status === 'failure'
+                      ? 'text-rose-300'
+                      : 'text-slate-100'
+                  }`}
+                  id="render-status-title"
+                >
                   {renderStatus.title}
+                </p>
+                <p
+                  className={`text-xs font-medium ${
+                    renderStatus.status === 'success'
+                      ? 'text-emerald-400/90'
+                      : renderStatus.status === 'failure'
+                      ? 'text-rose-400/90'
+                      : 'text-amber-300'
+                  }`}
+                  id="render-status-step"
+                >
+                  {renderStatus.stepLabel}
                 </p>
                 <p className="text-[11px] text-slate-400" id="render-status-desc">
                   {renderStatus.desc}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Быстрый переключатель шагов для предпросмотра/тестирования и ручного обновления */}
+              {renderStatus.status === 'running' && (
+                <div className="hidden xl:flex items-center gap-1 bg-[#090d16] px-2 py-1 rounded-lg border border-slate-800 text-[10px] text-slate-400">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRenderStatus(prev => ({
+                        ...prev,
+                        stepLabel: 'Шаг: Скачивание клипов из Google Drive...'
+                      }))
+                    }
+                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                      renderStatus.stepLabel.includes('Скачивание')
+                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/40'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    1. Скачивание
+                  </button>
+                  <span>→</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRenderStatus(prev => ({
+                        ...prev,
+                        stepLabel: 'Шаг: Рендеринг и сборка таймлайна в FFmpeg...'
+                      }))
+                    }
+                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                      renderStatus.stepLabel.includes('FFmpeg')
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    2. FFmpeg
+                  </button>
+                  <span>→</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRenderStatus(prev => ({
+                        ...prev,
+                        stepLabel: 'Шаг: Выгрузка готового 4K мастера в Google Drive...'
+                      }))
+                    }
+                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                      renderStatus.stepLabel.includes('Выгрузка')
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    3. Выгрузка GDrive
+                  </button>
+                </div>
+              )}
+
               <span
                 id="render-timer"
-                className="text-xs font-mono text-amber-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800"
+                className={`text-xs font-mono px-3 py-1.5 rounded-lg border ${
+                  renderStatus.status === 'success'
+                    ? 'text-emerald-300 bg-emerald-950/40 border-emerald-500/40'
+                    : renderStatus.status === 'failure'
+                    ? 'text-rose-300 bg-rose-950/40 border-rose-500/40'
+                    : 'text-amber-300 bg-[#090d16] border-slate-800'
+                }`}
               >
                 {formatTime(renderStatus.seconds)}
               </span>
+
               <a
                 id="gh-run-link"
                 href={renderStatus.runUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-slate-300 hover:text-amber-400 flex items-center gap-1"
+                className="text-xs font-semibold text-indigo-300 hover:text-amber-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-400/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition"
               >
-                Смотреть лог в GitHub <ExternalLink className="w-3 h-3" />
+                Смотреть лог в GitHub <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
               </a>
             </div>
           </div>
