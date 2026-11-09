@@ -1172,12 +1172,12 @@ export default function App() {
       ? 'YouTube Standard'
       : 'Эконом';
 
-  // Handle batch scene upload
+  // Handle batch scene upload (unlimited N-scenes)
   const handleSceneFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || !fileList.length) return;
     const files: File[] = Array.from(fileList);
-    const newScenes: SceneItem[] = files.slice(0, 100).map((file: File) => ({
+    const newScenes: SceneItem[] = files.map((file: File) => ({
       id: Math.random().toString(36).substring(7),
       name: file.name,
       file,
@@ -3282,7 +3282,7 @@ export default function App() {
 
         {/* Верхнее навигационное меню с цветными акцентами */}
         <nav className="flex flex-wrap items-center gap-1 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner">
-          {/* 1. Комбайн монтажа (60+ сцен): кинематографичный фиолетово-синий акцент (#818cf8 / text-indigo-400) */}
+          {/* 1. Повествовательный монтаж (8–16 мин / 100+ сцен): кинематографичный фиолетово-синий акцент (#818cf8 / text-indigo-400) */}
           <button
             onClick={() => setActiveTab('combine')}
             id="tab-combine"
@@ -3299,7 +3299,7 @@ export default function App() {
                   : 'drop-shadow-[0_0_4px_rgba(129,140,248,0.45)]'
               }`}
             />
-            <span>Комбайн монтажа (60+ сцен)</span>
+            <span>Повествовательный монтаж (8–16 мин / 100+ сцен)</span>
           </button>
 
           {/* 2. Многочасовой Луп (N-Слотов): яркий янтарно-оранжевый (#fbbf24 / text-amber-400 с эффектом свечения) */}

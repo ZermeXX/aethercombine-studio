@@ -17,12 +17,11 @@ import {
   CloudUpload,
   CheckCircle2,
   LayoutGrid,
-  Sparkles
+  Sparkles,
+  Search
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import {
-  GoogleDriveDirectUploader
-} from './GoogleDriveDirectUploader';
+import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
 import {
   googleDriveSignIn,
   getDriveAccessToken,
@@ -116,6 +115,11 @@ const parseTimecodeToSec = (val: unknown, fallbackSec: number): number => {
   return fallbackSec;
 };
 
+// Параметры виртуализации компактной строчной сетки (для 100–200+ сцен без перегрузки DOM)
+const ROW_HEIGHT = 44;
+const VIEWPORT_HEIGHT = 484;
+const OVERSCAN_ROWS = 8;
+
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ghToken,
   ghRepo,
@@ -132,11 +136,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onNotify,
   encodeManifestBase64
 }) => {
-  // Список сцен повествовательного видео (без захардкоженных имен-заглушек)
+  // Динамический массив сцен любой длины (80, 120, 160, 200+ сцен без лимитов и без тестовых заглушек)
   const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() =>
-    Array.from({ length: 6 }, (_, idx) => ({
+    Array.from({ length: 12 }, (_, idx) => ({
       scene_index: idx + 1,
-      scene_id: `SCENE_${String(idx + 1).padStart(2, '0')}`,
+      scene_id: `SCENE_${String(idx + 1).padStart(3, '0')}`,
       file_name: '',
       start_time: formatTimecode(idx * 6),
       duration: 6,
@@ -147,6 +151,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       text_overlay: ''
     }))
   );
+
+  // Состояние скролла и фильтра для виртуализированной компактной сетки
+  const [scrollTop, setScrollTop] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [customScenesCountInput, setCustomScenesCountInput] = useState<number>(120);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Общая мастер-аудиодорожка (.mp3 / .wav)
   const [masterAudio, setMasterAudio] = useState<MasterAudioConfig>({
@@ -167,7 +177,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     uploaded: false
   });
 
-  // Параметры кодирования для 60+ сцен
+  // Параметры кодирования для N-сцен
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
     resolution: '4k',
     aspect_ratio: '16:9',
@@ -189,7 +199,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     let cursorSec = 0;
     return list.map((item, idx) => {
       const startStr = formatTimecode(cursorSec);
-      const dur = Math.max(1, Number(item.duration) || 6);
+      const dur = Math.max(0.5, Number(item.duration) || 6);
       cursorSec += dur;
       return {
         ...item,
@@ -197,6 +207,29 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         start_time: startStr
       };
     });
+  };
+
+  // Расчет полного хронометража всех сцен (8–16+ минут / любое число сцен)
+  const calcTotalDurationSec = (scenesList: NarrativeSceneItem[]): number => {
+    return scenesList.reduce((acc, sc, idx) => {
+      const isLast = idx === scenesList.length - 1;
+      const overlap =
+        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
+          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
+          : 0;
+      return acc + Math.max(0.5, Number(sc.duration) || 0) - overlap;
+    }, 0);
+  };
+
+  const totalNarrativeDurationSec = useMemo(
+    () => calcTotalDurationSec(narrativeScenes),
+    [narrativeScenes]
+  );
+
+  const calcTotalDuration = (scenesList: NarrativeSceneItem[]): string => {
+    const totalSec = calcTotalDurationSec(scenesList);
+    const mins = (totalSec / 60).toFixed(1);
+    return `${formatTimecode(totalSec)} (${mins} мин / ${Math.round(totalSec)} сек)`;
   };
 
   // Автоматическая подстановка точных имен выбранных/загруженных файлов в свободные слоты сцен (или мастер-аудио)
@@ -249,12 +282,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           }
         }
 
-        // 2. Если файлов больше, чем свободных слотов — создаем новые сцены с реальными именами файлов
+        // 2. Если файлов больше, чем свободных слотов — динамически расширяем список без каких-либо лимитов (100, 150, 200+ сцен)
         while (fileQueueIdx < videoOrImageFiles.length) {
           const newIdx = next.length + 1;
           next.push({
             scene_index: newIdx,
-            scene_id: `SCENE_${String(newIdx).padStart(2, '0')}`,
+            scene_id: `SCENE_${String(newIdx).padStart(3, '0')}`,
             file_name: videoOrImageFiles[fileQueueIdx].name,
             start_time: '00:00',
             duration: 6,
@@ -279,8 +312,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     );
   };
 
-  // Универсальный динамический парсер JSON-сценария (60+ сцен)
+  // Универсальный динамический парсер JSON-сценария любого размера (80, 120, 160, 200+ сцен без ограничений)
   const applyNarrativeScenarioJson = (raw: Record<string, unknown>, fileNameLabel: string) => {
+    const timelineSub =
+      raw.timeline && typeof raw.timeline === 'object'
+        ? (raw.timeline as Record<string, unknown>)
+        : undefined;
+
     const rawScenesArray = Array.isArray(raw.scenes)
       ? raw.scenes
       : Array.isArray(raw.timeline_slots)
@@ -289,6 +327,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       ? raw.slots
       : Array.isArray(raw.items)
       ? raw.items
+      : Array.isArray(timelineSub?.scenes)
+      ? (timelineSub?.scenes as unknown[])
+      : Array.isArray(timelineSub?.timeline_slots)
+      ? (timelineSub?.timeline_slots as unknown[])
+      : Array.isArray(timelineSub?.slots)
+      ? (timelineSub?.slots as unknown[])
       : null;
 
     if (rawScenesArray && rawScenesArray.length > 0) {
@@ -365,7 +409,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           return {
             scene_index: idx + 1,
             scene_id: String(
-              sc.scene_id || sc.slot_id || sc.id || `SCENE_${String(idx + 1).padStart(2, '0')}`
+              sc.scene_id || sc.slot_id || sc.id || `SCENE_${String(idx + 1).padStart(3, '0')}`
             ),
             file_name: rawFileName,
             start_time:
@@ -383,6 +427,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
       if (parsedScenes.length > 0) {
         setNarrativeScenes(parsedScenes);
+        setCustomScenesCountInput(parsedScenes.length);
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+          setScrollTop(0);
+        }
       }
     }
 
@@ -508,7 +557,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         ...prev,
         {
           scene_index: nextNum,
-          scene_id: `SCENE_${String(nextNum).padStart(2, '0')}`,
+          scene_id: `SCENE_${String(nextNum).padStart(3, '0')}`,
           file_name: '',
           start_time: '00:00',
           duration: 6,
@@ -523,13 +572,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     });
   };
 
-  const generate60ScenesTemplate = () => {
+  // Генерация произвольного числа сцен (80, 120, 160, 200+ сцен для роликов 8–16 минут)
+  const generateNScenesTemplate = (targetCount: number) => {
+    const safeCount = Math.max(1, Math.floor(targetCount));
     setNarrativeScenes(prev => {
-      const generated: NarrativeSceneItem[] = Array.from({ length: 60 }, (_, idx) => {
+      const generated: NarrativeSceneItem[] = Array.from({ length: safeCount }, (_, idx) => {
         const existing = prev[idx];
         return {
           scene_index: idx + 1,
-          scene_id: existing?.scene_id || `SCENE_${String(idx + 1).padStart(2, '0')}`,
+          scene_id: existing?.scene_id || `SCENE_${String(idx + 1).padStart(3, '0')}`,
           file_name: existing?.file_name || '',
           start_time: formatTimecode(idx * (existing?.duration || 6)),
           duration: existing?.duration || 6,
@@ -542,7 +593,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       });
       return recalculateStartTimes(generated);
     });
-    onNotify('Сформирована сетка таймлайна на 60 сцен (с сохранением введенных имен файлов)', 'info');
+    setCustomScenesCountInput(safeCount);
+    onNotify(
+      `Сформирована сетка таймлайна на ${safeCount} сцен (~${((safeCount * 6) / 60).toFixed(
+        1
+      )} мин) с сохранением введенных имен файлов!`,
+      'info'
+    );
   };
 
   const removeScene = (idx: number) => {
@@ -629,20 +686,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
   };
 
-  const totalNarrativeDurationSec = useMemo(
-    () =>
-      narrativeScenes.reduce((acc, sc, idx) => {
-        const isLast = idx === narrativeScenes.length - 1;
-        const overlap =
-          !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-            ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-            : 0;
-        return acc + Math.max(1, Number(sc.duration) || 0) - overlap;
-      }, 0),
-    [narrativeScenes]
-  );
-
-  // Текущий итоговый JSON-манифест для 60+ сцен
+  // Полный JSON-манифест для N-сцен (собирает весь массив scenes[] любой длины без урезания)
   const narrativeManifest: NarrativeMontageManifest = useMemo(
     () => ({
       schema_version: '3.0',
@@ -663,7 +707,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       export_settings: exportSettings,
       scenes: narrativeScenes.map((sc, idx) => ({
         scene_index: idx + 1,
-        scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(2, '0')}`,
+        scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
         file_name: sc.file_name.trim(),
         start_time: sc.start_time,
         duration: Number(sc.duration) || 6,
@@ -692,10 +736,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       : `scenes_manifest_${narrativeScenes.length}scenes_${exportSettings.resolution}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    onNotify('JSON-манифест сцен экспортирован!', 'success');
+    onNotify(`JSON-манифест (${narrativeScenes.length} сцен) экспортирован!`, 'success');
   };
 
-  // Запуск облачного монтажа 60+ сцен: POST workflow_dispatch на render_scenes.yml
+  // Запуск облачного монтажа N-сцен: POST workflow_dispatch на render_scenes.yml
   const startNarrativeScenesRender = async () => {
     if (!ghToken) {
       onNotify('Настройте GitHub Personal Access Token (PAT) в параметрах раннера!', 'error');
@@ -709,9 +753,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     setIsDispatching(true);
     try {
       onStartRenderStatus(
-        `Облачный монтаж сцен запущен (${narrativeScenes.length} сцен • ${exportSettings.resolution.toUpperCase()} • ${exportSettings.video_codec} ${exportSettings.fps}fps)`,
+        `Облачный монтаж запущен (${narrativeScenes.length} сцен • ${calcTotalDuration(narrativeScenes)} • ${exportSettings.resolution.toUpperCase()} • ${exportSettings.video_codec} ${exportSettings.fps}fps)`,
         `Workflow: render_scenes.yml | Мастер-аудио: ${
-          masterAudio.file_name || 'без внешнего аудио'
+          masterAudio.file_name || 'Не выбрана'
         } | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
         targetRepo
       );
@@ -736,7 +780,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
       if (res.ok) {
         onNotify(
-          `🚀 Запущен workflow render_scenes.yml в ${targetRepo} (${narrativeScenes.length} сцен)!`,
+          `🚀 Запущен workflow render_scenes.yml в ${targetRepo} (весь массив: ${narrativeScenes.length} сцен)!`,
           'success'
         );
       } else {
@@ -754,19 +798,48 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
   };
 
+  // Фильтрация по поиску (сохраняя оригинальный индекс сцены в массиве narrativeScenes)
+  const indexedFilteredScenes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      return narrativeScenes.map((scene, originalIndex) => ({ scene, originalIndex }));
+    }
+    return narrativeScenes
+      .map((scene, originalIndex) => ({ scene, originalIndex }))
+      .filter(
+        ({ scene, originalIndex }) =>
+          String(originalIndex + 1).includes(q) ||
+          scene.scene_id.toLowerCase().includes(q) ||
+          scene.file_name.toLowerCase().includes(q) ||
+          scene.text_overlay.toLowerCase().includes(q)
+      );
+  }, [narrativeScenes, searchQuery]);
+
+  // Вычисление видимого окна виртуализации
+  const totalRows = indexedFilteredScenes.length;
+  const startRowIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS);
+  const visibleRowCount = Math.ceil(VIEWPORT_HEIGHT / ROW_HEIGHT) + OVERSCAN_ROWS * 2;
+  const endRowIdx = Math.min(totalRows, startRowIdx + visibleRowCount);
+
+  const visibleSlice = indexedFilteredScenes.slice(startRowIdx, endRowIdx);
+  const topSpacerHeight = startRowIdx * ROW_HEIGHT;
+  const bottomSpacerHeight = Math.max(0, (totalRows - endRowIdx) * ROW_HEIGHT);
+
   const filledScenesCount = narrativeScenes.filter(s => Boolean(s.file_name.trim())).length;
 
   return (
     <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
-      {/* Шапка вкладки «Комбайн монтажа (60+ сцен)» */}
+      {/* Шапка вкладки «Повествовательный монтаж (8–16 мин / 100+ сцен)» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2.5">
             <Clapperboard className="text-indigo-400 w-5 h-5 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]" />
-            <span>Комбайн монтажа (60+ сцен) — Повествовательный таймлайн &amp; Мастер-Аудио</span>
+            <span>
+              Повествовательный монтаж (8–16 мин / 100–200+ сцен) — Комбайн монтажа (N-Сцен)
+            </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Прямая Resumable-выгрузка исходников в текущую папку Google Drive • Динамический парсер JSON-сценариев • Отправка в{' '}
+            Динамический таймлайн без лимитов (80, 120, 160, 200+ сцен) • Виртуализированная строчная сетка • Прямая выгрузка в Google Drive &amp;{' '}
             <code className="text-indigo-300 font-mono">render_scenes.yml</code>
           </p>
         </div>
@@ -784,7 +857,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             onClick={() => scenarioJsonInputRef.current?.click()}
             className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-500/20"
           >
-            <FolderUp className="w-4 h-4" /> Загрузить JSON-сценарий (60+ сцен)
+            <FolderUp className="w-4 h-4" /> Загрузить JSON-сценарий (N-Сцен / 100–200+)
           </button>
 
           <button
@@ -793,14 +866,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-indigo-400" /> Экспорт JSON
-          </button>
-
-          <button
-            type="button"
-            onClick={generate60ScenesTemplate}
-            className="bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer"
-          >
-            Сетка 60 сцен
           </button>
         </div>
       </div>
@@ -837,7 +902,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         onNotify={onNotify}
         accentColor="indigo"
         title="1. Прямая загрузка исходных видеоклипов в текущую папку Google Drive"
-        subtitle="Перетащите исходные видеоклипы сюда или выберите файлы — они загружаются напрямую в target_folder_id (Resumable Upload), а их точные имена автоматически заполняют свободные сцены таймлайна"
+        subtitle="Перетащите любое количество исходных видеоклипов (80, 120, 200+ файлов) — они выгружаются напрямую в target_folder_id (Resumable Upload), а их точные имена автоматически заполняют сцены таймлайна"
       />
 
       {/* 2. БЛОК ВЫБОРА / ЗАГРУЗКИ ОБЩЕЙ МАСТЕР-АУДИОДОРОЖКИ (.MP3 / .WAV) И ПАРАМЕТРОВ КОДИРОВАНИЯ */}
@@ -868,7 +933,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   onChange={e =>
                     setMasterAudio(prev => ({ ...prev, file_name: e.target.value }))
                   }
-                  placeholder="Напр.: master_voiceover_full.wav или выберите локальный файл →"
+                  placeholder="Напр.: master_voiceover_12min.wav или выберите локальный файл →"
                   className="flex-1 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-mono text-amber-300 outline-none"
                 />
                 <input
@@ -1117,105 +1182,212 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         </div>
       </div>
 
-      {/* 4. ТАЙМЛАЙН СЦЕН (SCENES: 60+ СЦЕН) */}
+      {/* 4. ВИРТУАЛИЗИРОВАННЫЙ ТАЙМЛАЙН СЦЕН (100–200+ СЦЕН БЕЗ ОГРАНИЧЕНИЙ) */}
       <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div>
+        {/* Шапка таймлайна с обязательным автоматическим счетчиком */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+          <div className="space-y-1">
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
               <LayoutGrid className="w-4 h-4 text-indigo-400" />
               <span>
-                Таймлайн повествовательного монтажа (<code className="text-indigo-300">scenes: [{narrativeScenes.length}]</code>)
+                Динамический таймлайн сцен (<code className="text-indigo-300">scenes: [{narrativeScenes.length}]</code>)
               </span>
             </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Заполнено имен файлов: <strong className="text-emerald-400">{filledScenesCount}</strong> из{' '}
-              <strong>{narrativeScenes.length}</strong> • Общий хронометраж:{' '}
-              <strong className="text-amber-400">
-                {formatTimecode(totalNarrativeDurationSec)} ({totalNarrativeDurationSec.toFixed(1)} сек)
-              </strong>
-            </p>
+
+            {/* Автоматический счетчик по ТЗ */}
+            <div
+              id="narrative-timeline-counter"
+              className="text-xs font-mono bg-slate-900/95 border border-indigo-500/40 text-slate-200 px-3 py-1.5 rounded-xl inline-flex flex-wrap items-center gap-2 shadow-sm"
+            >
+              <span>
+                Всего сцен: <strong className="text-indigo-300">{narrativeScenes.length}</strong>
+                <span className="text-slate-500 text-[10px] ml-1">
+                  (заполнено: {filledScenesCount})
+                </span>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span>
+                Расчетный хронометраж:{' '}
+                <strong className="text-amber-300">{calcTotalDuration(narrativeScenes)}</strong>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span>
+                Аудиодорожка:{' '}
+                <strong className="text-emerald-300">
+                  {masterAudio.file_name.trim() || 'Не выбрана'}
+                </strong>
+              </span>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Быстрые генераторы сетки на 80 / 120 / 160 / 200+ сцен и кнопки управления */}
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={addScene}
-              className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1 transition cursor-pointer"
+              onClick={() => generateNScenesTemplate(80)}
+              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              title="Сгенерировать каркас на 80 сцен (~8 минут)"
             >
-              <Plus className="w-3.5 h-3.5" /> Добавить сцену (#{narrativeScenes.length + 1})
+              80 сцен (~8м)
             </button>
             <button
               type="button"
-              onClick={() =>
-                setNarrativeScenes(prev =>
-                  prev.map(s => ({ ...s, file_name: '' }))
-                )
-              }
-              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-rose-300 px-3 py-1.5 rounded-xl text-xs transition cursor-pointer"
+              onClick={() => generateNScenesTemplate(120)}
+              className="bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              title="Сгенерировать каркас на 120 сцен (~12 минут)"
             >
-              Очистить имена файлов
+              120 сцен (~12м)
+            </button>
+            <button
+              type="button"
+              onClick={() => generateNScenesTemplate(160)}
+              className="bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              title="Сгенерировать каркас на 160 сцен (~16 минут)"
+            >
+              160 сцен (~16м)
+            </button>
+            <button
+              type="button"
+              onClick={() => generateNScenesTemplate(200)}
+              className="bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              title="Сгенерировать каркас на 200 сцен"
+            >
+              200 сцен
+            </button>
+
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1">
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={customScenesCountInput}
+                onChange={e => setCustomScenesCountInput(Math.max(1, Number(e.target.value) || 100))}
+                className="w-14 bg-transparent text-xs font-mono text-indigo-300 outline-none text-center"
+                title="Произвольное количество сцен N"
+              />
+              <button
+                type="button"
+                onClick={() => generateNScenesTemplate(customScenesCountInput)}
+                className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer"
+              >
+                Задать N
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={addScene}
+              className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> +1 сцена
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setNarrativeScenes(prev => prev.map(s => ({ ...s, file_name: '' })))
+              }
+              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-rose-300 px-2.5 py-1.5 rounded-lg text-[11px] transition cursor-pointer"
+            >
+              Очистить имена
             </button>
           </div>
         </div>
 
-        {/* Таблица / Сетка сцен таймлайна */}
-        <div className="space-y-2.5 max-h-[520px] overflow-y-auto custom-scroll pr-1">
-          {narrativeScenes.map((sc, idx) => {
-            const hasFile = Boolean(sc.file_name.trim());
-            return (
-              <div
-                key={sc.scene_id + '-' + idx}
-                className={`bg-[#111622] border rounded-xl p-3 transition ${
-                  hasFile
-                    ? 'border-indigo-500/35 hover:border-indigo-400/60'
-                    : 'border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center text-xs">
-                  {/* Индекс и scene_id */}
-                  <div className="sm:col-span-2 flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-2 py-1 rounded shrink-0">
+        {/* Строка поиска / быстрого фильтра по сценам + заголовок колонок компактной сетки */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => {
+                setSearchQuery(e.target.value);
+                if (scrollContainerRef.current) {
+                  scrollContainerRef.current.scrollTop = 0;
+                  setScrollTop(0);
+                }
+              }}
+              placeholder="Поиск по номеру сцены (#1..200+), scene_id, имени файла или титру..."
+              className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-400 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 outline-none"
+            />
+          </div>
+
+          <span className="text-[11px] font-mono text-slate-400">
+            Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows} (Виртуализация DOM активна)
+          </span>
+        </div>
+
+        {/* Шапка колонок компактной строчной таблицы */}
+        <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-t-xl text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <div className="col-span-2">№ / ID Сцены</div>
+          <div className="col-span-4">Видеофайл (file_name)</div>
+          <div className="col-span-2 text-center">Старт / Длит. (с)</div>
+          <div className="col-span-2">Переход (Transition)</div>
+          <div className="col-span-2">Титр (text_overlay)</div>
+        </div>
+
+        {/* Виртуализированный контейнер прокрутки компактной строчной сетки */}
+        <div
+          ref={scrollContainerRef}
+          onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+          style={{ height: `${VIEWPORT_HEIGHT}px` }}
+          className="overflow-y-auto custom-scroll border-x border-b border-slate-800 rounded-b-xl bg-[#090d16]"
+        >
+          <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
+            {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
+              const hasFile = Boolean(sc.file_name.trim());
+              return (
+                <div
+                  key={sc.scene_id + '-' + idx}
+                  style={{ height: `${ROW_HEIGHT}px` }}
+                  className={`grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition ${
+                    hasFile
+                      ? 'bg-indigo-950/15 hover:bg-indigo-950/30'
+                      : 'bg-[#0d1320] hover:bg-slate-900/80'
+                  }`}
+                >
+                  {/* 1. Индекс и scene_id */}
+                  <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-1.5 py-0.5 rounded shrink-0">
                       #{idx + 1}
                     </span>
                     <input
                       type="text"
                       value={sc.scene_id}
                       onChange={e => updateScene(idx, { scene_id: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] font-mono text-slate-200 outline-none focus:border-indigo-400"
-                      title="ID сцены (scene_id)"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] font-mono text-slate-200 outline-none focus:border-indigo-400"
                     />
                   </div>
 
-                  {/* Имя видеофайла (file_name) */}
-                  <div className="sm:col-span-4">
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={sc.file_name}
-                        placeholder="Имя видеофайла (из JSON или Drag & Drop)"
-                        onChange={e => updateScene(idx, { file_name: e.target.value })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none focus:border-amber-400"
-                      />
-                      {hasFile && (
-                        <span title="Имя файла назначено" className="shrink-0 flex items-center">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        </span>
-                      )}
-                    </div>
+                  {/* 2. Имя видеофайла (file_name) */}
+                  <div className="col-span-4 flex items-center gap-1.5 min-w-0">
+                    <input
+                      type="text"
+                      value={sc.file_name}
+                      placeholder="Имя файла (из JSON или Drag & Drop)"
+                      onChange={e => updateScene(idx, { file_name: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-2 py-1 text-[11px] font-mono text-amber-300 outline-none focus:border-amber-400"
+                    />
+                    {hasFile && (
+                      <span title="Имя файла назначено" className="shrink-0 flex items-center">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      </span>
+                    )}
                   </div>
 
-                  {/* Таймкод старта (start_time) и длительность (duration) */}
-                  <div className="sm:col-span-2 flex items-center gap-1.5">
+                  {/* 3. Старт (start_time) и длительность (duration) */}
+                  <div className="col-span-2 flex items-center gap-1">
                     <input
                       type="text"
                       value={String(sc.start_time)}
                       onChange={e => updateScene(idx, { start_time: e.target.value })}
-                      className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] font-mono text-sky-300 text-center outline-none"
-                      title="Таймкод старта (start_time)"
+                      className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-sky-300 text-center outline-none"
+                      title="start_time"
                     />
                     <input
                       type="number"
-                      min={1}
+                      min={0.5}
                       max={600}
                       step={0.5}
                       value={sc.duration}
@@ -1224,13 +1396,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                           duration: Math.max(0.5, Number(e.target.value) || 6)
                         })
                       }
-                      className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] font-mono text-emerald-400 font-bold text-center outline-none"
-                      title="Длительность сцены (сек)"
+                      className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-emerald-400 font-bold text-center outline-none"
+                      title="duration (сек)"
                     />
                   </div>
 
-                  {/* Переход (transition) */}
-                  <div className="sm:col-span-2 flex items-center gap-1">
+                  {/* 4. Переход (transition) */}
+                  <div className="col-span-2 flex items-center gap-1">
                     <select
                       value={sc.transition.type}
                       onChange={e => {
@@ -1245,12 +1417,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                           }
                         });
                       }}
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-1.5 py-1.5 text-[11px] text-slate-200 outline-none"
+                      className="flex-1 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none"
                     >
                       <option value="crossfade">crossfade</option>
                       <option value="dissolve">dissolve</option>
                       <option value="fade">fade</option>
-                      <option value="cut">cut (жесткий)</option>
+                      <option value="cut">cut</option>
                     </select>
                     {sc.transition.type !== 'cut' && sc.transition.type !== 'none' && (
                       <input
@@ -1267,20 +1439,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                             }
                           })
                         }
-                        className="w-12 bg-slate-900 border border-slate-700 rounded-lg px-1 py-1.5 text-[11px] font-mono text-amber-300 text-center outline-none"
-                        title="Длительность перехода (сек)"
+                        className="w-11 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] font-mono text-amber-300 text-center outline-none"
                       />
                     )}
                   </div>
 
-                  {/* Текстовый титр / оверлей (text_overlay) и удаление */}
-                  <div className="sm:col-span-2 flex items-center gap-1.5">
+                  {/* 5. Титр (text_overlay) и кнопка удаления */}
+                  <div className="col-span-2 flex items-center gap-1 min-w-0">
                     <input
                       type="text"
                       value={sc.text_overlay}
-                      placeholder="Титр / text_overlay..."
+                      placeholder="Титр..."
                       onChange={e => updateScene(idx, { text_overlay: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
                     />
                     <button
                       type="button"
@@ -1292,22 +1463,22 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* 5. ПРЕДПРОСМОТР ИТОГОВОГО JSON-МАНИФЕСТА СЦЕН И КНОПКА ЗАПУСКА RENDER_SCENES.YML */}
+      {/* 5. ПРЕДПРОСМОТР ИТОГОВОГО JSON-МАНИФЕСТА И КНОПКА «ЗАПУСТИТЬ ОБЛАЧНЫЙ МОНТАЖ» */}
       <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <span className="font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Итоговый манифест для workflow{' '}
-            <code className="font-mono text-amber-300">render_scenes.yml</code> (Base64):
+            <Sparkles className="w-3.5 h-3.5" /> Полный манифест для workflow{' '}
+            <code className="font-mono text-amber-300">render_scenes.yml</code> (без урезания массива scenes[]):
           </span>
           <span className="font-mono text-emerald-400">
-            Сцен: {narrativeScenes.length} • Мастер-аудио: {masterAudio.file_name || 'нет'} • Папка GDrive:{' '}
-            {gdriveFolderId || 'не задана'}
+            Всего сцен: {narrativeScenes.length} | Расчетный хронометраж: {calcTotalDuration(narrativeScenes)} | Аудиодорожка:{' '}
+            {masterAudio.file_name.trim() || 'Не выбрана'}
           </span>
         </div>
 
@@ -1325,7 +1496,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               → <code className="text-indigo-300 font-mono">render_scenes.yml</code>
             </span>
             <span className="text-[11px] text-slate-500 block font-mono">
-              inputs: &#123; manifest_payload: &quot;{encodeManifestBase64(narrativeManifest).slice(0, 36)}...&quot; &#125;
+              inputs: &#123; manifest_payload: &quot;{encodeManifestBase64(narrativeManifest).slice(0, 36)}...&quot; ({encodeManifestBase64(narrativeManifest).length} байт Base64) &#125;
             </span>
           </div>
 
@@ -1338,7 +1509,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <Play className="w-4 h-4 fill-current" />
             {isDispatching
               ? 'Отправка задачи в GitHub Actions...'
-              : '🚀 Запустить облачный монтаж 60+ сцен'}
+              : '🚀 Запустить облачный монтаж'}
           </button>
         </div>
       </div>
