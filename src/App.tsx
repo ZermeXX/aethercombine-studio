@@ -40,7 +40,9 @@ import {
 import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
 import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
-import { MontageCombineView } from './components/MontageCombineView';
+import { MontageCombineView, NarrativeSceneItem } from './components/MontageCombineView';
+import { VerbaFlowStudioView } from './components/VerbaFlowStudioView';
+import { ThumbnailStudioView } from './components/ThumbnailStudioView';
 import {
   LiveTerminal,
   TerminalLogEntry,
@@ -144,7 +146,13 @@ export interface ContinuousBedConfig {
 export interface LoopMasterAudioConfig {
   enabled: boolean;
   file_name: string;
+  start_timecode: string;
   weight: number;
+}
+
+export interface SeamlessAsymmetryConfig {
+  enabled: boolean;
+  random_interval: [number, number];
 }
 
 export interface AudioMasteringConfig {
@@ -172,6 +180,7 @@ interface LoopBuildManifest {
   crf: number;
   export_settings: {
     video_codec: 'libx264' | 'libx265';
+    preset: 'veryfast' | 'medium';
     crf: number;
     resolution: '1080p' | '2k' | '4k';
     fps: 24 | 30 | 60;
@@ -183,6 +192,8 @@ interface LoopBuildManifest {
   final_black_screen_enabled: boolean;
   final_black_screen_sec: number;
   audio_mastering: AudioMasteringConfig;
+  seamless_asymmetry: SeamlessAsymmetryConfig;
+  random_interval: [number, number];
   crossfade_loop: boolean;
   seamless_mode: 'crossfade' | 'pingpong';
   video_crossfade_sec: number;
@@ -713,6 +724,7 @@ export default function App() {
   const [filmFormat, setFilmFormat] = useState<string>('16:9');
   const [filmResolution, setFilmResolution] = useState<string>('4k');
   const [transferredScript, setTransferredScript] = useState<string>('');
+  const [externalNarrativeScenes, setExternalNarrativeScenes] = useState<NarrativeSceneItem[] | null>(null);
 
   // Loop studio state (Universal dynamic manifest state)
   const [loopProjectName, setLoopProjectName] = useState<string>('Ambient Loop 4K');
@@ -749,7 +761,12 @@ export default function App() {
   const [loopMasterAudio, setLoopMasterAudio] = useState<LoopMasterAudioConfig>({
     enabled: false,
     file_name: '',
+    start_timecode: '00:00:00',
     weight: 1.0
+  });
+  const [seamlessAsymmetry, setSeamlessAsymmetry] = useState<SeamlessAsymmetryConfig>({
+    enabled: true,
+    random_interval: [1200, 2400]
   });
   const [loopHours, setLoopHours] = useState<number>(3);
   const [loopResolution, setLoopResolution] = useState<'1080p' | '2k' | '4k'>('4k');
@@ -1292,6 +1309,39 @@ export default function App() {
                 : 'Шаг завершился с ошибкой выполнения в GitHub Actions'
             }));
             showToast(`Ошибка рендера в GitHub Actions ${errStepInfo}`, 'error');
+
+            // Подгрузка полного текста лога задачи при ошибке
+            if (jobId) {
+              try {
+                const jobLogRes = await fetch(
+                  `https://api.github.com/repos/${targetRepo}/actions/jobs/${jobId}/logs`,
+                  { headers }
+                );
+                if (jobLogRes.ok && !isCancelled) {
+                  const fullLogText = await jobLogRes.text();
+                  if (fullLogText && fullLogText.trim()) {
+                    const logLines = fullLogText.split(/\r?\n/).filter(Boolean);
+                    const tailLines =
+                      logLines.length > 350 ? logLines.slice(logLines.length - 350) : logLines;
+                    setTerminalLogs(prev => [
+                      ...prev,
+                      {
+                        id: `${Date.now()}-err-log-header`,
+                        text: `\n--- 📄 ПОЛНЫЙ ОТЧЕТ ОШИБКИ ЗАДАЧИ GITHUB ACTIONS / FFMPEG (job_id: ${jobId}) ---`,
+                        level: 'error'
+                      },
+                      ...tailLines.map((line, idx) => ({
+                        id: `${Date.now()}-err-raw-${idx}`,
+                        text: line,
+                        level: 'raw' as const
+                      }))
+                    ]);
+                  }
+                }
+              } catch {
+                // Игнорируем ошибку CORS при чтении текстового лога
+              }
+            }
           }
         } else {
           setRenderStatus(prev => ({
@@ -1307,10 +1357,10 @@ export default function App() {
       }
     };
 
-    // Ждем 4 секунды (4000 мс) перед первым запросом к API
+    // Ждем 4.5 секунды (4500 мс) перед первым запросом к API
     let interval: ReturnType<typeof setInterval> | null = null;
     const startPollingWithDelay = async () => {
-      await new Promise(r => setTimeout(r, 4000));
+      await new Promise(r => setTimeout(r, 4500));
       if (isCancelled) return;
       await pollGitHubActions();
       if (isCancelled) return;
@@ -2265,6 +2315,7 @@ export default function App() {
     crf: videoCrf,
     export_settings: {
       video_codec: videoCodec,
+      preset: videoCodec === 'libx264' ? 'veryfast' : 'medium',
       crf: videoCrf,
       resolution: loopResolution,
       fps: videoFps,
@@ -2281,6 +2332,8 @@ export default function App() {
     final_black_screen_enabled: finalBlackScreenEnabled,
     final_black_screen_sec: finalBlackScreenSec,
     audio_mastering: audioMastering,
+    seamless_asymmetry: seamlessAsymmetry,
+    random_interval: seamlessAsymmetry.random_interval,
     video_filename:
       loopMedia?.name ||
       timelineSlots[0]?.file_name ||
@@ -2628,8 +2681,19 @@ export default function App() {
       setLoopMasterAudio(prev => ({
         enabled: typeof maObj.enabled === 'boolean' ? maObj.enabled : Boolean(maFile),
         file_name: maFile,
+        start_timecode:
+          typeof maObj.start_timecode === 'string' ? maObj.start_timecode : prev.start_timecode,
         weight: typeof maObj.weight === 'number' ? maObj.weight : prev.weight
       }));
+    }
+
+    if (Array.isArray(raw.random_interval) && raw.random_interval.length >= 2) {
+      const minInt = Math.max(60, Number(raw.random_interval[0]) || 1200);
+      const maxInt = Math.max(minInt, Number(raw.random_interval[1]) || 2400);
+      setSeamlessAsymmetry({
+        enabled: true,
+        random_interval: [minInt, maxInt]
+      });
     }
 
     // 2b. Parse codec, fps, audio bitrate, act crossfade, black screen & audio_mastering
@@ -3503,6 +3567,8 @@ export default function App() {
             }}
             transferredScript={transferredScript}
             onClearTransferredScript={() => setTransferredScript('')}
+            externalScenes={externalNarrativeScenes}
+            onConsumeExternalScenes={() => setExternalNarrativeScenes(null)}
             onOpenConfigModal={openConfigModal}
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
@@ -3707,7 +3773,7 @@ export default function App() {
                         }
                         className="accent-emerald-400 w-3.5 h-3.5"
                       />
-                      <span>Зациклить на всю длину</span>
+                      <span>Зациклить на всю длину видео</span>
                     </label>
                   </div>
 
@@ -3771,10 +3837,10 @@ export default function App() {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                     <div className="sm:col-span-2">
                       <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                        Имя файла мастер-аудиодорожки (в Google Drive):
+                        Имя файла мастер-аудио (в Google Drive):
                       </label>
                       <input
                         type="text"
@@ -3788,6 +3854,23 @@ export default function App() {
                         }
                         placeholder="master_voiceover_or_ost.mp3"
                         className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-indigo-300 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        Таймкод старта:
+                      </label>
+                      <input
+                        type="text"
+                        value={loopMasterAudio.start_timecode}
+                        onChange={e =>
+                          setLoopMasterAudio(prev => ({
+                            ...prev,
+                            start_timecode: e.target.value
+                          }))
+                        }
+                        placeholder="00:00:00"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
                       />
                     </div>
                     <div>
@@ -3810,6 +3893,112 @@ export default function App() {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* РАНДОМИЗАТОР ШВОВ И ИНТЕРВАЛОВ (SEAMLESS ASYMMETRY • random_interval: [1200, 2400]) */}
+            <div className="bg-[#0b0f17] border border-emerald-500/30 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-wider block">
+                      Рандомизатор швов и интервалов (Seamless Asymmetry • Защита от Reused Content)
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Непериодическое наложение микровставок каждые 20–40 минут (<code className="text-emerald-300 font-mono">random_interval: [{seamlessAsymmetry.random_interval[0]}, {seamlessAsymmetry.random_interval[1]}]</code> сек) с мягким кроссфейдом 1.5 сек
+                    </span>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-bold text-emerald-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={seamlessAsymmetry.enabled}
+                    onChange={e =>
+                      setSeamlessAsymmetry(prev => ({ ...prev, enabled: e.target.checked }))
+                    }
+                    className="accent-emerald-500 w-4 h-4"
+                  />
+                  <span>Seamless Asymmetry активен</span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                    Мин. интервал микровставки (сек):
+                  </label>
+                  <input
+                    type="number"
+                    min={60}
+                    max={3600}
+                    step={60}
+                    value={seamlessAsymmetry.random_interval[0]}
+                    onChange={e => {
+                      const v = Math.max(60, Number(e.target.value) || 1200);
+                      setSeamlessAsymmetry(prev => ({
+                        ...prev,
+                        random_interval: [v, Math.max(v, prev.random_interval[1])]
+                      }));
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-emerald-300 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                    Макс. интервал микровставки (сек):
+                  </label>
+                  <input
+                    type="number"
+                    min={120}
+                    max={7200}
+                    step={60}
+                    value={seamlessAsymmetry.random_interval[1]}
+                    onChange={e => {
+                      const v = Math.max(seamlessAsymmetry.random_interval[0], Number(e.target.value) || 2400);
+                      setSeamlessAsymmetry(prev => ({
+                        ...prev,
+                        random_interval: [prev.random_interval[0], v]
+                      }));
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-emerald-300 outline-none"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTimelineSlots(prev =>
+                        prev.map((sl, idx) => {
+                          if (!sl.inserts.length) return sl;
+                          return {
+                            ...sl,
+                            inserts: sl.inserts.map((ins, iIdx) => {
+                              const minI = seamlessAsymmetry.random_interval[0];
+                              const maxI = seamlessAsymmetry.random_interval[1];
+                              const randTrig = Math.min(
+                                Math.max(30, sl.slot_duration_sec - 20),
+                                Math.round(minI / 3 + ((idx + 1) * (iIdx + 1) * 173) % Math.max(120, maxI - minI))
+                              );
+                              return {
+                                ...ins,
+                                trigger_at_sec: randTrig,
+                                transition_in: { ...ins.transition_in, duration_sec: 1.5 }
+                              };
+                            })
+                          };
+                        })
+                      );
+                      showToast(
+                        `Интервалы микровставок рандомизированы по окну [${seamlessAsymmetry.random_interval[0]}, ${seamlessAsymmetry.random_interval[1]}] сек!`,
+                        'success'
+                      );
+                    }}
+                    className="w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-1.5 px-3 rounded-lg text-xs cursor-pointer transition"
+                  >
+                    🎲 Перемешать таймкоды микровставок
+                  </button>
                 </div>
               </div>
             </div>
@@ -4678,10 +4867,10 @@ export default function App() {
                       className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-400"
                     >
                       <option value="libx264">
-                        H.264 (libx264) — Скоростной рендер (в 3-4 раза быстрее, рекомендуется для YouTube 4K) [CRF 20]
+                        H.264 (libx264, preset veryfast, CRF 20) — Скоростной монтаж (рекомендуется для YouTube 4K)
                       </option>
                       <option value="libx265">
-                        H.265 (libx265) — Максимальное сжатие (CRF 22)
+                        H.265 (libx265, preset medium, CRF 22) — Архивное сжатие
                       </option>
                     </select>
                   </div>
@@ -4861,94 +5050,109 @@ export default function App() {
               onCopyLogs={() => showToast('Лог терминала скопирован в буфер обмена', 'info')}
               onCancelRun={cancelActiveRenderRun}
             />
+
+            {/* ГЕНЕРАТОР КЛИКАБЕЛЬНЫХ ТАЙМКОДОВ И SEO УПАКОВКИ ДЛЯ ОПИСАНИЯ YOUTUBE (СТРОГО US ENGLISH) */}
+            <div className="bg-[#0b0f17] border border-amber-500/30 rounded-2xl p-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                <div>
+                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" /> Генератор кликабельных таймкодов для описания YouTube (YouTube Chapters &amp; SEO • US English)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Автоматически формирует англоязычные таймкоды (Chapters), Title, Description и 30 Tags по вашим слотам таймлайна
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    let accumSec = 0;
+                    const englishActNames = [
+                      'Act I: The Frozen Perimeter & Distant Wind',
+                      'Act II: Deepening Blizzard & Sub-Zero Resonance',
+                      'Act III: Whiteout Horizon & Midnight Pulse',
+                      'Act IV: Eye of the Storm & Silent Telemetry',
+                      'Act V: Glacial Echoes & Heavy Snowfall',
+                      'Act VI: Final Embers & Dawn Stillness'
+                    ];
+                    const chapterLines = timelineSlots.map((sl, idx) => {
+                      const h = String(Math.floor(accumSec / 3600)).padStart(2, '0');
+                      const m = String(Math.floor((accumSec % 3600) / 60)).padStart(2, '0');
+                      const s = String(Math.floor(accumSec % 60)).padStart(2, '0');
+                      const isLast = idx === timelineSlots.length - 1;
+                      const overlap =
+                        !isLast && sl.slot_transition_out.type !== 'none'
+                          ? sl.slot_transition_out.duration_sec
+                          : 0;
+                      accumSec += Math.max(1, sl.slot_duration_sec - overlap);
+                      const rawTitle = (sl.act_title || sl.title || '').trim();
+                      const cleanEnTitle = /[а-яёА-ЯЁ]/.test(rawTitle) || !rawTitle
+                        ? englishActNames[idx % englishActNames.length]
+                        : rawTitle;
+                      return `${h}:${m}:${s} - ${cleanEnTitle}`;
+                    });
+                    const fullChaptersText =
+                      `TITLE: ${loopProjectName || 'Ambient Loop 4K'} — ${loopHours} Hours 4K Ultra HD Ambience\n\n` +
+                      `DESCRIPTION:\nImmerse yourself in ${loopHours} hours of seamless 4K Ultra HD atmospheric ambience with mastered spatial audio (-16 LUFS). Designed for deep focus, sleep, study, and cinematic relaxation.\n\n` +
+                      `YOUTUBE CHAPTERS:\n${chapterLines.join('\n')}\n\n` +
+                      `30 TAGS:\n4k ambience, ${loopHours} hours loop, snowstorm ambience, winter blizzard sounds, howling wind 4k, deep sleep ambience, study ambience, dark screen ambience, cozy cabin storm, arctic wind soundscape, seamless loop 4k, relaxation video, white noise sleep, atmospheric soundscape, cinematic ambience, heavy snowstorm, insomnia relief, meditation nature sounds, binaural wind, ultra hd 4k loop, ambient drone, deep focus audio, storm outside window, arctic outpost ambience, night blizzard 4k, peaceful winter night, sleep aid 4k, ambient study music, nature soundscape, aethercombine 4k`;
+                    navigator.clipboard.writeText(fullChaptersText);
+                    showToast('YouTube Chapters + SEO Packaging (US English) скопированы в буфер обмена!', 'success');
+                  }}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" /> Копировать YouTube Chapters &amp; SEO (EN)
+                </button>
+              </div>
+
+              <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-emerald-300 whitespace-pre-wrap max-h-48 overflow-y-auto custom-scroll leading-relaxed">
+                {(() => {
+                  let accumSec = 0;
+                  const englishActNames = [
+                    'Act I: The Frozen Perimeter & Distant Wind',
+                    'Act II: Deepening Blizzard & Sub-Zero Resonance',
+                    'Act III: Whiteout Horizon & Midnight Pulse',
+                    'Act IV: Eye of the Storm & Silent Telemetry',
+                    'Act V: Glacial Echoes & Heavy Snowfall',
+                    'Act VI: Final Embers & Dawn Stillness'
+                  ];
+                  return timelineSlots
+                    .map((sl, idx) => {
+                      const h = String(Math.floor(accumSec / 3600)).padStart(2, '0');
+                      const m = String(Math.floor((accumSec % 3600) / 60)).padStart(2, '0');
+                      const s = String(Math.floor(accumSec % 60)).padStart(2, '0');
+                      const isLast = idx === timelineSlots.length - 1;
+                      const overlap =
+                        !isLast && sl.slot_transition_out.type !== 'none'
+                          ? sl.slot_transition_out.duration_sec
+                          : 0;
+                      accumSec += Math.max(1, sl.slot_duration_sec - overlap);
+                      const rawTitle = (sl.act_title || sl.title || '').trim();
+                      const cleanEnTitle = /[а-яёА-ЯЁ]/.test(rawTitle) || !rawTitle
+                        ? englishActNames[idx % englishActNames.length]
+                        : rawTitle;
+                      return `${h}:${m}:${s} - ${cleanEnTitle}`;
+                    })
+                    .join('\n');
+                })()}
+              </pre>
+            </div>
           </div>
         </section>
 
         {/* =========================================
-            ЦЕХ 3: СТУДИЯ 4K ПРЕВЬЮ
+            ЦЕХ 3: СТУДИЯ 4K ПРЕВЬЮ (A/B ТЕСТЕР + ЗАХВАТ КАДРА + YOUTUBE MOCKUP)
            ========================================= */}
         <section
           id="view-thumb"
           className={`studio-view space-y-6 ${activeTab === 'thumb' ? '' : 'hidden'}`}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Панель управления */}
-            <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-5">
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
-                <Sparkles className="text-amber-500 w-5 h-5" /> Настройка Обложки
-              </h2>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase block">
-                  Исходное изображение
-                </label>
-                <input
-                  type="file"
-                  id="thumb-image-input"
-                  accept="image/*"
-                  onChange={loadThumbBaseImage}
-                  className="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-amber-400 hover:file:bg-slate-700 cursor-pointer"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase block">
-                  Заголовок обложки (CTR Hook)
-                </label>
-                <textarea
-                  id="thumb-title"
-                  rows={2}
-                  value={thumbTitle}
-                  onChange={e => setThumbTitle(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:border-amber-500 outline-none"
-                  placeholder="ТАЙНА РАСКРЫТА СПУСТЯ 50 ЛЕТ..."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase block">
-                  Стиль кинематографичного бейджа
-                </label>
-                <select
-                  id="thumb-badge"
-                  value={thumbBadge}
-                  onChange={e => setThumbBadge(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
-                >
-                  <option value="4k_gold">4K ULTRA HD • DUAL SLATE GOLD</option>
-                  <option value="ambience">AMBIENCE • 60FPS CINEMATIC</option>
-                  <option value="10h">10 HOURS LOOP • RELAX AUDIO</option>
-                  <option value="none">Без бейджа</option>
-                </select>
-              </div>
-
-              <button
-                onClick={renderThumbnailCanvas}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4" /> Обновить холст
-              </button>
-              <button
-                onClick={downloadThumbnail}
-                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Скачать обложку (1280x720)
-              </button>
-            </div>
-
-            {/* Холст предпросмотра */}
-            <div className="lg:col-span-2 bg-[#111622] border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center">
-              <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-800 bg-black shadow-2xl">
-                <canvas
-                  ref={canvasRef}
-                  id="thumb-canvas"
-                  width={1280}
-                  height={720}
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            </div>
-          </div>
+          <ThumbnailStudioView
+            thumbTitle={thumbTitle}
+            onThumbTitleChange={setThumbTitle}
+            thumbBadge={thumbBadge}
+            onThumbBadgeChange={setThumbBadge}
+            onNotify={showToast}
+          />
         </section>
 
         {/* =========================================
@@ -4958,322 +5162,32 @@ export default function App() {
           id="view-hooks"
           className={`studio-view space-y-6 ${activeTab === 'hooks' ? '' : 'hidden'}`}
         >
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <Zap className="text-amber-500 w-5 h-5" /> 🪝 Вирусный Текст &amp; Хуки — Движок VerbaFlow
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Глубокая сценарная переработка текста, конструирование 15-секундных хуков с загадкой, петли удержания и проверка YouTube-монетизации
-                </p>
-              </div>
-              <span className="text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1 rounded-lg font-semibold">
-                VERBAFLOW RETENTION ENGINE v2.4
-              </span>
-            </div>
-
-            {/* 1) СЕЛЕКТОРЫ РЕЖИМА И ФОРМАТА (РАДИОКНОПКИ) */}
-            <div className="space-y-2.5">
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                1. Селектор режима и формата (VerbaFlow Mode)
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {[
-                  {
-                    id: '15sec_rewrite' as VerbaMode,
-                    label: '[ 15-сек Хук с загадкой + Глубокая переделка текста ]',
-                    desc: 'Выделенный интригующий старт на 15 секунд + полная структурная перезапись исходника'
-                  },
-                  {
-                    id: 'pack5_script' as VerbaMode,
-                    label: '[ Пак из 5 хуков (15 сек) + Полный сценарий ]',
-                    desc: '5 вариантов первых 15 секунд под разные триггеры + раскадрованный мастер-сценарий'
-                  },
-                  {
-                    id: 'doc_loops' as VerbaMode,
-                    label: '[ Документальный сценарий с удержанием (петли интриги в каждом блоке) ]',
-                    desc: 'Открытые вопросы и микро-клиффхэнгеры между главами для максимального Average View Duration'
-                  },
-                  {
-                    id: 'shorts_1sec' as VerbaMode,
-                    label: '[ Shorts / Reels (Удержание с 1-й секунды) ]',
-                    desc: 'Сверхплотный темп со стоп-фразой на 1-й секунде и бесшовной закольцовкой финала'
-                  }
-                ].map(option => {
-                  const selected = verbaMode === option.id;
-                  return (
-                    <label
-                      key={option.id}
-                      onClick={() => setVerbaMode(option.id)}
-                      className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition ${
-                        selected
-                          ? 'bg-amber-500/10 border-amber-500 text-slate-100 shadow-md shadow-amber-500/5'
-                          : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="verbaflow-mode"
-                        checked={selected}
-                        onChange={() => setVerbaMode(option.id)}
-                        className="mt-1 accent-amber-500"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-amber-400">
-                          {option.label}
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          {option.desc}
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2) ВЫПАДАЮЩИЕ СПИСКИ ТОЧНОЙ НАСТРОЙКИ */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase block">
-                  ТИП ЗАГАДКИ В НАЧАЛЕ
-                </label>
-                <select
-                  value={mysteryType}
-                  onChange={e => setMysteryType(e.target.value as MysteryType)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-amber-500"
-                >
-                  <option value="mystery">Тайна и необъяснимый факт</option>
-                  <option value="question">Провокационный вопрос</option>
-                  <option value="epicenter">Сразу в эпицентр события</option>
-                  <option value="myth">Разрушение мифа</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase block">
-                  ТОНАЛЬНОСТЬ (TONE OF VOICE)
-                </label>
-                <select
-                  value={toneOfVoice}
-                  onChange={e => setToneOfVoice(e.target.value as ToneOfVoice)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-amber-500"
-                >
-                  <option value="doc">🎬 Документальный жанр</option>
-                  <option value="storyteller">🎙️ Живой рассказчик (YouTube)</option>
-                  <option value="truecrime">🕵️ Расследование / Тру-крайм</option>
-                  <option value="scipop">🧠 Научпоп / Аналитика</option>
-                  <option value="dynamic">🔥 Динамичный / Энергичный</option>
-                  <option value="neutral">⚖️ Нейтральный / Строгий</option>
-                </select>
-              </div>
-            </div>
-
-            {/* 3) РАБОЧАЯ ЗОНА ТЕКСТА — КНОПКИ ДЕЙСТВИЯ */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                onClick={runVerbaFlowRewrite}
-                className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-amber-500/20 transition text-xs flex items-center gap-2 cursor-pointer"
-              >
-                <Wand2 className="w-4 h-4" /> [ ⚡ ПЕРЕДЕЛАТЬ ТЕКСТ ]
-              </button>
-
-              <button
-                onClick={runYouTubeComplianceCheck}
-                className="bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-400 font-bold px-5 py-3 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4" /> [ 🛡️ YouTube Compliance Check ]
-              </button>
-            </div>
-
-            {/* Панель результатов YouTube Compliance Check */}
-            {complianceReport && (
-              <div
-                className={`rounded-xl border p-4 space-y-3 ${
-                  complianceReport.issues.length === 0
-                    ? 'bg-emerald-950/30 border-emerald-500/40'
-                    : 'bg-amber-950/20 border-amber-500/40'
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {complianceReport.issues.length === 0 ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    ) : (
-                      <ShieldAlert className="w-4 h-4 text-amber-400" />
-                    )}
-                    <span className="text-xs font-bold text-slate-100">
-                      YouTube Monetization &amp; Ad-Safety Check: Индекс безопасности{' '}
-                      <span
-                        className={
-                          complianceReport.score >= 85
-                            ? 'text-emerald-400'
-                            : 'text-amber-400'
-                        }
-                      >
-                        {complianceReport.score}/100
-                      </span>
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setComplianceReport(null)}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
-                  >
-                    Скрыть отчет
-                  </button>
-                </div>
-
-                {complianceReport.issues.length === 0 ? (
-                  <p className="text-xs text-emerald-300">
-                    Триггерных слов и стоп-факторов демонетизации не найдено. Сценарий безопасен для зеленого значка монетизации YouTube.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-300">
-                      Найдены слова-триггеры алгоритмов YouTube. Нажмите на безопасный синоним для мгновенной автозамены в тексте:
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {complianceReport.issues.map((issue, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-[#0b0f17] border border-slate-800 rounded-lg p-3 space-y-2"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-rose-400">
-                              ⚠️ «{issue.word}»
-                            </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400">
-                              {issue.category}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {issue.replacements.map((rep, rIdx) => (
-                              <button
-                                key={rIdx}
-                                onClick={() => applySafeSynonym(issue.word, rep)}
-                                className="text-[11px] bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2 py-1 rounded transition cursor-pointer"
-                              >
-                                Заменить на «{rep}»
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ДВУХКОЛОНОЧНАЯ РАБОЧАЯ ЗОНА: ИСХОДНЫЙ ТЕКСТ И ГОТОВЫЙ СЦЕНАРИЙ */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Поле «Исходный текст» со счетчиком символов и слов */}
-              <div className="space-y-2 flex flex-col">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-300 uppercase">
-                    Исходный текст / Черновик / Заметка
-                  </label>
-                  <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
-                    Слов: <strong className="text-amber-400">{wordCount}</strong> | Символов:{' '}
-                    <strong className="text-amber-400">{charCount}</strong>
-                  </span>
-                </div>
-                <textarea
-                  rows={14}
-                  value={sourceText}
-                  onChange={e => setSourceText(e.target.value)}
-                  placeholder="Вставьте сырой текст статьи, заметку, архивную сводку или черновик сценария (можно со словами-триггерами для проверки YouTube Compliance)..."
-                  className="w-full flex-1 bg-[#0b0f17] border border-slate-800 focus:border-amber-500 rounded-xl p-4 text-xs text-slate-200 leading-relaxed outline-none custom-scroll"
-                />
-              </div>
-
-              {/* Поле «Готовый сценарий» с визуально выделенной плашкой первого 15-секундного хука */}
-              <div className="space-y-3 flex flex-col">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-amber-400 uppercase">
-                    Готовый сценарий с удержанием
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    Формат: {verbaMode === 'shorts_1sec' ? 'Shorts 60s' : 'Retention Script'}
-                  </span>
-                </div>
-
-                {/* Визуально выделенная плашка первого 15-секундного хука */}
-                <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-slate-900 border-2 border-amber-500/50 rounded-xl p-4 space-y-1.5 shadow-lg shadow-amber-500/5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500 text-slate-950 px-2 py-0.5 rounded">
-                      🔥 ПЕРВЫЕ 15 СЕКУНД (ЗОЛОТОЙ ХУК УДЕРЖАНИЯ)
-                    </span>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(generatedHook15s);
-                        showToast('15-секундный хук скопирован!', 'success');
-                      }}
-                      className="text-amber-400 hover:text-amber-300 text-[11px] flex items-center gap-1 cursor-pointer"
-                    >
-                      <Copy className="w-3.5 h-3.5" /> Копировать хук
-                    </button>
-                  </div>
-                  <p className="text-xs font-semibold text-slate-100 leading-relaxed">
-                    {generatedHook15s ||
-                      'Нажмите «[ ⚡ ПЕРЕДЕЛАТЬ ТЕКСТ ]» для генерации 15-секундного хука...'}
-                  </p>
-                </div>
-
-                {/* Если выбран режим Пак из 5 хуков — показываем все 5 вариантов */}
-                {generatedHookPack.length > 0 && (
-                  <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-3 space-y-1.5">
-                    <span className="text-[10px] font-bold text-amber-400 uppercase">
-                      Альтернативные варианты из пака (5 хуков):
-                    </span>
-                    <div className="space-y-1 max-h-32 overflow-y-auto custom-scroll pr-1">
-                      {generatedHookPack.map((h, i) => (
-                        <div
-                          key={i}
-                          onClick={() => setGeneratedHook15s(h)}
-                          className="text-[11px] text-slate-300 hover:text-amber-300 bg-slate-900/70 p-2 rounded border border-slate-800 cursor-pointer transition"
-                        >
-                          {h}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Основное поле готового сценария */}
-                <textarea
-                  rows={9}
-                  value={generatedScript}
-                  onChange={e => setGeneratedScript(e.target.value)}
-                  placeholder="Здесь появится готовый переработанный сценарий с петлями интриги..."
-                  className="w-full flex-1 bg-[#0b0f17] border border-slate-800 focus:border-amber-500 rounded-xl p-4 text-xs text-slate-200 leading-relaxed outline-none custom-scroll"
-                />
-
-                {/* Кнопки трансфера */}
-                <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
-                  <button
-                    onClick={handleCopyAllVerbaFlow}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
-                  >
-                    {copiedAll ? (
-                      <Check className="w-4 h-4 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-4 h-4 text-amber-400" />
-                    )}
-                    [ 📋 Копировать всё ]
-                  </button>
-                  <button
-                    onClick={handleTransferToCombine}
-                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 transition shadow-md shadow-amber-500/10 cursor-pointer"
-                  >
-                    <Clapperboard className="w-4 h-4" /> [ 🎬 В сборочный цех монтажа ]
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <VerbaFlowStudioView
+            sourceText={sourceText}
+            onSourceTextChange={setSourceText}
+            verbaMode={verbaMode}
+            onVerbaModeChange={setVerbaMode}
+            mysteryType={mysteryType}
+            onMysteryTypeChange={setMysteryType}
+            toneOfVoice={toneOfVoice}
+            onToneOfVoiceChange={setToneOfVoice}
+            complianceDictionary={COMPLIANCE_DICTIONARY}
+            onTransferToNarrativeMontage={(newScenes, fullScript) => {
+              setExternalNarrativeScenes(newScenes);
+              setTransferredScript(fullScript);
+              setActiveTab('combine');
+              showToast(
+                `🎬 В Повествовательный монтаж передано ${newScenes.length} сцен и полный сценарий (US English)!`,
+                'success'
+              );
+            }}
+            onApplyToThumbnailStudio={(shortText, ytTitle) => {
+              setThumbTitle(shortText);
+              setActiveTab('thumb');
+              showToast(`Хук-надпись «${shortText}» (${ytTitle}) передана в Студию 4K Превью!`, 'success');
+            }}
+            onNotify={showToast}
+          />
         </section>
 
         {/* СТАТУС БАР ОБЛАЧНОГО РЕНДЕРА (НИЖНЯЯ ПЛАШКА С POLLING GITHUB ACTIONS) */}

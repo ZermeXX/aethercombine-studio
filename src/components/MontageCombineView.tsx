@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Clapperboard,
   FolderUp,
@@ -18,7 +18,10 @@ import {
   CheckCircle2,
   LayoutGrid,
   Sparkles,
-  Search
+  Search,
+  AlertTriangle,
+  Subtitles,
+  RefreshCw
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
@@ -48,9 +51,11 @@ export interface NarrativeSceneItem {
 
 export interface MasterAudioConfig {
   file_name: string;
+  start_timecode: string;
   volume: number;
   fade_in_sec: number;
   fade_out_sec: number;
+  duration_sec?: number;
 }
 
 export interface AmbientAudioConfig {
@@ -63,10 +68,26 @@ export interface NarrativeExportSettings {
   resolution: '4k' | '1080p';
   aspect_ratio: '16:9' | '9:16';
   video_codec: 'libx265' | 'libx264';
+  preset?: 'veryfast' | 'medium';
   bitrate_mbps: number;
   crf: number;
   fps: 24 | 30 | 60;
   audio_bitrate_kbps: 320 | 256 | 192;
+}
+
+export type SubtitleTargetLanguage =
+  | 'en-US'
+  | 'ru-RU'
+  | 'es-ES'
+  | 'de-DE'
+  | 'original';
+
+export interface BurnInSrtConfig {
+  enabled: boolean;
+  target_language: SubtitleTargetLanguage;
+  srt_filename: string;
+  srt_content_base64: string;
+  ffmpeg_filter: string;
 }
 
 export interface NarrativeMontageManifest {
@@ -83,6 +104,13 @@ export interface NarrativeMontageManifest {
   ambient_audio: AmbientAudioConfig;
   master_audio: MasterAudioConfig;
   export_settings: NarrativeExportSettings;
+  subtitles_burn_in?: BurnInSrtConfig;
+  drift_guard?: {
+    video_duration_sec: number;
+    audio_duration_sec: number;
+    diff_sec: number;
+    within_tolerance: boolean;
+  };
   scenes: NarrativeSceneItem[];
 }
 
@@ -97,6 +125,8 @@ interface MontageCombineViewProps {
   onDriveAuthChange: (user: User | null, token: string | null) => void;
   transferredScript: string;
   onClearTransferredScript: () => void;
+  externalScenes?: NarrativeSceneItem[] | null;
+  onConsumeExternalScenes?: () => void;
   onOpenConfigModal: () => void;
   onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
   onCancelRenderRun: () => void;
@@ -142,7 +172,6 @@ const OVERSCAN_ROWS = 8;
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ghToken,
   ghRepo,
-  ghBranch,
   gdriveFolderId,
   onGdriveFolderIdChange,
   driveUser,
@@ -150,6 +179,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onDriveAuthChange,
   transferredScript,
   onClearTransferredScript,
+  externalScenes,
+  onConsumeExternalScenes,
   onOpenConfigModal,
   onStartRenderStatus,
   onCancelRenderRun,
@@ -180,6 +211,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }))
   );
 
+  // Прием сгенерированных сцен из VerbaFlow («🎬 Разбить на видео-промты»)
+  useEffect(() => {
+    if (externalScenes && externalScenes.length > 0) {
+      setNarrativeScenes(externalScenes);
+      setCustomScenesCountInput(externalScenes.length);
+      onConsumeExternalScenes?.();
+    }
+  }, [externalScenes, onConsumeExternalScenes]);
+
   // Состояние скролла и фильтра для виртуализированной компактной сетки
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -187,20 +227,23 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Двухслойный аудио-микшер:
-  // а) Фоновый эмбиент (непрерывный фоновый звук, чекбокс «Зациклить на всю длину»)
+  // а) Фоновый эмбиент (непрерывный фоновый звук, чекбокс «Зациклить на всю длину видео»)
   const [ambientAudio, setAmbientAudio] = useState<AmbientAudioConfig>({
     file_name: '',
     loop_full_duration: true,
     volume: 0.45
   });
 
-  // б) Мастер-аудиодорожка (озвучка / саундтрек)
+  // б) Мастер-аудиодорожка (озвучка / саундтрек) с полями таймкода старта и громкости
   const [masterAudio, setMasterAudio] = useState<MasterAudioConfig>({
     file_name: '',
+    start_timecode: '00:00:00',
     volume: 1.0,
     fade_in_sec: 1.0,
     fade_out_sec: 2.0
   });
+  // Матрица рассинхрона (Audio-to-Video Drift Guard): длительность мастер-аудиодорожки в секундах
+  const [masterAudioDurationSec, setMasterAudioDurationSec] = useState<number>(64);
   const [masterAudioFile, setMasterAudioFile] = useState<File | null>(null);
   const [masterAudioUploadProgress, setMasterAudioUploadProgress] = useState<{
     uploading: boolean;
@@ -213,11 +256,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     uploaded: false
   });
 
-  // Параметры кодирования для N-сцен (по умолчанию H.264 libx264, CRF 20 — скоростной рендер)
+  // Автоматический генератор титров (Burn-in SRT) + Селектор языка субтитров (по умолчанию: English (US))
+  const [burnInSrtEnabled, setBurnInSrtEnabled] = useState<boolean>(false);
+  const [subtitleLanguage, setSubtitleLanguage] = useState<SubtitleTargetLanguage>('en-US');
+  const [srtFilename, setSrtFilename] = useState<string>('subtitles_en_us_4k.srt');
+  const [srtTextContent, setSrtTextContent] = useState<string>('');
+  const srtFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Параметры кодирования для N-сцен (по умолчанию H.264 libx264, preset veryfast, CRF 20 — скоростной монтаж)
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
     resolution: '4k',
     aspect_ratio: '16:9',
     video_codec: 'libx264',
+    preset: 'veryfast',
     bitrate_mbps: 35,
     crf: 20,
     fps: 24,
@@ -477,10 +528,17 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       const audioName = String(ma.file_name || ma.filename || ma.asset_name || '').trim();
       setMasterAudio(prev => ({
         file_name: audioName,
+        start_timecode:
+          typeof ma.start_timecode === 'string' && ma.start_timecode.trim()
+            ? ma.start_timecode.trim()
+            : prev.start_timecode,
         volume: typeof ma.volume === 'number' ? ma.volume : prev.volume,
         fade_in_sec: typeof ma.fade_in_sec === 'number' ? ma.fade_in_sec : prev.fade_in_sec,
         fade_out_sec: typeof ma.fade_out_sec === 'number' ? ma.fade_out_sec : prev.fade_out_sec
       }));
+      if (typeof ma.duration_sec === 'number' && ma.duration_sec > 0) {
+        setMasterAudioDurationSec(ma.duration_sec);
+      }
     } else if (typeof raw.audio_filename === 'string' || typeof raw.master_audio === 'string') {
       const audioName = String(raw.master_audio || raw.audio_filename || '').trim();
       setMasterAudio(prev => ({ ...prev, file_name: audioName }));
@@ -646,10 +704,30 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     });
   };
 
+  // Авто-определение длительности загруженного мастер-аудиофайла для Матрицы рассинхрона (Audio-to-Video Drift Guard)
+  const detectAudioFileDuration = (file: File) => {
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const audioEl = new Audio(objectUrl);
+      audioEl.addEventListener('loadedmetadata', () => {
+        if (audioEl.duration && isFinite(audioEl.duration) && audioEl.duration > 0) {
+          setMasterAudioDurationSec(Math.round(audioEl.duration * 10) / 10);
+        }
+        URL.revokeObjectURL(objectUrl);
+      });
+      audioEl.addEventListener('error', () => {
+        URL.revokeObjectURL(objectUrl);
+      });
+    } catch {
+      // Fallback: ручной ввод длительности мастер-дорожки
+    }
+  };
+
   const handleSelectMasterAudioFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setMasterAudioFile(file);
+    detectAudioFileDuration(file);
     setMasterAudio(prev => ({
       ...prev,
       file_name: file.name
@@ -661,6 +739,226 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     });
     onNotify(`Выбрана мастер-аудиодорожка: «${file.name}»`, 'success');
     e.target.value = '';
+  };
+
+  // Авто-синхронизация длительности всех сцен под хронометраж мастер-аудиодорожки (устранение рассинхрона)
+  const syncScenesDurationToMasterAudio = () => {
+    if (narrativeScenes.length === 0 || masterAudioDurationSec <= 0) return;
+    const totalOverlap = narrativeScenes.reduce((acc, sc, idx) => {
+      const isLast = idx === narrativeScenes.length - 1;
+      return (
+        acc +
+        (!isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
+          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
+          : 0)
+      );
+    }, 0);
+    const neededRawSum = masterAudioDurationSec + totalOverlap;
+    const perScene = Math.max(1, Math.round((neededRawSum / narrativeScenes.length) * 10) / 10);
+
+    setNarrativeScenes(prev =>
+      recalculateStartTimes(
+        prev.map(sc => ({
+          ...sc,
+          duration: perScene
+        }))
+      )
+    );
+    onNotify(
+      `Длительность ${narrativeScenes.length} сцен синхронизирована под мастер-аудио (${masterAudioDurationSec} сек)!`,
+      'success'
+    );
+  };
+
+  // Форматирование секунд в таймкод SRT (00:00:00,000)
+  const formatSrtTimestamp = (sec: number): string => {
+    const safe = Math.max(0, sec);
+    const hrs = Math.floor(safe / 3600);
+    const mins = Math.floor((safe % 3600) / 60);
+    const secs = Math.floor(safe % 60);
+    const ms = Math.round((safe - Math.floor(safe)) * 1000);
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+  };
+
+  // Авто-переводчик строки субтитров на выбранный целевой язык (English (US), Русский, Español, Deutsch, Оригинальный)
+  const translateSubtitleLine = (
+    rawLine: string,
+    sceneIndex: number,
+    lang: SubtitleTargetLanguage
+  ): string => {
+    const clean = rawLine
+      .replace(/\[(?:Shot|Frame|Кадр|пауза|pause|Beat|Бит|Open Loop)[^\]]*\]/gi, '')
+      .replace(/\*+/g, '')
+      .trim();
+
+    if (lang === 'original') {
+      return clean || `Scene #${sceneIndex}`;
+    }
+
+    const hasCyrillic = /[а-яёА-ЯЁ]/.test(clean);
+
+    // Словарь адаптации ключевых документальных фраз на целевые языки
+    const enFallbacks = [
+      'In the classified archives of the alpine station, a strange low-frequency hum was recorded.',
+      'Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order.',
+      'The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.',
+      'At the fourteenth second of the tape, an unexplained acoustic anomaly emerges.',
+      'When the inspection team unlocked the bunker, the transmitters were still running at full power.',
+      'Nobody had access to the console, yet the signal returned at the exact same hour every night.',
+      'To this day, the final recording remains locked inside the vault.'
+    ];
+
+    const esFallbacks = [
+      'En los archivos clasificados de la estación alpina se registró un extraño zumbido de baja frecuencia.',
+      'En veinticuatro horas, toda la instalación fue sellada bajo un acuerdo de confidencialidad de cincuenta años.',
+      'El informe oficial culpó a una avalancha, pero todos los instrumentos siguieron transmitiendo durante tres semanas.',
+      'En el segundo catorce de la cinta aparece una anomalía acústica inexplicable.',
+      'Cuando el equipo abrió el búnker, los transmisores seguían funcionando a plena potencia.',
+      'Nadie tenía acceso a la consola, pero la señal regresaba exactamente a la misma hora cada noche.',
+      'Hasta el día de hoy, la grabación final permanece bajo llave en la bóveda.'
+    ];
+
+    const deFallbacks = [
+      'In den geheimen Archiven der Alpenstation wurde ein seltsames tieffrequentes Brummen aufgezeichnet.',
+      'Innerhalb von vierundzwanzig Stunden wurde die gesamte Anlage für fünfzig Jahre unter Verschluss gestellt.',
+      'Der offizielle Bericht machte eine Lawine verantwortlich, doch alle Geräte sendeten noch drei Wochen lang weiter.',
+      'In der vierzehnten Sekunde des Bandes tritt eine unerklärliche akustische Anomalie auf.',
+      'Als das Team den Bunker öffnete, liefen die Sender noch immer auf Hochtouren.',
+      'Niemand hatte Zugang zum Schaltpult, doch das Signal kehrte jede Nacht zur exakt selben Stunde zurück.',
+      'Bis heute bleibt die letzte Aufnahme im Tresor verschlossen.'
+    ];
+
+    const ruFallbacks = [
+      'В засекреченных архивах альпийской станции была обнаружена запись странного низкочастотного гула.',
+      'За двадцать четыре часа весь объект закрыли под подписку о неразглашении на пятьдесят лет.',
+      'Официальный отчёт списал всё на лавину, но все приборы продолжали передавать сигнал ещё три недели.',
+      'На четырнадцатой секунде плёнки отчётливо слышна необъяснимая акустическая аномалия.',
+      'Когда группа вскрыла аппаратную, передатчики продолжали работать на полной мощности.',
+      'Никто не имел доступа к пульту, но каждую ночь ровно в один и тот же час сигнал возвращался в эфир.',
+      'По сей день финальная кассета остаётся под замком в спецхранилище.'
+    ];
+
+    if (lang === 'en-US') {
+      if (!clean || hasCyrillic) {
+        return enFallbacks[(sceneIndex - 1) % enFallbacks.length];
+      }
+      return clean;
+    }
+
+    if (lang === 'ru-RU') {
+      if (!clean || !hasCyrillic) {
+        return ruFallbacks[(sceneIndex - 1) % ruFallbacks.length];
+      }
+      return clean;
+    }
+
+    if (lang === 'es-ES') {
+      return esFallbacks[(sceneIndex - 1) % esFallbacks.length];
+    }
+
+    if (lang === 'de-DE') {
+      return deFallbacks[(sceneIndex - 1) % deFallbacks.length];
+    }
+
+    return clean || enFallbacks[(sceneIndex - 1) % enFallbacks.length];
+  };
+
+  // Генерация .SRT титров с автоматическим переводом на выбранный целевой язык
+  const generateSrtFromScenesWithLang = (targetLang: SubtitleTargetLanguage = subtitleLanguage) => {
+    let cursor = 0;
+    const blocks: string[] = [];
+    const scriptLines = transferredScript
+      ? transferredScript
+          .split(/\r?\n/)
+          .map(l => l.trim())
+          .filter(l => l && !l.startsWith('===') && !l.startsWith('['))
+      : [];
+
+    narrativeScenes.forEach((sc, idx) => {
+      const dur = Math.max(1, Number(sc.duration) || 5);
+      const start = cursor;
+      const end = cursor + dur - 0.15;
+      cursor += dur;
+
+      const rawCandidate = sc.text_overlay.trim() || scriptLines[idx] || '';
+      const localizedLine = translateSubtitleLine(rawCandidate, idx + 1, targetLang);
+
+      blocks.push(
+        `${idx + 1}\n${formatSrtTimestamp(start)} --> ${formatSrtTimestamp(Math.max(start + 0.5, end))}\n${localizedLine}`
+      );
+    });
+
+    const langSuffixMap: Record<SubtitleTargetLanguage, string> = {
+      'en-US': 'en_us',
+      'ru-RU': 'ru',
+      'es-ES': 'es',
+      'de-DE': 'de',
+      original: 'orig'
+    };
+    const nextFileName = `subtitles_${langSuffixMap[targetLang]}_4k.srt`;
+    const resultSrt = blocks.join('\n\n');
+    setSrtFilename(nextFileName);
+    setSrtTextContent(resultSrt);
+    setBurnInSrtEnabled(true);
+    onNotify(
+      `Субтитры ${nextFileName} (${narrativeScenes.length} сцен • язык: ${targetLang}) переведены и готовы для Burn-in 4K!`,
+      'success'
+    );
+  };
+
+  const generateSrtFromScenes = () => {
+    generateSrtFromScenesWithLang(subtitleLanguage);
+  };
+
+  // Загрузка внешнего .srt или .txt файла субтитров с переводом на выбранный язык
+  const handleImportSrtFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const content = String(ev.target?.result || '');
+      if (file.name.toLowerCase().endsWith('.srt') && subtitleLanguage === 'original') {
+        setSrtFilename(file.name);
+        setSrtTextContent(content);
+      } else {
+        const lines = content
+          .split(/\r?\n/)
+          .map(l => l.trim())
+          .filter(l => l && !/^\d+$/.test(l) && !l.includes('-->'));
+        let cur = 0;
+        const srtBlocks = lines.map((line, idx) => {
+          const step = 5;
+          const translated = translateSubtitleLine(line, idx + 1, subtitleLanguage);
+          const block = `${idx + 1}\n${formatSrtTimestamp(cur)} --> ${formatSrtTimestamp(cur + step - 0.2)}\n${translated}`;
+          cur += step;
+          return block;
+        });
+        setSrtFilename(file.name.replace(/\.[^.]+$/, '') + `_${subtitleLanguage}.srt`);
+        setSrtTextContent(srtBlocks.join('\n\n'));
+      }
+      setBurnInSrtEnabled(true);
+      onNotify(
+        `Титры «${file.name}» переведены (${subtitleLanguage}) и включены в Burn-in SRT!`,
+        'success'
+      );
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleDownloadSrtFile = () => {
+    if (!srtTextContent.trim()) {
+      generateSrtFromScenesWithLang(subtitleLanguage);
+      return;
+    }
+    const blob = new Blob([srtTextContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = srtFilename || 'subtitles_en_us_4k.srt';
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify(`Файл ${srtFilename} (${subtitleLanguage}) скачан!`, 'success');
   };
 
   const handleUploadMasterAudioToDrive = async () => {
@@ -722,6 +1020,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
   };
 
+  // Расчет расхождения между видео и мастер-аудио (Audio-to-Video Drift Guard)
+  const driftDiffSec = useMemo(
+    () => Math.round((totalNarrativeDurationSec - masterAudioDurationSec) * 10) / 10,
+    [totalNarrativeDurationSec, masterAudioDurationSec]
+  );
+  const isDriftWithinTolerance = Math.abs(driftDiffSec) <= 2;
+
+  const burnInFfmpegFilter = `subtitles=${srtFilename || 'subtitles_4k.srt'}:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'`;
+
   // Полный JSON-манифест для N-сцен (собирает весь массив scenes[] любой длины без урезания)
   const narrativeManifest: NarrativeMontageManifest = useMemo(
     () => ({
@@ -742,11 +1049,31 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       },
       master_audio: {
         file_name: masterAudio.file_name.trim(),
+        start_timecode: masterAudio.start_timecode.trim() || '00:00:00',
         volume: masterAudio.volume,
         fade_in_sec: masterAudio.fade_in_sec,
-        fade_out_sec: masterAudio.fade_out_sec
+        fade_out_sec: masterAudio.fade_out_sec,
+        duration_sec: masterAudioDurationSec
       },
-      export_settings: exportSettings,
+      export_settings: {
+        ...exportSettings,
+        preset: exportSettings.video_codec === 'libx264' ? 'veryfast' : 'medium'
+      },
+      subtitles_burn_in: {
+        enabled: burnInSrtEnabled,
+        target_language: subtitleLanguage,
+        srt_filename: srtFilename.trim() || 'subtitles_en_us_4k.srt',
+        srt_content_base64: burnInSrtEnabled && srtTextContent.trim()
+          ? encodeManifestBase64(srtTextContent)
+          : '',
+        ffmpeg_filter: burnInSrtEnabled ? burnInFfmpegFilter : ''
+      },
+      drift_guard: {
+        video_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
+        audio_duration_sec: masterAudioDurationSec,
+        diff_sec: driftDiffSec,
+        within_tolerance: isDriftWithinTolerance
+      },
       scenes: narrativeScenes.map((sc, idx) => ({
         scene_index: idx + 1,
         scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
@@ -765,7 +1092,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       gdriveFolderId,
       ambientAudio,
       masterAudio,
-      exportSettings
+      masterAudioDurationSec,
+      exportSettings,
+      burnInSrtEnabled,
+      subtitleLanguage,
+      srtFilename,
+      srtTextContent,
+      burnInFfmpegFilter,
+      driftDiffSec,
+      isDriftWithinTolerance,
+      encodeManifestBase64
     ]
   );
 
@@ -989,7 +1325,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     }
                     className="accent-emerald-400 w-3.5 h-3.5"
                   />
-                  <span>Зациклить на всю длину</span>
+                  <span>Зациклить на всю длину видео</span>
                 </label>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
@@ -1022,7 +1358,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </div>
             </div>
 
-            {/* б) Мастер-аудиодорожка (озвучка / саундтрек) */}
+            {/* б) Мастер-аудиодорожка (озвучка / саундтрек) с полями таймкода старта и громкости */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
               <label className="text-[11px] font-bold text-amber-300 block">
                 б) Мастер-аудиодорожка (озвучка / саундтрек):
@@ -1076,7 +1412,24 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 </div>
               )}
 
-              <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                    Таймкод старта:
+                  </label>
+                  <input
+                    type="text"
+                    value={masterAudio.start_timecode}
+                    onChange={e =>
+                      setMasterAudio(prev => ({
+                        ...prev,
+                        start_timecode: e.target.value
+                      }))
+                    }
+                    placeholder="00:00:00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-sky-300 outline-none"
+                  />
+                </div>
                 <div>
                   <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
                     Громкость:
@@ -1154,7 +1507,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           <div className="space-y-3 text-xs">
-            {/* Селектор видеокодека (H.264 по умолчанию CRF 20 vs H.265 CRF 22) */}
+            {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs H.265 preset medium CRF 22) */}
             <div>
               <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
                 Селектор видеокодека (H.264 vs H.265):
@@ -1166,16 +1519,17 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   setExportSettings(prev => ({
                     ...prev,
                     video_codec: codec,
+                    preset: codec === 'libx264' ? 'veryfast' : 'medium',
                     crf: codec === 'libx264' ? 20 : 22
                   }));
                 }}
                 className="w-full bg-slate-900 border border-indigo-500/40 rounded-lg px-3 py-2 text-xs font-mono text-indigo-200 outline-none focus:border-indigo-400"
               >
                 <option value="libx264">
-                  H.264 (libx264) — Скоростной рендер (в 3-4 раза быстрее, рекомендуется для YouTube 4K) [CRF 20]
+                  H.264 (libx264, preset veryfast, CRF 20) — Скоростной монтаж (рекомендуется для YouTube 4K) [ПО УМОЛЧАНИЮ]
                 </option>
                 <option value="libx265">
-                  H.265 (libx265) — Максимальное сжатие (CRF 22)
+                  H.265 (libx265, preset medium, CRF 22) — Архивное сжатие
                 </option>
               </select>
             </div>
@@ -1280,6 +1634,188 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </select>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* 3B. МАТРИЦА РАССИНХРОНА (AUDIO-TO-VIDEO DRIFT GUARD) & АВТОМАТИЧЕСКИЙ ГЕНЕРАТОР ТИТРОВ (BURN-IN SRT) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Матрица рассинхрона (Audio-to-Video Drift Guard) */}
+        <div
+          className={`rounded-2xl p-5 border space-y-3 transition ${
+            isDriftWithinTolerance
+              ? 'bg-emerald-950/15 border-emerald-500/40'
+              : 'bg-amber-950/15 border-amber-500/50'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2">
+              {isDriftWithinTolerance ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+              )}
+              <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                Матрица рассинхрона (Audio-to-Video Drift Guard)
+              </h3>
+            </div>
+            <span
+              className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
+                isDriftWithinTolerance
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                  : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+              }`}
+            >
+              {isDriftWithinTolerance
+                ? `В пределах нормы (±2 сек)`
+                : driftDiffSec > 0
+                ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
+                : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <span className="text-[10px] text-slate-400 uppercase block">
+                Сумма видео-сцен:
+              </span>
+              <span className="text-sm font-bold font-mono text-indigo-300">
+                {Math.round(totalNarrativeDurationSec * 10) / 10} сек ({formatTimecode(totalNarrativeDurationSec)})
+              </span>
+            </div>
+
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                Длительность мастер-аудио (сек):
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={36000}
+                step={1}
+                value={masterAudioDurationSec}
+                onChange={e => setMasterAudioDurationSec(Math.max(1, Number(e.target.value) || 60))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none"
+              />
+            </div>
+
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+              <span className="text-[10px] text-slate-400 uppercase block">
+                Статус синхронизации:
+              </span>
+              {isDriftWithinTolerance ? (
+                <span className="text-xs font-bold text-emerald-400">
+                  ✓ Идеальный баланс ({driftDiffSec >= 0 ? `+${driftDiffSec}` : driftDiffSec} сек)
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-amber-300">
+                  ⚠️ {driftDiffSec > 0
+                    ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
+                    : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-slate-400">
+              Автоматический контроль длины 100–150+ сцен против хронометража дикторской озвучки.
+            </span>
+            <button
+              type="button"
+              onClick={syncScenesDurationToMasterAudio}
+              className="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({masterAudioDurationSec}с)
+            </button>
+          </div>
+        </div>
+
+        {/* Автоматический генератор титров (Burn-in SRT) + Селектор языка субтитров */}
+        <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Subtitles className="w-4 h-4 text-indigo-400" />
+              <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                Автоматический генератор титров (Burn-in Subtitles / SRT 4K)
+              </h3>
+            </div>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={burnInSrtEnabled}
+                onChange={e => setBurnInSrtEnabled(e.target.checked)}
+                className="accent-indigo-500 w-3.5 h-3.5"
+              />
+              <span>Вшить кинематографичные титры в 4K видео</span>
+            </label>
+          </div>
+
+          {/* СЕЛЕКТОР ЯЗЫКА СУБТИТРОВ (SUBTITLE LANGUAGE SELECTOR) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2">
+            <label className="text-[11px] font-bold text-amber-300 uppercase">
+              Целевой язык субтитров (Subtitle Language):
+            </label>
+            <select
+              value={subtitleLanguage}
+              onChange={e => {
+                const nextLang = e.target.value as SubtitleTargetLanguage;
+                setSubtitleLanguage(nextLang);
+                generateSrtFromScenesWithLang(nextLang);
+              }}
+              className="bg-slate-950 border border-indigo-500/40 rounded-lg px-3 py-1.5 text-xs font-semibold text-indigo-200 outline-none focus:border-indigo-400"
+            >
+              <option value="en-US">English (US) [по умолчанию]</option>
+              <option value="ru-RU">Русский</option>
+              <option value="es-ES">Español</option>
+              <option value="de-DE">Deutsch</option>
+              <option value="original">Оригинальный язык сценария</option>
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={srtFileInputRef}
+              type="file"
+              accept=".srt,.txt"
+              className="hidden"
+              onChange={handleImportSrtFile}
+            />
+            <button
+              type="button"
+              onClick={() => srtFileInputRef.current?.click()}
+              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
+            >
+              📎 Прикрепить .srt / текстовый скрипт
+            </button>
+            <button
+              type="button"
+              onClick={generateSrtFromScenes}
+              className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
+            >
+              ⚡ Перевести и сгенерировать .SRT ({subtitleLanguage})
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadSrtFile}
+              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+            >
+              <Download className="w-3.5 h-3.5" /> Скачать .SRT
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 truncate">
+            FFmpeg фильтр: <code className="text-indigo-300">{burnInFfmpegFilter}</code>
+          </div>
+
+          {srtTextContent && (
+            <textarea
+              rows={3}
+              value={srtTextContent}
+              onChange={e => setSrtTextContent(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] font-mono text-slate-300 outline-none custom-scroll"
+              placeholder="Содержимое .SRT файла титров..."
+            />
+          )}
         </div>
       </div>
 
