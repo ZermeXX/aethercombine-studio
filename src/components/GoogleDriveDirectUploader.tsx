@@ -62,6 +62,8 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
   const [isSigningIn, setIsSigningIn] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const DEFAULT_DRIVE_FOLDER_ID = '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK';
+
   const handleLogin = async (): Promise<string | null> => {
     setIsSigningIn(true);
     try {
@@ -87,67 +89,15 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
     onNotify('Сессия Google Drive завершена', 'info');
   };
 
-  const addFilesToQueue = (incomingFiles: File[]) => {
-    if (!incomingFiles.length) return;
+  const uploadBatchItems = async (itemsToUpload: DriveUploadQueueItem[], explicitToken?: string | null) => {
+    if (!itemsToUpload.length) return;
 
-    // 1. Немедленно передаем выбранные файлы наверх для автоматической подстановки их реальных имен в свободные слоты
-    onFilesSelected(incomingFiles);
-
-    // 2. Добавляем в список очереди загрузки Google Drive
-    setQueue(prev => {
-      const existingNames = new Set(prev.map(item => item.file.name));
-      const newItems: DriveUploadQueueItem[] = incomingFiles
-        .filter(f => !existingNames.has(f.name))
-        .map(file => ({
-          id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          file,
-          progress: 0,
-          status: 'queued'
-        }));
-      return [...prev, ...newItems];
-    });
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
-    addFilesToQueue(files);
-    e.target.value = '';
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isDragging) setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    const files: File[] = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
-    addFilesToQueue(files);
-  };
-
-  const uploadAllQueuedToDrive = async () => {
-    const cleanFolder = targetFolderId.trim();
-    if (!cleanFolder) {
-      onNotify('Укажите ID целевой папки Google Drive (target_folder_id / GDRIVE_FOLDER_ID)!', 'error');
-      return;
+    const cleanFolder = targetFolderId.trim() || DEFAULT_DRIVE_FOLDER_ID;
+    if (!targetFolderId.trim()) {
+      onTargetFolderIdChange(DEFAULT_DRIVE_FOLDER_ID);
     }
 
-    const pendingItems = queue.filter(item => item.status !== 'done');
-    if (pendingItems.length === 0) {
-      onNotify('Все файлы в списке уже выгружены в Google Drive!', 'info');
-      return;
-    }
-
-    let activeToken = driveToken || getDriveAccessToken();
+    let activeToken = explicitToken || driveToken || getDriveAccessToken();
     if (!activeToken) {
       activeToken = await handleLogin();
       if (!activeToken) return;
@@ -156,7 +106,7 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
     setIsUploadingBatch(true);
     let successCount = 0;
 
-    for (const item of pendingItems) {
+    for (const item of itemsToUpload) {
       setQueue(prev =>
         prev.map(q =>
           q.id === item.id ? { ...q, status: 'uploading', progress: 1, errorMessage: undefined } : q
@@ -197,10 +147,68 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
     setIsUploadingBatch(false);
     if (successCount > 0) {
       onNotify(
-        `✅ В папку Google Drive (${cleanFolder}) успешно загружено файлов: ${successCount} из ${pendingItems.length}!`,
+        `✅ В папку Google Drive (${cleanFolder}) физически выгружено файлов: ${successCount} из ${itemsToUpload.length}!`,
         'success'
       );
     }
+  };
+
+  const addFilesToQueue = (incomingFiles: File[]) => {
+    if (!incomingFiles.length) return;
+
+    // а) Заполняем слоты таймлайна реальными именами файлов
+    onFilesSelected(incomingFiles);
+
+    // б) Формируем очередь и сразу запускаем физическую выгрузку в указанную папку Google Drive с прогресс-барами (0-100%)
+    const newItems: DriveUploadQueueItem[] = incomingFiles.map(file => ({
+      id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      file,
+      progress: 0,
+      status: 'queued'
+    }));
+
+    setQueue(prev => {
+      const incomingNames = new Set(incomingFiles.map(f => f.name));
+      const filteredPrev = prev.filter(item => !incomingNames.has(item.file.name));
+      return [...filteredPrev, ...newItems];
+    });
+
+    void uploadBatchItems(newItems);
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    addFilesToQueue(files);
+    e.target.value = '';
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const files: File[] = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+    addFilesToQueue(files);
+  };
+
+  const uploadAllQueuedToDrive = async () => {
+    const pendingItems = queue.filter(item => item.status !== 'done');
+    if (pendingItems.length === 0) {
+      onNotify('Все файлы в списке уже выгружены в Google Drive!', 'info');
+      return;
+    }
+    await uploadBatchItems(pendingItems);
   };
 
   const formatBytes = (bytes: number) => {

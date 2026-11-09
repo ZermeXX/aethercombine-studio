@@ -804,7 +804,7 @@ export default function App() {
   );
   const [ghBranch, setGhBranch] = useState<string>(() => localStorage.getItem('ac_gh_branch') || 'main');
   const [gdriveFolderId, setGdriveFolderId] = useState<string>(
-    () => localStorage.getItem('ac_gdrive_folder_id') || ''
+    () => localStorage.getItem('ac_gdrive_folder_id') || '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK'
   );
   const [gdriveSaKey, setGdriveSaKey] = useState<string>(
     () => localStorage.getItem('ac_gdrive_sa_key') || ''
@@ -1641,11 +1641,16 @@ export default function App() {
         return next;
       });
 
-      // Автоматически заполняем свободные слоты (где file_name пустой '') реальными именами выбранных видеофайлов
+      // Автоматически заполняем слоты таймлайна (и вставки inserts) реальными именами перетащенных видеофайлов
       if (videoFiles.length > 0) {
         setTimelineSlots(prev => {
-          const next = [...prev];
+          const next = prev.map(sl => ({
+            ...sl,
+            inserts: sl.inserts.map(ins => ({ ...ins }))
+          }));
           let qIdx = 0;
+
+          // 1. Заполняем пустые основные слоты (file_name === '')
           for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
             if (!next[i].file_name.trim()) {
               const exactName = videoFiles[qIdx].name;
@@ -1660,12 +1665,55 @@ export default function App() {
               qIdx += 1;
             }
           }
+
+          // 2. Оставшимися файлами заполняем пустые вставки (inserts) внутри слотов
+          for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
+            for (let j = 0; j < next[i].inserts.length && qIdx < videoFiles.length; j++) {
+              if (!next[i].inserts[j].file_name.trim()) {
+                const exactName = videoFiles[qIdx].name;
+                next[i].inserts[j] = {
+                  ...next[i].inserts[j],
+                  file_name: exactName,
+                  filename: exactName
+                };
+                qIdx += 1;
+              }
+            }
+          }
+
+          // 3. Если все слоты и вставки уже были заполнены ранее (qIdx === 0), обновляем их по порядку новыми перетащенными файлами
+          if (qIdx === 0) {
+            for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
+              const exactName = videoFiles[qIdx].name;
+              next[i] = {
+                ...next[i],
+                file_name: exactName,
+                base_content: {
+                  ...(next[i].base_content || {}),
+                  file_name: exactName
+                }
+              };
+              qIdx += 1;
+            }
+            for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
+              for (let j = 0; j < next[i].inserts.length && qIdx < videoFiles.length; j++) {
+                const exactName = videoFiles[qIdx].name;
+                next[i].inserts[j] = {
+                  ...next[i].inserts[j],
+                  file_name: exactName,
+                  filename: exactName
+                };
+                qIdx += 1;
+              }
+            }
+          }
+
           return next;
         });
       }
 
       showToast(
-        `Файлы добавлены (${files.length} шт.) — их точные имена автоматически подставлены в свободные слоты!`,
+        `Файлы добавлены (${files.length} шт.) — слоты таймлайна заполнены, запущена выгрузка в Google Drive!`,
         'success'
       );
     },
@@ -3743,7 +3791,7 @@ export default function App() {
               </div>
             )}
 
-            {/* ПРЯМАЯ DRAG-AND-DROP ВЫГРУЗКА ИСХОДНИКОВ СЛОТОВ В ТЕКУЩУЮ ПАПКУ GOOGLE DRIVE (RESUMABLE UPLOAD) */}
+            {/* ЕДИНЫЙ РАБОЧИЙ БЛОК ЗАГРУЗКИ ВИДЕО В GOOGLE DRIVE + АВТОЗАПОЛНЕНИЕ СЛОТОВ ТАЙМЛАЙНА */}
             <GoogleDriveDirectUploader
               targetFolderId={gdriveFolderId}
               onTargetFolderIdChange={newFolder => {
@@ -3759,94 +3807,94 @@ export default function App() {
               onFilesSelected={handleLoopFilesSelected}
               onNotify={showToast}
               accentColor="amber"
-              title="Прямая загрузка исходных видеоклипов в текущую папку Google Drive (Resumable Upload)"
-              subtitle="Перетащите исходные видеоклипы сюда или выберите файлы — они выгружаются строго в указанную папку Google Drive, а их точные имена автоматически подставляются в свободные слоты таймлайна"
+              title="1. Единая зона загрузки исходных видеоклипов в Google Drive (Resumable Upload)"
+              subtitle="Перетащите исходные видеоклипы сюда или выберите файлы — их имена сразу заполнят слоты таймлайна, а сами файлы физически выгрузятся в папку Google Drive с прогресс-барами (0–100%)"
             />
 
-            {/* 1 & 2. ДРОПЗОНА ПАКЕТНОЙ ПРИВЯЗКИ АССЕТОВ (СЛОТЫ 10С + ВСТАВКИ E1..E3 + OMNI 1.2 FLASH BED) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase">
-                    1. Дропзона исходников 10 сек (Акты 1–6 + Вставки E1, E2, E3)
-                  </label>
-                  <span className="text-[10px] font-mono text-amber-400">
-                    В пуле: {Object.keys(uploadedLoopAssets).length} файл(ов)
-                  </span>
+            {/* 2. КОМПАКТНАЯ ПАНЕЛЬ НАСТРОЕК ЗВУКА: НАТИВНЫЙ ЗВУК OMNI / CONTINUOUS_BED (БЕЗ ПСЕВДО-ДРОПЗОНЫ) */}
+            <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Headphones className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-wider block">
+                      2. Нативный звук Omni / continuous_bed (Аудио-фильтр манифеста)
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Управляет микшированием звуковой дорожки в <code className="text-amber-300 font-mono">filter_complex</code> (<code className="text-emerald-400 font-mono">acrossfade=d={actCrossfadeSec}</code> + <code className="text-sky-400 font-mono">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>)
+                    </span>
+                  </div>
                 </div>
-                <div
-                  onClick={() => loopVideoInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition bg-[#0b0f17]/50 ${
-                    expectedVideoFilename && !isAssetMatched(expectedVideoFilename)
-                      ? 'border-amber-500/60 hover:border-amber-400'
-                      : 'border-slate-800 hover:border-amber-500/40'
-                  }`}
-                >
+
+                <label className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-3.5 py-2 rounded-xl text-xs font-semibold text-amber-300 cursor-pointer select-none">
                   <input
-                    ref={loopVideoInputRef}
-                    type="file"
-                    id="loop-video-file"
-                    multiple
-                    accept="video/*,image/*"
-                    className="hidden"
-                    onChange={handleLoopMedia}
+                    type="checkbox"
+                    checked={continuousBed.enabled}
+                    onChange={e =>
+                      setContinuousBed(prev => ({ ...prev, enabled: e.target.checked }))
+                    }
+                    className="accent-amber-500 w-4 h-4"
                   />
-                  <Film className="w-9 h-9 text-amber-500 mx-auto mb-2" />
-                  <p className="text-sm font-semibold text-slate-200" id="loop-media-label">
-                    {Object.keys(uploadedLoopAssets).length > 0
-                      ? `🎥 Загружено ассетов: ${Object.keys(uploadedLoopAssets).length} (${
-                          loopMedia?.name || ''
-                        })`
-                      : expectedVideoFilename
-                      ? `Загрузите ожидаемый файл: ${expectedVideoFilename} (и вставки E1, E2, E3)`
-                      : 'Перетащите 10-секундные исходники слотов и клипы вставок E1/E2/E3 (multiple)'}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Бесшовная петля 10с исходников со швом video+audio crossfade ровно <code className="text-amber-400">{internalLoopCrossfadeSec.toFixed(1)} сек</code>
-                  </p>
-                </div>
+                  <span>Включить непрерывную звуковую подложку (amix)</span>
+                </label>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase">
-                    2. Нативный звук Omni 1.2 Flash + Непрерывный фоновый слой (continuous_bed)
-                  </label>
-                  <label className="flex items-center gap-1.5 text-[11px] text-amber-400 cursor-pointer">
+              {continuousBed.enabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80 text-xs">
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                      Имя аудиофайла подложки в Google Drive (continuous_bed.file_name):
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={continuousBed.enabled}
+                      type="text"
+                      value={continuousBed.file_name}
                       onChange={e =>
-                        setContinuousBed(prev => ({ ...prev, enabled: e.target.checked }))
+                        setContinuousBed(prev => ({ ...prev, file_name: e.target.value }))
                       }
-                      className="accent-amber-500"
+                      placeholder="Напр.: ambient_bed.wav (оставьте пустым для нативного звука клипов)"
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
                     />
-                    <span>Включить continuous_bed (amix)</span>
-                  </label>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                      Вес нативного звука (veo_weight):
+                    </label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={2.0}
+                      step={0.05}
+                      value={continuousBed.veo_audio_weight}
+                      onChange={e =>
+                        setContinuousBed(prev => ({
+                          ...prev,
+                          veo_audio_weight: Math.max(0.1, Number(e.target.value) || 0.85)
+                        }))
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                      Вес подложки (bed_weight):
+                    </label>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={2.0}
+                      step={0.05}
+                      value={continuousBed.bed_audio_weight}
+                      onChange={e =>
+                        setContinuousBed(prev => ({
+                          ...prev,
+                          bed_audio_weight: Math.max(0.1, Number(e.target.value) || 0.55)
+                        }))
+                      }
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-sky-300 outline-none"
+                    />
+                  </div>
                 </div>
-                <div
-                  onClick={() => loopAudioInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl p-6 text-center transition bg-[#0b0f17]/50 cursor-pointer"
-                >
-                  <input
-                    ref={loopAudioInputRef}
-                    type="file"
-                    id="loop-audio-file"
-                    accept="audio/*"
-                    className="hidden"
-                    onChange={handleLoopAudio}
-                  />
-                  <Headphones className="w-9 h-9 text-amber-500 mx-auto mb-2" />
-                  <p className="text-sm font-semibold text-slate-200" id="loop-audio-label">
-                    {loopAudio
-                      ? `🎧 ${loopAudio.name}`
-                      : `Фоновый слой: ${continuousBed.file_name} (Omni 1.2 Flash Native Audio)`}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Аудио синхронно следует за видеокроссфейдом актов (<code className="text-emerald-400">acrossfade=d={actCrossfadeSec}</code>) + мастеринг <code className="text-sky-400">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* БЛОК ПАРАМЕТРОВ СТЫКОВ АКТОВ (90 СЕК), ШВА ПЕТЛИ (1.0 СЕК), ЧЕРНОГО ЭКРАНА (2 СЕК) И НОРМАЛИЗАЦИИ LOUDNORM */}
