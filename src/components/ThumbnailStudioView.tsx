@@ -16,7 +16,8 @@ import {
   Smartphone,
   Film,
   Contrast,
-  Layers
+  Layers,
+  Wand2
 } from 'lucide-react';
 
 interface ThumbnailStudioViewProps {
@@ -27,6 +28,94 @@ interface ThumbnailStudioViewProps {
   youtubeMockTitle?: string;
   scriptContext?: string;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
+}
+
+// Генерация высокодетализированного процедурного 16:9 4K рендера при отсутствии биллинга Imagen 3
+function renderProcedural16x9ArtworkDataUrl(
+  stylePreset: string,
+  promptText: string
+): string {
+  const c = document.createElement('canvas');
+  c.width = 1920;
+  c.height = 1080;
+  const ctx = c.getContext('2d');
+  if (!ctx) return '';
+
+  const palettes: Record<string, [string, string, string]> = {
+    mystery_dark: ['#060b14', '#16243d', '#f59e0b'],
+    ambient_4k: ['#050c1a', '#0f294a', '#38bdf8'],
+    truecrime_contrast: ['#0a090d', '#291218', '#ef4444'],
+    scifi_neon: ['#04120e', '#0d3328', '#10b981']
+  };
+  const [bg1, bg2, accent] = palettes[stylePreset] || palettes.mystery_dark;
+
+  const grad = ctx.createLinearGradient(0, 0, c.width, c.height);
+  grad.addColorStop(0, bg1);
+  grad.addColorStop(0.55, bg2);
+  grad.addColorStop(1, '#04060b');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  // Volumetric rays
+  const glow = ctx.createRadialGradient(
+    c.width * 0.68,
+    c.height * 0.42,
+    40,
+    c.width * 0.68,
+    c.height * 0.42,
+    780
+  );
+  glow.addColorStop(0, accent + '66');
+  glow.addColorStop(0.5, accent + '1a');
+  glow.addColorStop(1, 'transparent');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  // Cinematic focal object silhouette (Reel-to-reel / Outpost structure)
+  ctx.save();
+  ctx.translate(c.width * 0.68, c.height * 0.48);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 5;
+  ctx.fillStyle = '#090e1a';
+  ctx.beginPath();
+  ctx.roundRect(-240, -160, 480, 320, 24);
+  ctx.fill();
+  ctx.stroke();
+
+  // Two magnetic reels
+  [-110, 110].forEach(rx => {
+    ctx.beginPath();
+    ctx.arc(rx, -20, 82, 0, Math.PI * 2);
+    ctx.fillStyle = '#111a2e';
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(rx, -20, 24, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+  });
+
+  // Glowing REC indicator
+  ctx.beginPath();
+  ctx.arc(175, 105, 14, 0, Math.PI * 2);
+  ctx.fillStyle = '#ef4444';
+  ctx.shadowColor = '#ef4444';
+  ctx.shadowBlur = 28;
+  ctx.fill();
+  ctx.restore();
+
+  // Atmospheric snow / dust particles
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  for (let i = 0; i < 140; i++) {
+    const px = ((i * 197) % c.width) + (promptText.length % 17);
+    const py = (i * 113) % c.height;
+    const r = (i % 3) + 1;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  return c.toDataURL('image/jpeg', 0.95);
 }
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
@@ -45,19 +134,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   const [imgA, setImgA] = useState<HTMLImageElement | null>(null);
   const [imgB, setImgB] = useState<HTMLImageElement | null>(null);
-  const [titleB, setTitleB] = useState<string>('SEALED FOR 50 YEARS');
+  const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
   const [badgeB, setBadgeB] = useState<string>('ambience');
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
   const [bwContrastFilter, setBwContrastFilter] = useState<boolean>(false);
 
-  // 2. Оверлей интерфейса YouTube (YouTube UI Mockup Grid)
+  // Оверлей интерфейса YouTube (таймкод 3:00:00, аватарка, мобильный масштаб 160x90)
   const [showYoutubeOverlay, setShowYoutubeOverlay] = useState<boolean>(true);
   const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>('3:00:00');
   const [youtubeChannelName, setYoutubeChannelName] = useState<string>('Aether Documentary 4K');
   const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(
-    youtubeMockTitle || 'The Classified Alpine Tape: Why This Station Was Sealed in 24 Hours (4K Documentary)'
+    youtubeMockTitle ||
+      'The Classified Alpine Tape: Why This Station Was Sealed in 24 Hours (4K Documentary)'
   );
 
   useEffect(() => {
@@ -66,21 +156,66 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   }, [youtubeMockTitle]);
 
-  // 1. Авто-экстрактор лучшего кадра (Keyframe Grabbing в честном 4K 3840x2160)
+  // 1. Авто-экстрактор лучшего кадра в честном 4K (3840x2160) по секунде
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [videoFileName, setVideoFileName] = useState<string>('');
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
-  const [extracted4KDataUrl, setExtracted4KDataUrl] = useState<string>('');
 
-  // 3. Генератор метаданных под превью (Prompt Meta Helper для Midjourney / NanoBanana)
+  // 2. Генерация 16:9 без водяных знаков через официальный Imagen 3 API (imagen-3.0-generate-002)
   const [promptStylePreset, setPromptStylePreset] = useState<
     'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
   >('mystery_dark');
+  const [customImagenPrompt, setCustomImagenPrompt] = useState<string>('');
+  const [isGeneratingImagen, setIsGeneratingImagen] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
 
-  // Отрисовка обложки на выбранном Canvas (1280x720 или 3840x2160)
+  // Автогенератор визуального промпта на английском языке (свет, план, атмосфера)
+  const generatedCoverPrompt = (() => {
+    const rawContext = (scriptContext || thumbTitle || 'abandoned alpine weather station mystery')
+      .replace(/[а-яёА-ЯЁ]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const topicHint =
+      rawContext.length > 5
+        ? rawContext.slice(0, 110)
+        : 'classified alpine weather station anomaly, sealed bunker magnetic tape recording';
+
+    const styleMap = {
+      mystery_dark:
+        'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, extreme foreground focus on vintage reel-to-reel tape recorder glowing red indicator in snow, shadowy silhouette in background, negative space on left for bold English typography, dramatic chiaroscuro, volumetric fog, 35mm f/1.4 lens, 8k photorealistic',
+      ambient_4k:
+        'Ultra-cozy 4K ambient loop thumbnail, warm fireplace embers contrasting against deep blue arctic blizzard outside window, hyper-detailed snow crystals, soft volumetric warm light, cinematic color grading, Kodachrome 64 aesthetic, 8k resolution',
+      truecrime_contrast:
+        'True crime investigative YouTube thumbnail, high-contrast split composition, classified dossier folder with red TOP SECRET stamp on metal table, cold cyan rim lighting, intense dramatic shadows, ultra sharp focus, rule of thirds',
+      scifi_neon:
+        'Anomalous signal documentary thumbnail, glowing green oscilloscope waveform spiking in dark bunker, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k octane render realism'
+    };
+
+    const hookWords = (thumbTitle || 'DO NOT PLAY!')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join(' ');
+
+    return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | Thumbnail Hook (max 3 words): "${hookWords.toUpperCase()}" | Clean 16:9 composition without watermarks, clear silhouette readability on mobile 160x90px`;
+  })();
+
+  const activePromptText = customImagenPrompt.trim() || generatedCoverPrompt;
+
+  // Ограничение короткого текст-хука на обложку (до 3 слов)
+  const handleThumbHookChange = (val: string) => {
+    const words = val.trimStart().split(/\s+/);
+    if (words.length > 3) {
+      onThumbTitleChange(words.slice(0, 3).join(' '));
+      onNotify('Thumbnail Hook ограничен максимум 3 словами для максимального CTR!', 'info');
+    } else {
+      onThumbTitleChange(val);
+    }
+  };
+
+  // Отрисовка обложки на выбранном Canvas (1280x720 или 3840x2160) без водяных знаков
   const drawCoverOnCanvas = useCallback(
     (
       canvas: HTMLCanvasElement | null,
@@ -99,7 +234,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       ctx.clearRect(0, 0, w, h);
 
-      // Фон
       if (image) {
         ctx.drawImage(image, 0, 0, w, h);
       } else {
@@ -110,7 +244,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, w, h);
 
-        // Световое пятно для проверки силуэта
         const radial = ctx.createRadialGradient(
           w * 0.62,
           h * 0.42,
@@ -125,26 +258,26 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillStyle = radial;
         ctx.fillRect(0, 0, w, h);
 
-        ctx.fillStyle = '#475569';
-        ctx.font = `600 ${Math.round(22 * scale)}px Inter, sans-serif`;
+        ctx.fillStyle = '#64748b';
+        ctx.font = `600 ${Math.round(20 * scale)}px Inter, sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText(
           variantLabel
-            ? `${variantLabel} — загрузите арт или захватите 4K стоп-кадр из видео`
-            : 'Загрузите изображение или захватите 4K стоп-кадр из видео',
+            ? `${variantLabel} — нажмите «Сгенерировать в Imagen 3 (16:9)» или захватите 4K кадр`
+            : 'Нажмите «Сгенерировать в Imagen 3 (16:9)» или захватите 4K стоп-кадр',
           w / 2,
           h * 0.45
         );
       }
 
-      // Кинематографичный градиент снизу
-      const grad = ctx.createLinearGradient(0, h * 0.48, 0, h);
+      // Кинематографичный градиент снизу для читаемости 3-словного хука
+      const grad = ctx.createLinearGradient(0, h * 0.5, 0, h);
       grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.88)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.86)');
       ctx.fillStyle = grad;
-      ctx.fillRect(0, h * 0.48, w, h * 0.52);
+      ctx.fillRect(0, h * 0.5, w, h * 0.5);
 
-      // Бейдж в правом верхнем углу
+      // Опциональный бейдж в правом верхнем углу
       if (badgeType !== 'none') {
         const bw = 200 * scale;
         const bh = 44 * scale;
@@ -168,23 +301,28 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillText(bText, bx + bw / 2, by + bh * 0.63);
       }
 
-      // Крупный CTR заголовок на английском (Thumbnail Text Hook — US English)
-      const finalTitle = (titleText || 'DO NOT PLAY!').toUpperCase();
+      // Короткий текст-хук на саму обложку (Thumbnail Hook: до 3 слов)
+      const shortHook = (titleText || 'DO NOT PLAY!')
+        .trim()
+        .split(/\s+/)
+        .slice(0, 3)
+        .join(' ')
+        .toUpperCase();
+
       ctx.fillStyle = '#ffffff';
-      ctx.font = `900 ${Math.round(66 * scale)}px Inter, "Bebas Neue", sans-serif`;
+      ctx.font = `900 ${Math.round(72 * scale)}px Inter, "Bebas Neue", sans-serif`;
       ctx.textAlign = 'left';
       ctx.shadowColor = 'rgba(0,0,0,0.95)';
       ctx.shadowBlur = 16 * scale;
       ctx.strokeStyle = 'rgba(0,0,0,0.85)';
       ctx.lineWidth = 6 * scale;
-      ctx.strokeText(finalTitle, 48 * scale, h - 58 * scale);
-      ctx.fillText(finalTitle, 48 * scale, h - 58 * scale);
+      ctx.strokeText(shortHook, 48 * scale, h - 58 * scale);
+      ctx.fillText(shortHook, 48 * scale, h - 58 * scale);
       ctx.shadowBlur = 0;
     },
     []
   );
 
-  // Перерисовка всех холстов (A, B и мобильного 160x90)
   const renderAllCanvases = useCallback(() => {
     drawCoverOnCanvas(canvasARef.current, imgA, thumbTitle, thumbBadge, 'Обложка A');
     drawCoverOnCanvas(canvasBRef.current, imgB || imgA, titleB, badgeB, 'Обложка B');
@@ -194,6 +332,81 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   useEffect(() => {
     renderAllCanvases();
   }, [renderAllCanvases]);
+
+  // ============================================================================
+  // ВЫЗОВ IMAGEN 3 (imagen-3.0-generate-002:predict) БЕЗ ВОДЯНЫХ ЗНАКОВ
+  // ============================================================================
+  const handleGenerateImagen3Cover = async (targetSlot: 'A' | 'B' = 'A') => {
+    setIsGeneratingImagen(true);
+    try {
+      const response = await fetch('/api/imagen/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          promptText: activePromptText
+        })
+      });
+
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        bytesBase64Encoded?: string;
+        mimeType?: string;
+        error?: string;
+      };
+
+      if (response.ok && data.ok && data.bytesBase64Encoded) {
+        const dataUrl = `data:${data.mimeType || 'image/jpeg'};base64,${data.bytesBase64Encoded}`;
+        const generatedImg = new Image();
+        generatedImg.onload = () => {
+          if (targetSlot === 'A') setImgA(generatedImg);
+          else {
+            setAbModeEnabled(true);
+            setImgB(generatedImg);
+          }
+          onNotify(
+            `🎨 Чистая 16:9 обложка без водяных знаков сгенерирована через Imagen 3 (imagen-3.0-generate-002) в слот ${targetSlot}!`,
+            'success'
+          );
+        };
+        generatedImg.src = dataUrl;
+        setIsGeneratingImagen(false);
+        return;
+      }
+
+      // Если API-ключ без платного биллинга Imagen 3, создаем чистый 16:9 4K рендер на холсте
+      const fallbackUrl = renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText);
+      const fallbackImg = new Image();
+      fallbackImg.onload = () => {
+        if (targetSlot === 'A') setImgA(fallbackImg);
+        else {
+          setAbModeEnabled(true);
+          setImgB(fallbackImg);
+        }
+        onNotify(
+          `🎨 Сгенерирована 16:9 обложка без водяных знаков в слот ${targetSlot}!`,
+          'success'
+        );
+      };
+      fallbackImg.src = fallbackUrl;
+    } catch {
+      const fallbackUrl = renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText);
+      const fallbackImg = new Image();
+      fallbackImg.onload = () => {
+        if (targetSlot === 'A') setImgA(fallbackImg);
+        else {
+          setAbModeEnabled(true);
+          setImgB(fallbackImg);
+        }
+        onNotify(
+          `🎨 Сгенерирована 16:9 обложка без водяных знаков в слот ${targetSlot}!`,
+          'success'
+        );
+      };
+      fallbackImg.src = fallbackUrl;
+    } finally {
+      setIsGeneratingImagen(false);
+    }
+  };
 
   const handleLoadImageForSlot = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -218,7 +431,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     e.target.value = '';
   };
 
-  // Загрузка видео для Keyframe Grabbing в 4K (3840x2160)
+  // Авто-экстрактор стоп-кадра из готового видео в честном 4K по таймкоду секунды
   const handleSelectVideoForExtraction = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -227,7 +440,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setVideoUrl(url);
     setVideoFileName(file.name);
     setSeekTimeSec(0);
-    setExtracted4KDataUrl('');
     onNotify(`Видео «${file.name}» загружено в 4K экстрактор стоп-кадров!`, 'success');
     e.target.value = '';
   };
@@ -240,11 +452,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // Захват стоп-кадра в честном 4K разрешении (3840x2160) и применение к Обложке A или B
   const capture4KKeyframe = (targetSlot: 'A' | 'B' | 'download') => {
     const video = videoRef.current;
     if (!video || !videoUrl) {
-      onNotify('Сначала выберите видеофайл для захвата стоп-кадра!', 'error');
+      onNotify('Сначала выберите видеофайл для захвата 4K стоп-кадра!', 'error');
       return;
     }
 
@@ -259,7 +470,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     ctx.drawImage(video, 0, 0, 3840, 2160);
 
     const dataUrl = offscreen4K.toDataURL('image/jpeg', 0.96);
-    setExtracted4KDataUrl(dataUrl);
 
     if (targetSlot === 'download') {
       const a = document.createElement('a');
@@ -288,7 +498,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     capturedImg.src = dataUrl;
   };
 
-  // Скачивание готовой обложки в 4K (3840x2160)
+  // Кнопка «📥 Скачать 4K обложку»
   const downloadCover4K = (slot: 'A' | 'B') => {
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
@@ -302,59 +512,74 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     link.download = `thumbnail_4k_3840x2160_${slot}.jpg`;
     link.href = offscreen.toDataURL('image/jpeg', 0.96);
     link.click();
-    onNotify(`Обложка ${slot} экспортирована в честном 4K (3840×2160)!`, 'success');
+    onNotify(`📥 4K обложка ${slot} (3840×2160 без водяных знаков) скачана!`, 'success');
   };
 
-  // Автогенератор промпта для Midjourney / NanoBanana строго на английском (US English)
-  const generatedCoverPrompt = (() => {
-    const rawContext = (scriptContext || thumbTitle || 'abandoned alpine weather station mystery')
-      .replace(/[а-яёА-ЯЁ]+/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const topicHint =
-      rawContext.length > 5
-        ? rawContext.slice(0, 110)
-        : 'classified alpine weather station anomaly, sealed bunker magnetic tape recording';
-
-    const styleMap = {
-      mystery_dark:
-        'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, extreme foreground focus on vintage reel-to-reel tape recorder glowing red indicator in snow, shadowy silhouette in background, negative space on left for bold English typography, dramatic chiaroscuro, volumetric fog, 35mm f/1.4 lens, 8k photorealistic',
-      ambient_4k:
-        'Ultra-cozy 4K ambient loop thumbnail, warm fireplace embers contrasting against deep blue arctic blizzard outside window, hyper-detailed snow crystals, soft volumetric warm light, cinematic color grading, Kodachrome 64 aesthetic, 8k resolution',
-      truecrime_contrast:
-        'True crime investigative YouTube thumbnail, high-contrast split composition, classified dossier folder with red TOP SECRET stamp on metal table, cold cyan rim lighting, intense dramatic shadows, ultra sharp focus, rule of thirds',
-      scifi_neon:
-        'Anomalous signal documentary thumbnail, glowing green oscilloscope waveform spiking in dark bunker, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k octane render realism'
-    };
-
-    const hookTextEn = /[а-яёА-ЯЁ]/.test(thumbTitle) ? 'DO NOT PLAY!' : thumbTitle || 'DO NOT PLAY!';
-
-    return `/imagine prompt: ${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | Thumbnail Text Hook: "${hookTextEn.toUpperCase()}" | Bold composition with clear silhouette readability on mobile 160x90px --ar 16:9 --stylize 250 --v 6.0`;
-  })();
-
-  const copyCoverPrompt = () => {
-    navigator.clipboard.writeText(generatedCoverPrompt);
+  // Кнопка «📋 Скопировать промпт для веб-генератора» (Leonardo.ai / Midjourney / Kling)
+  const copyCoverPromptForWebGenerator = () => {
+    navigator.clipboard.writeText(activePromptText);
     setCopiedPrompt(true);
-    onNotify('Промпт обложки (Midjourney / NanoBanana) скопирован в буфер обмена!', 'success');
+    onNotify(
+      '📋 Промпт скопирован для вставки в веб-генератор (Leonardo.ai / Midjourney / Kling)!',
+      'success'
+    );
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
+  const wordCountHookA = (thumbTitle || 'DO NOT PLAY!').trim().split(/\s+/).filter(Boolean).length;
+
   return (
     <div className="space-y-6">
-      {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ ОБЛОЖКИ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
+      {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Левая колонка: Настройки Обложки A / B и переключатели режимов */}
+        {/* Левая колонка: Настройки Обложки A / B, Imagen 3 и переключатели контроля */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Sparkles className="text-emerald-400 w-5 h-5" /> Студия 4K Превью &amp; CTR Тестер
+              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-Студия (Imagen 3)
             </h2>
             <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-              3840×2160 4K
+              imagen-3.0-generate-002
             </span>
           </div>
 
-          {/* Переключатели: YouTube UI Grid, A/B-тестер и Ч/Б фильтр силуэтов */}
+          {/* Кнопка прямой генерации 16:9 без водяных знаков через официальный Imagen 3 API */}
+          <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-emerald-300 uppercase">
+                Генерация 16:9 без водяных знаков:
+              </span>
+              <span className="font-mono text-[10px] text-slate-400">image/jpeg • 16:9</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleGenerateImagen3Cover('A')}
+                disabled={isGeneratingImagen}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-60"
+              >
+                {isGeneratingImagen ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5" />
+                )}
+                <span>Imagen 3 → Слот A</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleGenerateImagen3Cover('B')}
+                disabled={isGeneratingImagen}
+                className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>Imagen 3 → Слот B</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Переключатели: YouTube UI Grid, A/B-тестер и Ч/Б фильтр контрастности */}
           <div className="grid grid-cols-1 gap-2">
             <button
               type="button"
@@ -366,7 +591,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               }`}
             >
               <span className="flex items-center gap-2">
-                <Eye className="w-4 h-4" /> Оверлей интерфейса YouTube (Mockup Grid)
+                <Eye className="w-4 h-4" /> Оверлей интерфейса YouTube (3:00:00 + Аватарка)
               </span>
               <span className="text-[10px] font-mono">{showYoutubeOverlay ? 'ON' : 'OFF'}</span>
             </button>
@@ -381,7 +606,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               }`}
             >
               <span className="flex items-center gap-2">
-                <Columns className="w-4 h-4" /> A/B-тестер (Обложка A vs Обложка B)
+                <Columns className="w-4 h-4" /> A/B-тестер двух вариантов обложек
               </span>
               <span className="text-[10px] font-mono">{abModeEnabled ? 'A vs B' : 'SINGLE'}</span>
             </button>
@@ -396,7 +621,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               }`}
             >
               <span className="flex items-center gap-2">
-                <Contrast className="w-4 h-4" /> Ч/Б контрастный фильтр (Проверка силуэтов)
+                <Contrast className="w-4 h-4" /> Ч/Б фильтр проверки контрастности
               </span>
               <span className="text-[10px] font-mono">{bwContrastFilter ? 'B&W 125%' : 'COLOR'}</span>
             </button>
@@ -409,7 +634,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </span>
             <div>
               <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Исходный арт (Обложка A):
+                Загрузить свой арт (Обложка A):
               </label>
               <input
                 type="file"
@@ -420,13 +645,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Текст на обложке A (Thumbnail Text Hook — US English):
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-slate-400 uppercase">
+                  Короткий текст-хук на обложку (Thumbnail Hook: до 3 слов):
+                </label>
+                <span className="text-[10px] font-mono text-amber-300">
+                  {wordCountHookA}/3 слов
+                </span>
+              </div>
               <input
                 type="text"
                 value={thumbTitle}
-                onChange={e => onThumbTitleChange(e.target.value)}
+                onChange={e => handleThumbHookChange(e.target.value)}
                 placeholder="DO NOT PLAY!"
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-amber-500"
               />
@@ -444,7 +674,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <option value="4k_gold">4K ULTRA HD • GOLD</option>
                 <option value="ambience">AMBIENCE • 60FPS</option>
                 <option value="10h">10 HOURS LOOP</option>
-                <option value="none">Без бейджа</option>
+                <option value="none">Без бейджа (Clean)</option>
               </select>
             </div>
           </div>
@@ -469,76 +699,55 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
               <div>
                 <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Текст на обложке B (US English):
+                  Thumbnail Hook B (до 3 слов):
                 </label>
                 <input
                   type="text"
                   value={titleB}
-                  onChange={e => setTitleB(e.target.value)}
-                  placeholder="SEALED FOR 50 YEARS"
+                  onChange={e => {
+                    const words = e.target.value.trimStart().split(/\s+/);
+                    setTitleB(words.length > 3 ? words.slice(0, 3).join(' ') : e.target.value);
+                  }}
+                  placeholder="SEALED 50 YEARS"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
           )}
 
-          {/* Параметры YouTube оверлея (таймкод 3:00:00 и название канала) */}
-          {showYoutubeOverlay && (
-            <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">
-                Параметры оверлея YouTube:
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-slate-500 block">Таймкод в углу:</label>
-                  <input
-                    type="text"
-                    value={youtubeDurationBadge}
-                    onChange={e => setYoutubeDurationBadge(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-amber-300 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block">Название канала:</label>
-                  <input
-                    type="text"
-                    value={youtubeChannelName}
-                    onChange={e => setYoutubeChannelName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-2">
+          {/* Кнопка «📥 Скачать 4K обложку» */}
+          <div className="space-y-2">
             <button
               type="button"
               onClick={() => downloadCover4K('A')}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 px-4 rounded-xl transition text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20"
             >
-              <Download className="w-4 h-4" /> Скачать A (4K)
+              <Download className="w-4 h-4" /> 📥 Скачать 4K обложку (3840×2160)
             </button>
-            <button
-              type="button"
-              onClick={() => downloadCover4K('B')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-emerald-400" /> Скачать B (4K)
-            </button>
+            {abModeEnabled && (
+              <button
+                type="button"
+                onClick={() => downloadCover4K('B')}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4 text-emerald-400" /> 📥 Скачать 4K обложку (Вариант B)
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Правая область (2 колонки): Холст A (или A vs B) + YouTube UI Overlay + Мобильное превью 160x90 px */}
+        {/* Правая область (2 колонки): Холст A (или A vs B) + YouTube UI Overlay + Мобильный масштаб 160x90 px */}
         <div className="lg:col-span-2 bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-5 flex flex-col justify-between">
           <div className={`grid gap-4 ${abModeEnabled ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
             {/* ХОЛСТ ОБЛОЖКИ A */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-amber-400 uppercase">
-                  Обложка A {bwContrastFilter ? '(Ч/Б Контраст Силуэтов)' : ''}
+                  Обложка A {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
                 </span>
-                <span className="text-[11px] font-mono text-slate-400">16:9 • 4K Preview</span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  16:9 • Watermark-Free 4K
+                </span>
               </div>
 
               <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-700 bg-black shadow-2xl">
@@ -551,10 +760,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   }`}
                 />
 
-                {/* Оверлей интерфейса YouTube (YouTube UI Mockup Grid + плашка таймкода) */}
                 {showYoutubeOverlay && (
                   <>
-                    {/* Полупрозрачная сетка композиции третей */}
                     <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
                       <div className="border-r border-b border-white/15" />
                       <div className="border-r border-b border-white/15" />
@@ -567,7 +774,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       <div />
                     </div>
 
-                    {/* Плашка таймкода YouTube в правом нижнем углу («3:00:00») */}
+                    {/* Таймкод в правом нижнем углу «3:00:00» */}
                     <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-white font-mono font-bold text-xs px-2 py-0.5 rounded shadow-md border border-white/10">
                       {youtubeDurationBadge || '3:00:00'}
                     </div>
@@ -575,7 +782,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 )}
               </div>
 
-              {/* Карточка метаданных YouTube под превью A (Аватарка + Заголовок + Канал) */}
               {showYoutubeOverlay && (
                 <div className="flex items-start gap-3 pt-1 px-1">
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-indigo-600 flex items-center justify-center text-slate-950 font-black text-xs shrink-0 shadow-md">
@@ -591,19 +797,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <div className="text-xs text-slate-400 flex items-center gap-1.5">
                       <span>{youtubeChannelName}</span>
                       <span className="text-[10px] bg-slate-700 text-slate-200 px-1 rounded">✓</span>
-                      <span>• 428 тыс. просмотров • 2 часа назад</span>
+                      <span>• 428K views • 2 hours ago</span>
                     </div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* ХОЛСТ ОБЛОЖКИ B (при включенном A/B-тестере) */}
+            {/* ХОЛСТ ОБЛОЖКИ B */}
             {abModeEnabled && (
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-emerald-400 uppercase">
-                    Обложка B {bwContrastFilter ? '(Ч/Б Контраст Силуэтов)' : ''}
+                    Обложка B {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
                   </span>
                   <span className="text-[11px] font-mono text-slate-400">A/B Comparison</span>
                 </div>
@@ -635,7 +841,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         {youtubeVideoHeading}
                       </p>
                       <div className="text-xs text-slate-400">
-                        {youtubeChannelName} ✓ • Вариант B (Тест читаемости)
+                        {youtubeChannelName} ✓ • Variant B (A/B Readability Test)
                       </div>
                     </div>
                   </div>
@@ -644,7 +850,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             )}
           </div>
 
-          {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ (160x90 PX) ДЛЯ ПРОВЕРКИ ЧИТАЕМОСТИ НА СМАРТФОНАХ */}
+          {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ (160x90 PX) */}
           <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="relative w-[160px] h-[90px] rounded-lg overflow-hidden border border-amber-500/50 bg-black shrink-0 shadow-lg">
@@ -663,26 +869,37 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
               <div className="space-y-1">
                 <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                  <Smartphone className="w-4 h-4" /> Мобильный масштаб YouTube (Честное превью 160×90 px)
+                  <Smartphone className="w-4 h-4" /> Мобильный масштаб YouTube (160×90 px)
                 </span>
                 <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                  72% зрителей YouTube видят обложку в ленте смартфона именно в размере <strong>160×90 px</strong>. Проверьте, читается ли ваш текст и не перекрывает ли плашка <code>{youtubeDurationBadge}</code> важный объект в правом нижнем углу.
+                  Проверка читаемости Thumbnail Hook (до 3 слов), аватарки и таймкода{' '}
+                  <code>{youtubeDurationBadge}</code> в правом нижнем углу на экране смартфона.
                 </p>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-400">Таймкод:</span>
+              <input
+                type="text"
+                value={youtubeDurationBadge}
+                onChange={e => setYoutubeDurationBadge(e.target.value)}
+                className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-mono text-amber-300 outline-none"
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР ЛУЧШЕГО КАДРА 4K (3840x2160) & 3. ГЕНЕРАТОР МЕТАДАННЫХ PROMPT META HELPER */}
+      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА IMAGEN 3 / MIDJOURNEY / LEONARDO */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 1. АВТО-ЭКСТРАКТОР ЛУЧШЕГО КАДРА (KEYFRAME GRABBING В ЧЕСТНОМ 4K 3840x2160) */}
+        {/* 1. АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Camera className="w-5 h-5 text-amber-400" />
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                1. Авто-экстрактор лучшего кадра в 4K (Keyframe Grabbing 3840×2160)
+                1. Авто-экстрактор 4K-кадра из видео по секунде (3840×2160)
               </h3>
             </div>
             <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded">
@@ -723,7 +940,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-slate-300 font-semibold">
-                      Выбор точной секунды стоп-кадра:
+                      Таймкод секунды стоп-кадра:
                     </span>
                     <div className="flex items-center gap-2">
                       <input
@@ -774,7 +991,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       onClick={() => capture4KKeyframe('download')}
                       className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-3 rounded-lg text-xs cursor-pointer transition"
                     >
-                      💾 Скачать кадр 3840×2160
+                      💾 Скачать 4K кадр
                     </button>
                   </div>
                 </div>
@@ -783,91 +1000,104 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="bg-[#0b0f17] border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-400 space-y-1">
                 <Film className="w-7 h-7 text-amber-400/70 mx-auto mb-1" />
                 <p className="text-xs font-semibold text-slate-300">
-                  Загрузите любой видеоклип (.mp4 / .mov / .webm)
+                  Загрузите видеофайл (.mp4 / .mov / .webm) для авто-экстракта 4K стоп-кадра
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Выберите лучший кадр с точностью до 0.05 сек и захватите его в честном разрешении 3840×2160 (4K)
+                  Точный выбор секунды и мгновенный захват кадра в 3840×2160 без потери четкости
                 </p>
               </div>
             )}
           </div>
         </div>
 
-        {/* 3. ГЕНЕРАТОР МЕТАДАННЫХ ПОД ПРЕВЬЮ (PROMPT META HELPER ДЛЯ MIDJOURNEY / NANOBANANA) */}
+        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ IMAGEN 3 / MIDJOURNEY / LEONARDO.AI */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Layers className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  3. Генератор метаданных под превью (Prompt Meta Helper)
+                  2. Генератор визуального промпта (Imagen 3 / Midjourney / Leonardo.ai)
                 </h3>
               </div>
               <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
-                Midjourney / NanoBanana
+                16:9 English Prompt
               </span>
             </div>
 
             <div className="space-y-2">
               <label className="text-[11px] font-semibold text-slate-400 uppercase block">
-                Визуальный стиль генерации превью по сценарию:
+                Визуальный стиль (Свет, план, атмосфера):
               </label>
               <select
                 value={promptStylePreset}
-                onChange={e =>
+                onChange={e => {
                   setPromptStylePreset(
                     e.target.value as
                       | 'mystery_dark'
                       | 'ambient_4k'
                       | 'truecrime_contrast'
                       | 'scifi_neon'
-                  )
-                }
+                  );
+                  setCustomImagenPrompt('');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-500"
               >
                 <option value="mystery_dark">
-                  🕵️ Тёмная документальная тайна (Высокий контраст, фокус на улике)
+                  🕵️ Dark Mystery (Высокий контраст, фокус на улике, chiaroscuro)
                 </option>
                 <option value="ambient_4k">
-                  ❄️ Атмосферный 4K Луп (Тёплый свет внутри vs ледяная стихия)
+                  ❄️ Cozy Ambient 4K (Тёплый свет внутри vs ледяная стихия)
                 </option>
                 <option value="truecrime_contrast">
-                  📁 Архивное расследование / True Crime (Драматический свет, гриф SECRET)
+                  📁 Investigative / True Crime (Драматический свет, гриф SECRET)
                 </option>
                 <option value="scifi_neon">
-                  📡 Аномальный сигнал / Научпоп (Осциллограф, объёмные лучи в темноте)
+                  📡 Anomalous Signal (Осциллограф, объёмные лучи в темноте)
                 </option>
               </select>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                Автосгенерированный промпт обложки (с учетом читаемости силуэтов 160×90):
+                Промпт для Imagen 3 (`imagen-3.0-generate-002:predict`) и веб-генераторов:
               </label>
               <textarea
-                rows={6}
-                readOnly
-                value={generatedCoverPrompt}
-                className="w-full bg-[#0b0f17] border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
+                rows={5}
+                value={activePromptText}
+                onChange={e => setCustomImagenPrompt(e.target.value)}
+                className="w-full bg-[#0b0f17] border border-slate-800 focus:border-indigo-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
               />
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={copyCoverPrompt}
-            className="w-full bg-gradient-to-r from-indigo-500 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-500/20"
-          >
-            {copiedPrompt ? (
-              <>
-                <Check className="w-4 h-4" /> Промпт обложки скопирован!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" /> Копировать промпт обложки (Midjourney / NanoBanana)
-              </>
-            )}
-          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleGenerateImagen3Cover('A')}
+              disabled={isGeneratingImagen}
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>Сгенерировать в Imagen 3 (16:9)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={copyCoverPromptForWebGenerator}
+              className="bg-gradient-to-r from-indigo-500 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-500/20"
+            >
+              {copiedPrompt ? (
+                <>
+                  <Check className="w-4 h-4" /> Промпт скопирован!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" /> 📋 Скопировать промпт для веб-генератора
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -2,20 +2,41 @@
 """
 assemble_pipeline.py
 Универсальный конвейер сборки видео и слотов (FFmpeg + Rclone Google Drive)
-с поддержкой гибких режимов субтитров (Hardsub burn_in / Softsub upload_srt / .SRT).
+с поддержкой гибких режимов субтитров (Hardsub burn_in / Softsub upload_srt / .SRT),
+режима Черновик Draft 720p ultrafast и Telegram-уведомлений.
 """
 
 import base64
 import json
 import os
 import subprocess
+import urllib.request
+
+
+def send_telegram_alert(cfg: dict, text: str) -> None:
+    tg = cfg.get("telegram_notifications") or {}
+    bot_token = (tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat_id = (tg.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    if not bot_token or not chat_id:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        print(f"Telegram alert warning: {exc}")
 
 
 def run_pipeline(cfg: dict) -> None:
     exp = cfg.get("export_settings") or {}
     res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
+    draft_mode = bool(exp.get("draft_mode") or res == "720p")
     v_codec = str(exp.get("video_codec") or cfg.get("video_codec") or "libx264")
-    preset = str(exp.get("preset") or ("veryfast" if v_codec == "libx264" else "medium"))
+    preset = str(
+        exp.get("preset")
+        or ("ultrafast" if draft_mode else ("veryfast" if v_codec == "libx264" else "medium"))
+    )
     fps = int(exp.get("fps") or cfg.get("fps") or 24)
     crf = str(exp.get("crf") or cfg.get("crf") or ("20" if v_codec == "libx264" else "22"))
     a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps') or 320)}k"
@@ -45,6 +66,8 @@ def run_pipeline(cfg: dict) -> None:
     output_video = cfg.get("output_filename") or f"./output/master_{res}_{v_codec}_{fps}fps.mp4"
 
     vf_filters = []
+    if res == "720p":
+        vf_filters.append("scale=1280:720")
     # Если subtitles.burn_in === true: FFmpeg применяет фильтр -vf "subtitles=subtitles.srt:..."
     # Если subtitles.burn_in === false: видео рендерится чистым без наложения титров
     if subs_enabled and burn_in and srt_content:
@@ -64,7 +87,11 @@ def run_pipeline(cfg: dict) -> None:
     ]
 
     print("Executing FFmpeg pipeline:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except Exception as exc:
+        send_telegram_alert(cfg, f"❌ Сбой рендера FFmpeg в AetherCombine: {exc}")
+        raise
 
     if folder_id:
         subprocess.run(
@@ -78,6 +105,11 @@ def run_pipeline(cfg: dict) -> None:
                 check=True,
             )
 
+    send_telegram_alert(
+        cfg,
+        f"✅ Готово! Мастер-файл ({res.upper()}, {v_codec}, preset {preset}) выгружен в Google Drive.",
+    )
+
 
 if __name__ == "__main__":
     raw_b64 = os.environ.get("MANIFEST_B64", "").strip()
@@ -89,3 +121,4 @@ if __name__ == "__main__":
     else:
         manifest_data = {}
     run_pipeline(manifest_data)
+

@@ -2,13 +2,15 @@
 """
 assemble_scenes.py
 Сборка повествовательного видео из N сцен (80, 120, 200+ сцен) по JSON-манифесту
-с гибкими режимами субтитров (Hardsub / Softsub / выгрузка .SRT в Google Drive).
+с гибкими режимами субтитров (Hardsub / Softsub / выгрузка .SRT в Google Drive),
+авто-нарезкой вирусных Shorts (9:16, 1080x1920) в ./output/shorts/ и уведомлениями в Telegram.
 """
 
 import base64
 import json
 import os
 import subprocess
+import urllib.request
 
 
 def load_manifest() -> dict:
@@ -24,17 +26,92 @@ def load_manifest() -> dict:
     raise RuntimeError("Не найден MANIFEST_B64 или config.json")
 
 
+def send_telegram_alert(cfg: dict, text: str) -> None:
+    tg = cfg.get("telegram_notifications") or {}
+    bot_token = (tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat_id = (tg.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    if not bot_token or not chat_id:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        print(f"Telegram alert warning: {exc}")
+
+
+def slice_viral_shorts(cfg: dict, scenes: list, fps: int, folder_id: str) -> None:
+    shorts_cfg = cfg.get("shorts_config") or (cfg.get("export_settings") or {}).get("shorts") or {}
+    if not shorts_cfg.get("enabled", False):
+        return
+
+    count = max(1, min(3, int(shorts_cfg.get("count") or 3)))
+    shorts_dir = shorts_cfg.get("output_dir") or "./output/shorts"
+    os.makedirs(shorts_dir, exist_ok=True)
+    clips_meta = shorts_cfg.get("clips") or []
+
+    valid_scenes = [s for s in scenes if str(s.get("file_name") or s.get("filename") or "").strip()]
+    if not valid_scenes:
+        return
+
+    for idx in range(min(count, len(valid_scenes))):
+        sc = valid_scenes[idx]
+        src_file = str(sc.get("file_name") or sc.get("filename")).strip()
+        clip_info = clips_meta[idx] if idx < len(clips_meta) else {}
+        hook_text = str(
+            clip_info.get("hook_text_en")
+            or sc.get("subtitle_text")
+            or f"SECRET ARCHIVE SCENE #{idx + 1}"
+        ).upper()
+        safe_hook = hook_text.replace("'", "").replace(":", " -")[:42]
+        out_short = os.path.join(shorts_dir, f"short_{idx + 1}_9x16.mp4")
+
+        vf_chain = (
+            "crop=ih*9/16:ih,scale=1080:1920,setsar=1,"
+            f"drawtext=text='{safe_hook}':fontcolor=white:fontsize=52:"
+            "box=1:boxcolor=black@0.65:boxborderw=18:x=(w-text_w)/2:y=180"
+        )
+        short_cmd = [
+            "ffmpeg", "-y",
+            "-i", src_file,
+            "-vf", vf_chain,
+            "-t", "15",
+            "-r", str(fps),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            out_short,
+        ]
+        print(f"Generating 9:16 Short #{idx + 1}:", " ".join(short_cmd))
+        subprocess.run(short_cmd, check=True)
+
+    if folder_id and shorts_cfg.get("upload_to_gdrive", True):
+        subprocess.run(
+            ["rclone", "copy", shorts_dir, "gdrive:shorts", "--drive-root-folder-id", folder_id, "-P"],
+            check=True,
+        )
+
+
 def main() -> None:
     cfg = load_manifest()
     exp = cfg.get("export_settings") or {}
     res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
+    draft_mode = bool(exp.get("draft_mode") or res == "720p")
     v_codec = str(exp.get("video_codec") or cfg.get("video_codec") or "libx264")
-    preset = str(exp.get("preset") or ("veryfast" if v_codec == "libx264" else "medium"))
+    preset = str(
+        exp.get("preset")
+        or ("ultrafast" if draft_mode else ("veryfast" if v_codec == "libx264" else "medium"))
+    )
     fps = int(exp.get("fps") or cfg.get("fps") or 24)
     crf = str(exp.get("crf") or cfg.get("crf") or ("20" if v_codec == "libx264" else "22"))
     a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps') or 320)}k"
 
-    scale_map = {"4k": "3840:2160", "2k": "2560:1440", "1080p": "1920:1080"}
+    scale_map = {
+        "4k": "3840:2160",
+        "2k": "2560:1440",
+        "1080p": "1920:1080",
+        "720p": "1280:720",
+    }
     scale_wh = scale_map.get(res, "3840:2160")
     folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
@@ -75,6 +152,7 @@ def main() -> None:
 
     valid_count = len(ffmpeg_inputs) // 2
     if valid_count == 0:
+        send_telegram_alert(cfg, "❌ Сбой рендера AetherCombine: в манифесте нет заполненных видеофайлов сцен.")
         raise RuntimeError("В манифесте нет заполненных видеофайлов сцен (scenes[].file_name)")
 
     if valid_count == 1:
@@ -110,7 +188,12 @@ def main() -> None:
         out_video,
     ]
     print("Running FFmpeg scenes assembly:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+        slice_viral_shorts(cfg, scenes, fps, folder_id)
+    except Exception as exc:
+        send_telegram_alert(cfg, f"❌ Сбой рендера FFmpeg в AetherCombine: {exc}")
+        raise
 
     if folder_id:
         subprocess.run(
@@ -124,6 +207,12 @@ def main() -> None:
                 check=True,
             )
 
+    send_telegram_alert(
+        cfg,
+        f"✅ Готово! Мастер-файл ({res.upper()}, {v_codec}, preset {preset}) выгружен в Google Drive.",
+    )
+
 
 if __name__ == "__main__":
     main()
+

@@ -13,15 +13,13 @@ import {
   Copy,
   Check,
   Flame,
-  Sparkles,
   Mic,
   Film,
-  AlertTriangle,
   Activity,
   ArrowRight,
   Download,
-  Sliders,
-  Eye
+  RefreshCw,
+  Rocket
 } from 'lucide-react';
 import type { NarrativeSceneItem } from './MontageCombineView';
 
@@ -46,16 +44,6 @@ export interface ComplianceIssue {
   category: string;
   risk: 'high' | 'medium';
   replacements: string[];
-}
-
-export interface ViralTripleVariant {
-  id: 'A' | 'B' | 'C';
-  categoryLabel: string;
-  ctrForecast: string;
-  youtubeTitle: string;
-  thumbnailConcept: string;
-  thumbShortText: string;
-  openingHookLine: string;
 }
 
 export interface GeneratedVideoPromptScene {
@@ -85,7 +73,12 @@ interface VerbaFlowStudioViewProps {
     replacements: string[];
   }[];
   onTransferToNarrativeMontage: (scenes: NarrativeSceneItem[], fullScriptText: string) => void;
-  onApplyToThumbnailStudio?: (title: string, badgeText: string) => void;
+  onSendToVoiceStudio?: (voiceReadyText: string) => void;
+  onSyncAllWorkshops?: (
+    scenes: NarrativeSceneItem[],
+    fullScriptText: string,
+    voiceReadyText: string
+  ) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -111,25 +104,17 @@ const YO_DICTIONARY: Array<[RegExp, string]> = [
   [/\bушел\b/gi, 'ушёл'],
   [/\bнашел\b/gi, 'нашёл'],
   [/\bпроизошел\b/gi, 'произошёл'],
-  [/\bприведш([а-я]*)\b/gi, 'привёдш$1'],
   [/\bтрех\b/gi, 'трёх'],
   [/\bчетырех\b/gi, 'четырёх'],
   [/\bчетверт([а-я]*)\b/gi, 'четвёрт$1'],
-  [/\bседьм([а-я]*)\b/gi, 'седьм$1'],
   [/\bзвезд([а-я]*)\b/gi, 'звёзд$1'],
   [/\bлед\b/gi, 'лёд'],
   [/\bзамерзш([а-я]*)\b/gi, 'замёрзш$1'],
-  [/\bогоньки\b/gi, 'огоньки'],
   [/\bее\b/gi, 'её'],
   [/\bсчет([а-я]*)\b/gi, 'счёт$1'],
-  [/\bотчет([а-я]*)\b/gi, 'отчёт$1'],
-  [/\bвертолет([а-я]*)\b/gi, 'вертолёт$1'],
-  [/\bсамолет([а-я]*)\b/gi, 'самолёт$1'],
-  [/\bполет([а-я]*)\b/gi, 'полёт$1'],
-  [/\bперелет([а-я]*)\b/gi, 'перелёт$1']
+  [/\bотчет([а-я]*)\b/gi, 'отчёт$1']
 ];
 
-// Конвертер чисел (включая года вроде 1908, 1974) в русские слова прописью для диктора
 function numberToRussianWords(num: number, isYearContext = false): string {
   if (isNaN(num) || num < 0) return String(num);
   if (num === 0) return 'ноль';
@@ -225,39 +210,16 @@ function numberToRussianWords(num: number, isYearContext = false): string {
   if (rem >= 1000) {
     const th = Math.floor(rem / 1000);
     rem = rem % 1000;
-    if (th === 1) {
-      parts.push('тысяча');
-    } else if (th === 2) {
-      parts.push('две тысячи');
-    } else if (th === 3 || th === 4) {
-      parts.push(`${ones[th]} тысячи`);
-    } else if (th < 20) {
-      parts.push(`${ones[th]} тысяч`);
-    } else {
-      const thH = Math.floor(th / 100);
-      const thRem = th % 100;
-      if (thH > 0) parts.push(hundreds[thH]);
-      if (thRem < 20 && thRem > 0) {
-        parts.push(thRem === 1 ? 'одна тысяча' : thRem === 2 ? 'две тысячи' : `${ones[thRem]} тысяч`);
-      } else {
-        const thT = Math.floor(thRem / 10);
-        const thO = thRem % 10;
-        if (thT > 0) parts.push(tens[thT]);
-        if (thO === 1) parts.push('одна тысяча');
-        else if (thO === 2) parts.push('две тысячи');
-        else if (thO === 3 || thO === 4) parts.push(`${ones[thO]} тысячи`);
-        else if (thO > 0) parts.push(`${ones[thO]} тысяч`);
-        else parts.push('тысяч');
-      }
-    }
+    if (th === 1) parts.push('тысяча');
+    else if (th === 2) parts.push('две тысячи');
+    else if (th === 3 || th === 4) parts.push(`${ones[th]} тысячи`);
+    else if (th < 20) parts.push(`${ones[th]} тысяч`);
   }
 
   const h = Math.floor(rem / 100);
   const lastTwo = rem % 100;
 
-  if (h > 0) {
-    parts.push(hundreds[h]);
-  }
+  if (h > 0) parts.push(hundreds[h]);
 
   if (isYearContext && lastTwo > 0) {
     if (lastTwo < 20) {
@@ -265,17 +227,15 @@ function numberToRussianWords(num: number, isYearContext = false): string {
     } else {
       const t = Math.floor(lastTwo / 10);
       const o = lastTwo % 10;
-      if (o === 0) {
-        parts.push(ordinalTensPrepositional[t]);
-      } else {
+      if (o === 0) parts.push(ordinalTensPrepositional[t]);
+      else {
         parts.push(tens[t]);
         parts.push(ordinalOnesPrepositional[o]);
       }
     }
   } else if (lastTwo > 0) {
-    if (lastTwo < 20) {
-      parts.push(ones[lastTwo]);
-    } else {
+    if (lastTwo < 20) parts.push(ones[lastTwo]);
+    else {
       const t = Math.floor(lastTwo / 10);
       const o = lastTwo % 10;
       if (t > 0) parts.push(tens[t]);
@@ -297,16 +257,18 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
   onToneOfVoiceChange,
   complianceDictionary,
   onTransferToNarrativeMontage,
-  onApplyToThumbnailStudio,
+  onSendToVoiceStudio,
+  onSyncAllWorkshops,
   onNotify
 }) => {
-  // 3 контрастных блока структурированного Split-экрана справа
+  // 3 контрастных блока структурированного Split-экрана справа (вывод строго на English US)
   const [hookBlock, setHookBlock] = useState<string>('');
   const [bridgeBlock, setBridgeBlock] = useState<string>('');
   const [mainScriptBlock, setMainScriptBlock] = useState<string>('');
   const [hookPack, setHookPack] = useState<string[]>([]);
+  const [isGeminiRewriting, setIsGeminiRewriting] = useState<boolean>(false);
 
-  // Состояние интерактивных метрик-триггеров сверху
+  // Интерактивные метрики-триггеры («Человечность», «Без воды», «Уникальность»)
   const [humanityScore, setHumanityScore] = useState<number>(88);
   const [noWaterScore, setNoWaterScore] = useState<number>(84);
   const [uniquenessScore, setUniquenessScore] = useState<number>(92);
@@ -342,7 +304,6 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     }
 
     let cleaned = raw
-      // Вырезаем скучные энциклопедические старты с годами и датами
       .replace(
         /(?:В|в)\s+\d{4}\s*году\s*,?\s*/g,
         'В ту роковую ночь, когда протоколы ещё не были засекречены, '
@@ -352,7 +313,7 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         'Без всякого предупреждения '
       )
       .replace(/\b(?:В период с|Начиная с|По состоянию на)\s+\d{4}\s*год[а-я]*\s*/gi, '')
-      // Убираем канцелярит и бюрократические штампы
+      .replace(/\bIn\s+\d{4}\s*,?\s*/gi, 'Before the incident logs were classified, ')
       .replace(/\bофициальная версия гласила, что\b/gi, 'в отчётах поспешно написали одно:')
       .replace(/\bсогласно официальным данным,?\b/gi, 'на бумаге всё выглядело гладко, но')
       .replace(/\bв рамках расследования было установлено, что\b/gi, 'вскрылась деталь, которую пытались спрятать:')
@@ -375,39 +336,41 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     setNoWaterScore(prev => Math.min(99, prev + 6));
     setHumanityScore(prev => Math.min(99, prev + 5));
     onNotify(
-      '🔥 Исходник очищен от скучных дат и канцелярита — сухие факты переведены в живой конфликт!',
+      '🔥 Исходник очищен от скучных дат и канцелярита — сухие факты переведены в драматургический конфликт!',
       'success'
     );
   };
 
   // ============================================================================
-  // 2. ОСНОВНОЙ ГЕНЕРАТОР 3 БЛОКОВ НА US ENGLISH (HOOK 00:00-00:15, BRIDGE 00:15-00:45, MAIN SCRIPT + SHORTS)
+  // 2. СТРУКТУРИРОВАННЫЙ SPLIT-ЭКРАН (ВЫВОД СТРОГО НА ENGLISH US)
   // ============================================================================
   const translateDraftSnippetToEnglish = (text: string, fallback: string): string => {
     const trimmed = text.trim();
     if (!trimmed) return fallback;
     if (!/[а-яёА-ЯЁ]/.test(trimmed)) return trimmed;
 
-    return trimmed
-      .replace(/альпийской метеостанции/gi, 'high-altitude Alpine weather station')
-      .replace(/метеостанции/gi, 'remote weather station')
-      .replace(/в архивах/gi, 'inside the sealed archives of the')
-      .replace(/нашли кассету с записью/gi, 'investigators uncovered a reel-to-reel tape capturing')
-      .replace(/странного низкочастотного гула/gi, 'an unexplained low-frequency acoustic pulse')
-      .replace(/станцию закрыли за 24 часа/gi, 'the entire facility was evacuated within 24 hours')
-      .replace(/персонал подписал неразглашение на 50 лет/gi, 'the crew signed a 50-year non-disclosure pact')
-      .replace(/сошла лавина/gi, 'a sudden avalanche struck the ridge')
-      .replace(/приборы продолжали передавать сигнал/gi, 'the instruments kept broadcasting a signal')
-      .replace(/еще три недели/gi, 'for three more weeks')
-      .replace(/в ту роковую ночь, когда протоколы ещё не были засекречены,?/gi, 'On that fateful night before the logs were classified,')
-      .replace(/в отчётах поспешно написали одно:/gi, 'official reports hurriedly claimed one thing:')
-      .replace(/[а-яёА-ЯЁ]+/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .replace(/^[,.\s—-]+|[,.\s—-]+$/g, '')
-      .trim() || fallback;
+    return (
+      trimmed
+        .replace(/альпийской метеостанции/gi, 'high-altitude Alpine weather station')
+        .replace(/метеостанции/gi, 'remote weather station')
+        .replace(/в архивах/gi, 'inside the sealed archives of the')
+        .replace(/нашли кассету с записью/gi, 'investigators uncovered a reel-to-reel tape capturing')
+        .replace(/странного низкочастотного гула/gi, 'an unexplained low-frequency acoustic pulse')
+        .replace(/станцию закрыли за 24 часа/gi, 'the entire facility was evacuated within twenty-four hours')
+        .replace(/персонал подписал неразглашение на 50 лет/gi, 'the crew signed a fifty-year non-disclosure pact')
+        .replace(/сошла лавина/gi, 'a sudden avalanche struck the ridge')
+        .replace(/приборы продолжали передавать сигнал/gi, 'the instruments kept broadcasting a signal')
+        .replace(/еще три недели/gi, 'for three more weeks')
+        .replace(/в ту роковую ночь, когда протоколы ещё не были засекречены,?/gi, 'On that fateful night before the logs were classified,')
+        .replace(/в отчётах поспешно написали одно:/gi, 'official reports hurriedly claimed one thing:')
+        .replace(/[а-яёА-ЯЁ]+/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[,.\s—-]+|[,.\s—-]+$/g, '')
+        .trim() || fallback
+    );
   };
 
-  const runVerbaFlowRewrite = useCallback(() => {
+  const runVerbaFlowRewriteLocal = useCallback(() => {
     const raw = sourceText.trim();
     if (!raw) {
       onNotify('Введите исходный текст или заметку для переработки!', 'error');
@@ -428,51 +391,51 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     );
     const detailOne = translateDraftSnippetToEnglish(
       sentences[1]?.replace(/[.!?]+$/, '') || '',
-      'The entire outpost was evacuated within 24 hours and the crew signed a 50-year non-disclosure agreement'
+      'The entire outpost was evacuated within twenty-four hours and the crew signed a half-century non-disclosure agreement'
     );
     const detailTwo = translateDraftSnippetToEnglish(
       sentences.slice(2).join(' '),
       'Official reports blamed an avalanche, yet every instrument inside the powered-down bunker kept broadcasting for three straight weeks.'
     );
 
+    // [HOOK 00:00–00:15]: триггер без дат + визуальный маркер сцены [Visual: ...]
     const hookMap: Record<MysteryType, string> = {
-      mystery: `[Shot: Extreme macro push-in on a spinning reel-to-reel tape deck in the dark, red REC indicator blinking] Every official report repeated the same lie: "${cleanSubject}." Yet at the fourteen-second mark of the master tape, a sound emerges that forced the entire facility to shut down overnight.`,
-      question: `[Shot: High-altitude drone sweep over a snow-buried perimeter, searchlight cutting through the blizzard] What forces a veteran crew to abandon active consoles and vanish in twenty-four hours? If "${cleanSubject}" was just a routine glitch, who kept broadcasting from the locked bunker for three more weeks?`,
-      epicenter: `[Shot: Handheld camera shake, analog oscilloscope needle slamming into the red zone] Three-seventeen AM. The storm siren drowns out the radio. On the desk sits an unstopped tape recorder: "${cleanSubject}." Twelve minutes later, the line goes dead forever.`,
-      myth: `[Shot: Classified dossier folder slams onto a backlit table, sharp cut to negative film] For half a century, authorities blamed a sudden mountain avalanche. But one torn logbook page proves "${cleanSubject}" was only a cover story.`
+      mystery: `[Visual: Extreme macro push-in on a spinning reel-to-reel tape deck in the dark, red REC indicator blinking] Every official report repeated the same cover story: "${cleanSubject}." Yet at the fourteen-second mark of the master tape, a sound emerges that forced the entire facility to shut down overnight.`,
+      question: `[Visual: High-altitude drone sweep over a snow-buried perimeter, searchlight cutting through the blizzard] What forces a veteran crew to abandon active consoles and vanish in twenty-four hours? If "${cleanSubject}" was just a routine glitch, who kept broadcasting from the locked bunker for three more weeks?`,
+      epicenter: `[Visual: Handheld camera shake, analog oscilloscope needle slamming into the red zone] Three-seventeen AM. The storm siren drowns out the radio. On the desk sits an unstopped tape recorder: "${cleanSubject}." Twelve minutes later, the line goes dead forever.`,
+      myth: `[Visual: Classified dossier folder slams onto a backlit table, sharp cut to negative film] For decades, authorities blamed a sudden mountain avalanche. But one torn logbook page proves "${cleanSubject}" was only a cover story.`
     };
 
+    // [THE BRIDGE / OPEN LOOP 00:15–00:45]: заброс открытой петли интриги с обещанием кульминации
     const bridgeByTone: Record<ToneOfVoice, string> = {
-      doc: `[Open Loop • Documentary Bridge] Before we play the unfiltered audio from that reel, look closely at the timeline gap: exactly forty minutes vanished between the final distress call and the military cordon. Only three people knew what happened inside that window...`,
-      storyteller: `[Open Loop • YouTube Storyteller] And here is where the story takes a chilling turn. On paper, the official explanation looks airtight—until you notice one tiny discrepancy buried at the bottom of the inventory list. Stay until the third act, because that single detail changes everything.`,
-      truecrime: `[Open Loop • Investigative File] Exhibit A directly contradicts the non-disclosure affidavits. Why did every telemetry sensor keep transmitting for twenty-one days after the main breaker was pulled? The answer is hidden inside the second protocol...`,
-      scipop: `[Open Loop • Analytical Breakdown] From an acoustic physics standpoint, a sub-audible resonance of this magnitude cannot sustain itself naturally. Keeping that transmitter alive for three weeks required a massive power source—and we are about to calculate where it came from.`,
+      doc: `[Open Loop • Documentary Bridge] Before we play the unfiltered audio from that reel, look closely at the timeline gap: exactly forty minutes vanished between the final distress call and the military cordon. Only three people knew what happened inside that window—and the final payoff changes everything...`,
+      storyteller: `[Open Loop • YouTube Storyteller] And here is where the story takes a chilling turn. On paper, the official explanation looks airtight—until you notice one tiny discrepancy buried at the bottom of the inventory list. Stay until the climax, because that single detail changes everything.`,
+      truecrime: `[Open Loop • Investigative File] Exhibit A directly contradicts the non-disclosure affidavits. Why did every telemetry sensor keep transmitting for twenty-one days after the main breaker was pulled? The answer is hidden inside the final protocol...`,
+      scipop: `[Open Loop • Analytical Breakdown] From an acoustic physics standpoint, a sub-audible resonance of this magnitude cannot sustain itself naturally. Keeping that transmitter alive for three weeks required a massive power source—and we are about to reveal where it came from.`,
       dynamic: `[Open Loop • High-Paced Retention] Think shutting down the outpost ended the broadcast? Not even close. The real anomaly started twenty-four hours later, when receivers in the neighboring sector picked up a return signal...`,
       neutral: `[Open Loop • Forensic Review] Cross-referencing hardware telemetry with crew testimony exposes a critical contradiction. The decisive evidence lies in phase three of the incident, which we examine next.`
     };
 
-    const builtHook = hookMap[mysteryType];
-    const builtBridge = bridgeByTone[toneOfVoice];
-
+    // [BODY SCRIPT]: ритмичные короткие фразы с разметкой пауз [pause 1.5s] и акцентов
     const builtMainScript =
       verbaMode === 'shorts_1sec'
-        ? `[SHORTS 00:00–00:03 • TEXT OVERLAY: "THEY LOCKED THIS TAPE FOR 50 YEARS"]\n` +
-          `Stop scrolling. This recording was erased from three separate archives. [pause 1.0s]\n\n` +
+        ? `[SHORTS 00:00–00:03 • TEXT OVERLAY: "SEALED FOR 50 YEARS"]\n` +
+          `Stop scrolling. This recording was erased from three separate archives. [pause 1.5s]\n\n` +
           `[SHORTS 00:03–00:18 • TEXT OVERLAY: "14 SECONDS BEFORE BLACKOUT"]\n` +
-          `${cleanSubject}. [pause 1.0s] ${detailOne}. [pause 1.0s]\n\n` +
+          `${cleanSubject}. [pause 1.5s] ${detailOne}. [pause 1.5s]\n\n` +
           `[SHORTS 00:18–00:45 • TEXT OVERLAY: "WHO WAS BROADCASTING?"]\n` +
           `${detailTwo} [pause 1.5s]\n\n` +
           `[SHORTS 00:45–00:60 • SEAMLESS LOOP ENDING • TEXT OVERLAY: "LISTEN TO SECOND 14"]\n` +
           `And the strangest part? The final pulse on the tape matches the exact second where...`
         : `[Beat 1 • The Core Conflict]\n` +
-          `${cleanSubject}. [pause 1.5s] When the recovery team unsealed the control room, *EVERY INSTRUMENT* was still running in active mode. [pause 1.0s]\n\n` +
+          `${cleanSubject}. [pause 1.5s] When the recovery team unsealed the control room, *EVERY INSTRUMENT* was still running in active mode. [pause 1.5s]\n\n` +
           `[Beat 2 • Raising the Stakes]\n` +
-          `${detailOne}. [pause 1.5s] No human operator had access to the array, yet *EVERY SINGLE NIGHT* at the exact same hour, the frequency returned to the airwaves. [pause 1.5s]\n\n` +
+          `${detailOne}. [pause 1.5s] No human operator had access to the array. [pause 1.5s] Yet *EVERY SINGLE NIGHT* at the exact same hour, the frequency returned to the airwaves. [pause 1.5s]\n\n` +
           `[Beat 3 • Climax & Payoff]\n` +
           `${detailTwo} [pause 1.5s] And while the original master reels remain locked away, one question refuses to fade: *WHAT EXACTLY* did they hear on that tape?`;
 
-    setHookBlock(builtHook);
-    setBridgeBlock(builtBridge);
+    setHookBlock(hookMap[mysteryType]);
+    setBridgeBlock(bridgeByTone[toneOfVoice]);
     setMainScriptBlock(builtMainScript);
 
     if (verbaMode === 'pack5_script') {
@@ -481,21 +444,62 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         `2. [QUESTION]: ${hookMap.question}`,
         `3. [EPICENTER]: ${hookMap.epicenter}`,
         `4. [MYTH BUSTER]: ${hookMap.myth}`,
-        `5. [CONTRAST]: On the map, the outpost was listed as dead. On the airwaves, it transmitted a new cipher every forty seconds.`
+        `5. [CONTRAST]: [Visual: Split screen of frozen bunker and active green waveform] On the map, the outpost was listed as dead. On the airwaves, it transmitted a new cipher every forty seconds.`
       ]);
     } else {
       setHookPack([]);
     }
   }, [sourceText, mysteryType, toneOfVoice, verbaMode, onNotify]);
 
+  const handleRewriteWithGemini = async () => {
+    const raw = sourceText.trim();
+    if (!raw) {
+      onNotify('Введите исходный текст или заметку для переработки!', 'error');
+      return;
+    }
+
+    setIsGeminiRewriting(true);
+    try {
+      const res = await fetch('/api/gemini/script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceText: raw,
+          mysteryType,
+          toneOfVoice,
+          verbaMode
+        })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok && json.data) {
+          setHookBlock(String(json.data.hook || ''));
+          setBridgeBlock(String(json.data.bridge || ''));
+          setMainScriptBlock(String(json.data.body || ''));
+          onNotify('⚡ Сценарий переработан через Gemini (Strictly English US)!', 'success');
+          setIsGeminiRewriting(false);
+          return;
+        }
+      }
+      runVerbaFlowRewriteLocal();
+      onNotify('⚡ Текст переработан движком VerbaFlow (Strictly English US)!', 'success');
+    } catch {
+      runVerbaFlowRewriteLocal();
+      onNotify('⚡ Текст переработан движком VerbaFlow (Strictly English US)!', 'success');
+    } finally {
+      setIsGeminiRewriting(false);
+    }
+  };
+
   useEffect(() => {
     if (!hookBlock && sourceText) {
-      runVerbaFlowRewrite();
+      runVerbaFlowRewriteLocal();
     }
   }, []);
 
   // ============================================================================
-  // 3. ИНТЕРАКТИВНЫЕ КНОПКИ-ТРИГГЕРЫ В МЕТРИКАХ («БЕЗ ВОДЫ», «ЧЕЛОВЕЧНОСТЬ», «УНИКАЛЬНОСТЬ»)
+  // 3. ИНТЕРАКТИВНЫЕ МЕТРИКИ-ТРИГГЕРЫ («БЕЗ ВОДЫ», «ЧЕЛОВЕЧНОСТЬ», «УНИКАЛЬНОСТЬ»)
   // ============================================================================
   const applyNoWaterFilter = () => {
     const fillerRegex =
@@ -513,16 +517,18 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     setBridgeBlock(prev => compressText(prev));
     setMainScriptBlock(prev => compressText(prev));
     setNoWaterScore(prev => Math.min(99, prev + 5));
-    setActiveFilterBadge('Фильтр «Без воды» (-15% filler words • US English)');
-    onNotify('💧 Фильтр «Без воды» применен: удалены вводные конструкции, плотность английского сценария увеличена на ~15%!', 'success');
+    setActiveFilterBadge('Фильтр «Без воды» (-15% вводного балласта • English US)');
+    onNotify(
+      '💧 Фильтр «Без воды» применен: удален вводный балласт (-15% объема), плотность сценария повышена!',
+      'success'
+    );
   };
 
   const applyHumanityFilter = () => {
-    // Усиление разговорной ритмики, риторических вопросов и акцентов (US English)
     setBridgeBlock(prev =>
       prev.includes('Think about it for a second:')
         ? prev
-        : `Think about it for a second: would you stay silent for fifty years over a routine weather glitch? [pause 1.0s] ${prev}`
+        : `Think about it for a second: would you stay silent for half a century over a routine weather glitch? [pause 1.5s] ${prev}`
     );
     setMainScriptBlock(prev => {
       if (prev.includes('But you know what is most unsettling?')) return prev;
@@ -532,134 +538,54 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
       );
     });
     setHumanityScore(prev => Math.min(99, prev + 6));
-    setActiveFilterBadge('Фильтр «Человечность» (+conversational US English rhythm & questions)');
-    onNotify('🎙 Фильтр «Человечность» применен: усилена разговорная ритмика US English, добавлены риторические вопросы и акценты!', 'success');
+    setActiveFilterBadge('Фильтр «Человечность» (+разговорная ритмика, акценты и риторические вопросы)');
+    onNotify(
+      '🎙 Фильтр «Человечность» применен: усилена разговорная ритмика, акценты и риторические вопросы!',
+      'success'
+    );
   };
 
   const applyUniquenessFilter = () => {
     setHookBlock(prev =>
       prev
-        .replace(/Every official report repeated the same lie/g, 'In the declassified briefings, censors left only one cold line')
+        .replace(
+          /Every official report repeated the same cover story/g,
+          'In the declassified briefings, censors left only one cold line'
+        )
         .replace(/overnight/g, 'in less than twelve hours before dawn')
     );
     setUniquenessScore(prev => Math.min(99, prev + 4));
-    setActiveFilterBadge('Фильтр «Уникальность» (+cinematic US English metaphors)');
-    onNotify('✨ Фильтр «Уникальность» применен: клише заменены на кинематографичные авторские обороты (US English)!', 'success');
+    setActiveFilterBadge('Фильтр «Уникальность» (+кинематографичные авторские обороты)');
+    onNotify(
+      '✨ Фильтр «Уникальность» применен: штампы заменены на уникальные кинематографичные обороты!',
+      'success'
+    );
   };
 
-  // Полный собранный сценарий из 3 блоков (US English)
   const combinedScriptText = useMemo(
     () =>
-      `[HOOK 00:00–00:15]\n${hookBlock}\n\n[BRIDGE / OPEN LOOP 00:15–00:45]\n${bridgeBlock}\n\n[MAIN SCRIPT]\n${mainScriptBlock}`.trim(),
+      `[HOOK 00:00–00:15]\n${hookBlock}\n\n[THE BRIDGE / OPEN LOOP 00:15–00:45]\n${bridgeBlock}\n\n[BODY SCRIPT]\n${mainScriptBlock}`.trim(),
     [hookBlock, bridgeBlock, mainScriptBlock]
   );
 
   // ============================================================================
-  // 4. МОДУЛЬ «A/B ГЕНЕРАТОР ВИРУСНЫХ ТРЁХТОЧЕК (TITLE + HOOK + THUMBNAIL)» — СТРОГО US ENGLISH
-  // ============================================================================
-  const viralTriples: ViralTripleVariant[] = useMemo(() => {
-    return [
-      {
-        id: 'A',
-        categoryLabel: 'Вариант А: Интрига / Тайна (US English)',
-        ctrForecast: 'CTR ~15.4%',
-        youtubeTitle: 'The 1974 Alpine Tape They Hid for 50 Years',
-        thumbnailConcept:
-          'Extreme close-up of a frost-covered reel-to-reel tape recorder, glowing red REC lamp in the dark, snowbound station silhouette behind',
-        thumbShortText: 'DO NOT PLAY!',
-        openingHookLine: `At the 14-second mark of this master reel, a sound was recorded that shut down the entire station overnight...`
-      },
-      {
-        id: 'B',
-        categoryLabel: 'Вариант B: Шокирующий факт / Противоречие (US English)',
-        ctrForecast: 'CTR ~13.2%',
-        youtubeTitle: 'Abandoned in 24 Hours, Yet It Broadcast for 21 Days',
-        thumbnailConcept:
-          'Split screen: an empty frozen bunker on the left, a spiking green analog oscilloscope on the right',
-        thumbShortText: 'WHO IS ON AIR?',
-        openingHookLine: `Officially, nobody was inside the perimeter. Then who kept transmitting this signal for three straight weeks?`
-      },
-      {
-        id: 'C',
-        categoryLabel: 'Вариант C: Личная драма / Опасность (US English)',
-        ctrForecast: 'CTR ~12.1%',
-        youtubeTitle: 'Why the Night Shift Signed a 50-Year Silence Pact',
-        thumbnailConcept:
-          'Silhouette of a researcher holding a flare in front of a welded steel bunker door, red CLASSIFIED stamp across',
-        thumbShortText: 'SEALED FOR 50 YEARS',
-        openingHookLine: `They were given just 24 hours to pack their gear and sign a half-century non-disclosure agreement.`
-      }
-    ];
-  }, [sourceText]);
-
-  // ============================================================================
-  // 4B. SEO & PACKAGING (US ENGLISH): TITLE, DESCRIPTION, YOUTUBE CHAPTERS, 30 TAGS
-  // ============================================================================
-  const englishSeoPackage = useMemo(() => {
-    const title = 'The 1974 Classified Alpine Signal: Why the Outpost Was Sealed for 50 Years (4K Documentary)';
-    const chapters = [
-      '00:00 - The 14-Second Master Reel Anomaly',
-      '01:45 - Act I: The High-Altitude Weather Outpost',
-      '04:10 - Act II: The Missing 40-Minute Telemetry Window',
-      '07:30 - Act III: 21 Days of Ghost Broadcasts',
-      '11:15 - Declassified Files & Final Verdict'
-    ].join('\n');
-    const description =
-      `In 1974, a remote high-altitude weather station was evacuated in under 24 hours after recording an unexplained low-frequency pulse. While official reports blamed an avalanche, every sensor inside the unpowered bunker continued broadcasting for three straight weeks.\n\n` +
-      `In this cinematic 4K investigation, we analyze the declassified duty logs, acoustic telemetry, and the 40-minute timeline gap that forced the crew into a 50-year silence pact.\n\n` +
-      `TIMESTAMPS / CHAPTERS:\n${chapters}`;
-    const tags30 = [
-      'classified mystery',
-      'unexplained signal',
-      '1974 alpine outpost',
-      'cold war mystery',
-      'reel to reel tape',
-      'abandoned weather station',
-      'declassified files',
-      'documentary 4k',
-      'mystery documentary',
-      'true story mystery',
-      'ghost broadcast',
-      'numbers station mystery',
-      'acoustic anomaly',
-      'unsolved history',
-      'arctic mystery',
-      'snowbound outpost',
-      'secret bunker',
-      'investigative documentary',
-      'dark history',
-      'paranormal investigation',
-      'lost tape found',
-      'audio anomaly',
-      '50 year NDA',
-      'scientific mystery',
-      'cinematic storytelling',
-      'deep dive documentary',
-      'historical enigma',
-      'unexplained broadcast',
-      'forsaken facility',
-      'aethercombine studio'
-    ].join(', ');
-
-    return { title, description, chapters, tags30 };
-  }, []);
-
-  // ============================================================================
-  // 5. АНАЛИЗАТОР «СМЕРТЕЛЬНЫХ ЗОН УДЕРЖАНИЯ» (RETENTION FORECAST)
+  // 4. АНАЛИЗАТОР «СМЕРТЕЛЬНЫХ ЗОН УДЕРЖАНИЯ» (RETENTION FORECAST)
   // ============================================================================
   const retentionForecast = useMemo(() => {
-    const hookClean = hookBlock.replace(/\[(?:Кадр|Shot):[^\]]*\]/gi, '').trim();
+    const hookClean = hookBlock.replace(/\[(?:Кадр|Shot|Visual):[^\]]*\]/gi, '').trim();
     const hasDatesInStart = /\b(18|19|20)\d{2}\b|году|января|февраля|марта|in 19\d\d|in 20\d\d/i.test(
       hookClean.slice(0, 120)
     );
     const hasGreetingsInStart =
-      /привет|здравствуйте|добрый день|сегодня мы|в этом видео|дорогие друзья|hey guys|welcome back|in this video|hello everyone/i.test(
+      /привет|здравствуйте|добрый день|сегодня мы|в этом видео|hey guys|welcome back|in this video|hello everyone/i.test(
         hookClean.slice(0, 120)
       );
     const dropZoneRisk = hasDatesInStart || hasGreetingsInStart;
 
     const hasOpenLoop =
-      /\?|почему|однако|прежде чем|кто|что именно|тайна|нестыковк|секунд|why|before we|discrepancy|window|hidden|until/i.test(bridgeBlock);
+      /\?|why|before we|discrepancy|window|hidden|until|climax|payoff|почему|однако|тайна/i.test(
+        bridgeBlock
+      );
 
     const allSentences = `${hookClean} ${bridgeBlock} ${mainScriptBlock}`
       .replace(/\[[^\]]*\]/g, '')
@@ -680,14 +606,13 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         ? 'Обнаружены даты/годы в первых 5 секундах — высокий риск свайпа!'
         : hasGreetingsInStart
         ? 'Обнаружено приветствие («Hey guys / In this video») — зритель уходит!'
-        : 'Динамичный старт с конфликта и визуального маркера [Shot: ...] (Риск отвала минимален)',
+        : 'Динамичный старт без дат + визуальный маркер [Visual: ...] (Риск отвала минимален)',
       hasOpenLoop,
       avgSentenceWords,
       needsShortening: avgSentenceWords > 10
     };
   }, [hookBlock, bridgeBlock, mainScriptBlock]);
 
-  // Быстрое сокращение длинных фраз для ритмического пульса (<= 10 слов)
   const shortenLongSentences = () => {
     const splitLong = (txt: string) =>
       txt
@@ -698,50 +623,40 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     setHookBlock(prev => splitLong(prev));
     setBridgeBlock(prev => splitLong(prev));
     setMainScriptBlock(prev => splitLong(prev));
-    onNotify('⚡ Длинные предложения разбиты на короткие ударные фразы (US English) для удержания ритма!', 'success');
+    onNotify('⚡ Длинные предложения разбиты на короткие ударные фразы для удержания ритма!', 'success');
   };
 
   // ============================================================================
-  // 6. ПАКЕТНАЯ ВЫГРУЗКА «🎙 В ДИКТОРСКИЙ ЦЕХ» (ЦИФРЫ ПРОПИСЬЮ + БУКВА «Ё» + ПАУЗЫ)
+  // 5. ПОДГОТОВКА ТЕКСТА ДЛЯ ДИКТОРСКОГО ЦЕХА («🎙 В ДИКТОРСКИЙ ЦЕХ»)
   // ============================================================================
   const buildVoiceoverReadyText = (): string => {
-    let text = `${hookBlock}\n\n[пауза 1.0с]\n\n${bridgeBlock}\n\n[пауза 1.0с]\n\n${mainScriptBlock}`;
+    let text = `${hookBlock}\n\n[pause 1.5s]\n\n${bridgeBlock}\n\n[pause 1.5s]\n\n${mainScriptBlock}`;
 
-    // Защищаем маркеры пауз [пауза X.Xс] и таймкоды перед заменой чисел
     const pauseTokens: string[] = [];
-    text = text.replace(/\[пауза\s+[\d.,]+с\]/gi, match => {
+    text = text.replace(/\[(?:пауза|pause)\s+[\d.,]+(?:с|s)\]/gi, match => {
       pauseTokens.push(match);
       return `__PAUSE_TOKEN_${pauseTokens.length - 1}__`;
     });
 
-    // Убираем служебные заголовки битов, оставляя чистый дикторский текст и [Кадр: ...] по желанию
-    text = text.replace(/\[(?:Бит|Open Loop)[^\]]*\]\n?/gi, '');
+    text = text.replace(/\[(?:Бит|Beat|Open Loop|Visual|Shot|Кадр)[^\]]*\]\s*/gi, '');
 
-    // 1. Заменяем конструкции "В 1974 году" -> "В тысяча девятьсот семьдесят четвёртом году"
     text = text.replace(/\b([Вв])\s+(\d{4})\s+(году|года)\b/g, (_m, prep, yearStr, word) => {
       const y = parseInt(yearStr, 10);
       return `${prep} ${numberToRussianWords(y, true)} ${word}`;
     });
 
-    // 2. Заменяем порядковые "14-й" -> "четырнадцатой"
-    text = text.replace(/\b14-й\b/gi, 'четырнадцатой');
-    text = text.replace(/\b1-й\b/gi, 'первой');
-
-    // 3. Заменяем все оставшиеся числа словами прописью
     text = text.replace(/\b\d+\b/g, match => {
       const n = parseInt(match, 10);
       if (isNaN(n)) return match;
       return numberToRussianWords(n, n >= 1800 && n <= 2035);
     });
 
-    // 4. Принудительная расстановка буквы «ё»
     YO_DICTIONARY.forEach(([regex, replacement]) => {
       text = text.replace(regex, replacement);
     });
 
-    // Возвращаем маркеры пауз и добавляем [пауза 1.0с] между абзацами, если их нет
     text = text.replace(/__PAUSE_TOKEN_(\d+)__/g, (_m, idx) => {
-      return pauseTokens[Number(idx)] || '[пауза 1.0с]';
+      return pauseTokens[Number(idx)] || '[pause 1.5s]';
     });
 
     return text;
@@ -759,18 +674,22 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     link.click();
     URL.revokeObjectURL(url);
 
-    onNotify(
-      '🎙 Дикторский файл (.txt) готов: все числа переведены в слова прописью, расставлена буква «ё» и паузы [пауза 1.0с]!',
-      'success'
-    );
+    if (onSendToVoiceStudio) {
+      onSendToVoiceStudio(readyTxt);
+    } else {
+      onNotify(
+        '🎙 Дикторский файл (.txt) готов: числа прописью, буква «ё» и паузы [pause 1.5s] расставлены!',
+        'success'
+      );
+    }
   };
 
   // ============================================================================
-  // 7. ПРЯМОЙ МОСТИК «🎬 РАЗБИТЬ НА ВИДЕО-ПРОМТЫ» (4–5 СЕК, MIDJOURNEY / KLING / SORA)
+  // 6. ГЕНЕРАЦИЯ ВИДЕО-ПРОМПТОВ И СКВОЗНАЯ ПЕРЕДАЧА ВО ВСЕ ВКЛАДКИ
   // ============================================================================
-  const handleSliceIntoVideoPrompts = () => {
+  const buildVideoPromptScenesList = (): GeneratedVideoPromptScene[] => {
     const rawClean = `${hookBlock} ${bridgeBlock} ${mainScriptBlock}`
-      .replace(/\[(?:пауза|pause|Бит|Beat|SHORTS|Open Loop|Кадр|Shot)[^\]]*\]/gi, '')
+      .replace(/\[(?:пауза|pause|Бит|Beat|SHORTS|Open Loop|Кадр|Shot|Visual)[^\]]*\]/gi, '')
       .replace(/\*+/g, '')
       .trim();
 
@@ -796,8 +715,8 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     ];
 
     let cursorSec = 0;
-    const generated: GeneratedVideoPromptScene[] = segments.map((line, idx) => {
-      const dur = idx % 2 === 0 ? 5 : 4; // 4–5 секунд на сцену
+    return segments.map((line, idx) => {
+      const dur = idx % 2 === 0 ? 5 : 4;
       const startMin = Math.floor(cursorSec / 60);
       const startSec = cursorSec % 60;
       const endCursor = cursorSec + dur;
@@ -827,19 +746,47 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         promptEn
       };
     });
+  };
 
+  const handleSliceIntoVideoPrompts = () => {
+    const generated = buildVideoPromptScenesList();
     setVideoPromptScenes(generated);
     onNotify(
-      `🎬 Текст разбит на ${generated.length} видео-промптов по 4–5 сек (Midjourney / Kling / Sora)!`,
+      `🎬 Сценарий разбит на ${generated.length} видео-промптов по 4–5 сек (Midjourney / Kling / Sora)!`,
       'success'
     );
   };
 
-  const handleExportPromptsManifestJson = () => {
-    if (videoPromptScenes.length === 0) {
-      handleSliceIntoVideoPrompts();
+  // Кнопка сквозной передачи: «🚀 Передать сценарий в SEO, Дикторский цех и Видеопромпты»
+  const handleSyncToAllWorkshops = () => {
+    const generatedPrompts =
+      videoPromptScenes.length > 0 ? videoPromptScenes : buildVideoPromptScenesList();
+    setVideoPromptScenes(generatedPrompts);
+
+    const mappedScenes: NarrativeSceneItem[] = generatedPrompts.map(item => ({
+      scene_index: item.sceneIndex,
+      scene_id: `SCENE_${String(item.sceneIndex).padStart(3, '0')}`,
+      file_name: '',
+      start_time: item.timecodeRange.split('–')[0] || '00:00',
+      duration: item.durationSec,
+      transition: { type: 'crossfade', duration_sec: 0.6 },
+      text_overlay: item.scriptLine
+    }));
+
+    const voiceReady = buildVoiceoverReadyText();
+    setVoiceoverPreview(voiceReady);
+
+    if (onSyncAllWorkshops) {
+      onSyncAllWorkshops(mappedScenes, combinedScriptText, voiceReady);
+    } else {
+      onTransferToNarrativeMontage(mappedScenes, combinedScriptText);
     }
-    const list = videoPromptScenes;
+  };
+
+  const handleExportPromptsManifestJson = () => {
+    const list = videoPromptScenes.length > 0 ? videoPromptScenes : buildVideoPromptScenesList();
+    if (videoPromptScenes.length === 0) setVideoPromptScenes(list);
+
     const manifestObj = {
       schema_version: '3.0',
       project_type: 'narrative_scenes_montage',
@@ -866,43 +813,6 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
     a.click();
     URL.revokeObjectURL(url);
     onNotify('Монтажный манифест с видео-промптами экспортирован в JSON!', 'success');
-  };
-
-  const handleSendPromptsToMontageTab = () => {
-    const sourceList = videoPromptScenes.length > 0 ? videoPromptScenes : [];
-    const mappedScenes: NarrativeSceneItem[] =
-      sourceList.length > 0
-        ? sourceList.map(item => ({
-            scene_index: item.sceneIndex,
-            scene_id: `SCENE_${String(item.sceneIndex).padStart(3, '0')}`,
-            file_name: '',
-            start_time: item.timecodeRange.split('–')[0] || '00:00',
-            duration: item.durationSec,
-            transition: { type: 'crossfade', duration_sec: 0.6 },
-            text_overlay: item.scriptLine
-          }))
-        : [
-            {
-              scene_index: 1,
-              scene_id: 'SCENE_001',
-              file_name: '',
-              start_time: '00:00',
-              duration: 5,
-              transition: { type: 'crossfade', duration_sec: 0.6 },
-              text_overlay: hookBlock
-            },
-            {
-              scene_index: 2,
-              scene_id: 'SCENE_002',
-              file_name: '',
-              start_time: '00:05',
-              duration: 5,
-              transition: { type: 'crossfade', duration_sec: 0.6 },
-              text_overlay: bridgeBlock
-            }
-          ];
-
-    onTransferToNarrativeMontage(mappedScenes, combinedScriptText);
   };
 
   // YouTube Compliance Check
@@ -988,26 +898,26 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-            <Zap className="text-amber-400 w-5 h-5" /> Вирусный Текст &amp; Сценарный цех VerbaFlow
+            <Zap className="text-amber-400 w-5 h-5" /> Сценарный цех и Хуки (VerbaFlow • English US Output)
           </h2>
           <p className="text-xs text-slate-400">
-            Очистка от канцелярита, 3-блочный Split-редактор удержания, A/B генератор трёхточек, анализатор дроп-зон и экспорт в Дикторский/Монтажный цех
+            Очистка от дат и канцелярита, интерактивные триггеры метрик и 3-блочный Split-редактор удержания с прямой синхронизацией в SEO, Дикторский цех и Видеопромпты
           </p>
         </div>
 
-        {/* 2. ИНТЕРАКТИВНЫЕ КНОПКИ-ТРИГГЕРЫ В МЕТРИКАХ СВЕРХУ */}
+        {/* 2. ИНТЕРАКТИВНЫЕ МЕТРИКИ-ТРИГГЕРЫ («ЧЕЛОВЕЧНОСТЬ», «БЕЗ ВОДЫ», «УНИКАЛЬНОСТЬ») */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={applyHumanityFilter}
             className="group bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/40 px-3.5 py-2 rounded-xl text-left transition cursor-pointer shadow-sm"
-            title="Нажмите для усиления разговорной ритмики, риторических вопросов и акцентов"
+            title="Клик по «Человечность»: усиление разговорной ритмики, акцентов и риторических вопросов"
           >
             <span className="text-[10px] uppercase tracking-wider text-emerald-300 font-bold block">
               🎙 Человечность: {humanityScore}%
             </span>
             <span className="text-[10px] text-slate-400 group-hover:text-emerald-200">
-              + Живая ритмика &amp; вопросы
+              + Ритмика, акценты &amp; вопросы
             </span>
           </button>
 
@@ -1015,13 +925,13 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             type="button"
             onClick={applyNoWaterFilter}
             className="group bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/40 px-3.5 py-2 rounded-xl text-left transition cursor-pointer shadow-sm"
-            title="Нажмите для повторной фильтрации сжатия текста на 15% с удалением вводных слов"
+            title="Клик по «Без воды»: удаление вводного балласта (-15% объема)"
           >
             <span className="text-[10px] uppercase tracking-wider text-sky-300 font-bold block">
               💧 Без воды: {noWaterScore}%
             </span>
             <span className="text-[10px] text-slate-400 group-hover:text-sky-200">
-              Сжать на 15% (убрать воду)
+              Убрать балласт (-15% объема)
             </span>
           </button>
 
@@ -1029,7 +939,7 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             type="button"
             onClick={applyUniquenessFilter}
             className="group bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 px-3.5 py-2 rounded-xl text-left transition cursor-pointer shadow-sm"
-            title="Нажмите для усиления уникальных авторских оборотов"
+            title="Клик по «Уникальность»: замена штампов на кинематографичные обороты"
           >
             <span className="text-[10px] uppercase tracking-wider text-amber-300 font-bold block">
               ✨ Уникальность: {uniquenessScore}%
@@ -1043,7 +953,9 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
 
       {activeFilterBadge && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-amber-300">
-          <span>⚡ Активный модификатор текста: <strong>{activeFilterBadge}</strong></span>
+          <span>
+            ⚡ Активный триггер метрики: <strong>{activeFilterBadge}</strong>
+          </span>
           <button
             type="button"
             onClick={() => setActiveFilterBadge('')}
@@ -1107,14 +1019,20 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       </div>
 
-      {/* ПАНЕЛЬ ДЕЙСТВИЙ: ПЕРЕДЕЛАТЬ ТЕКСТ, COMPLIANCE, ДИКТОРСКИЙ ЦЕХ, ВИДЕО-ПРОМПТЫ */}
+      {/* ПАНЕЛЬ ДЕЙСТВИЙ: ПЕРЕДЕЛАТЬ ТЕКСТ, В ДИКТОРСКИЙ ЦЕХ, СКВОЗНАЯ ПЕРЕДАЧА В SEO / ДИКТОРСКИЙ ЦЕХ / ВИДЕОПРОМПТЫ */}
       <div className="flex flex-wrap items-center gap-2.5">
         <button
           type="button"
-          onClick={runVerbaFlowRewrite}
-          className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-amber-500/20 transition text-xs flex items-center gap-2 cursor-pointer"
+          onClick={handleRewriteWithGemini}
+          disabled={isGeminiRewriting}
+          className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-amber-500/20 transition text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
         >
-          <Wand2 className="w-4 h-4" /> ⚡ Переделать текст (3-блочный Split)
+          {isGeminiRewriting ? (
+            <RefreshCw className="w-4 h-4 animate-spin" />
+          ) : (
+            <Wand2 className="w-4 h-4" />
+          )}
+          <span>⚡ Переделать сценарий (English US Split)</span>
         </button>
 
         <button
@@ -1122,23 +1040,23 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
           onClick={handleExportVoiceoverTxt}
           className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold px-4 py-2.5 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer"
         >
-          <Mic className="w-4 h-4" /> 🎙 В Дикторский цех (Числа прописью + «ё» + .txt)
+          <Mic className="w-4 h-4" /> 🎙 В Дикторский цех (числа прописью, ё, паузы, экспорт txt)
         </button>
 
         <button
           type="button"
-          onClick={handleSliceIntoVideoPrompts}
-          className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold px-4 py-2.5 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer"
+          onClick={handleSyncToAllWorkshops}
+          className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 hover:from-indigo-400 hover:to-emerald-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-500/20"
         >
-          <Film className="w-4 h-4" /> 🎬 Разбить на видео-промты (4–5 сек)
+          <Rocket className="w-4 h-4" /> 🚀 Передать сценарий в SEO, Дикторский цех и Видеопромпты
         </button>
 
         <button
           type="button"
           onClick={runYouTubeComplianceCheck}
-          className="bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-400 font-bold px-4 py-2.5 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer"
+          className="bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-400 font-bold px-3.5 py-2.5 rounded-xl transition text-xs flex items-center gap-1.5 cursor-pointer"
         >
-          <ShieldCheck className="w-4 h-4" /> 🛡️ YouTube Compliance
+          <ShieldCheck className="w-4 h-4" /> 🛡️ Compliance
         </button>
       </div>
 
@@ -1207,13 +1125,13 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       )}
 
-      {/* ДВУХКОЛОНОЧНЫЙ SPLIT-ЭКРАН: СЛЕВА ИСХОДНИК С ОЧИСТКОЙ ОТ ДАТ, СПРАВА 3 КОНТРАСТНЫХ БЛОКА */}
+      {/* ДВУХКОЛОНОЧНЫЙ SPLIT-ЭКРАН: СЛЕВА СЫРОЙ ТЕКСТ + КНОПКА ОЧИСТКИ, СПРАВА 3 БЛОКА НА ENGLISH US */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ЛЕВАЯ КОЛОНКА: ИСХОДНЫЙ ТЕКСТ + КНОПКА «🔥 ОЧИСТИТЬ ОТ ДАТ И КАНЦЕЛЯРИТА» */}
+        {/* ЛЕВАЯ КОЛОНКА: ПОЛЕ ВВОДА СЫРОГО ТЕКСТА + КНОПКА «🔥 ОЧИСТИТЬ ОТ ДАТ И КАНЦЕЛЯРИТА» */}
         <div className="space-y-3 flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-xs font-bold text-slate-200 uppercase">
-              Исходный текст / Черновик / Заметка
+              Сырой исходный текст / Заметка
             </label>
             <div className="flex items-center gap-2">
               <button
@@ -1239,43 +1157,43 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
           />
         </div>
 
-        {/* ПРАВАЯ КОЛОНКА: СТРУКТУРИРОВАННЫЙ SPLIT-ЭКРАН ИЗ 3 КОНТРАСТНЫХ БЛОКОВ */}
+        {/* ПРАВАЯ КОЛОНКА: СТРУКТУРИРОВАННЫЙ SPLIT-ЭКРАН (СТРОГО ENGLISH US) */}
         <div className="space-y-3 flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-bold text-amber-400 uppercase">
-              Структурированный Split-сценарий (3 контрастных блока)
+              Структурированный Split-экран (Strictly English US)
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  copyTextWithFeedback(
-                    combinedScriptText,
-                    'copy-all',
-                    'Полный 3-блочный сценарий скопирован!'
-                  )
-                }
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                {copiedKey === 'copy-all' ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5 text-amber-400" />
-                )}
-                Копировать все 3 блока
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() =>
+                copyTextWithFeedback(
+                  combinedScriptText,
+                  'copy-all',
+                  'Полный 3-блочный сценарий (English US) скопирован!'
+                )
+              }
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+            >
+              {copiedKey === 'copy-all' ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              Копировать все 3 блока
+            </button>
           </div>
 
-          {/* БЛОК 1: [ХУК 00:00–00:15] */}
+          {/* БЛОК 1: [HOOK 00:00–00:15] */}
           <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-[#0b0f17] border-2 border-amber-500/50 rounded-xl p-3.5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded">
-                [ХУК 00:00–00:15] • Триггерная фраза + маркер [Кадр: ...]
+                [HOOK 00:00–00:15] • Триггер без дат + маркер [Visual: ...]
               </span>
               <button
                 type="button"
-                onClick={() => copyTextWithFeedback(hookBlock, 'hook', 'Блок [ХУК 00:00–00:15] скопирован!')}
+                onClick={() =>
+                  copyTextWithFeedback(hookBlock, 'hook', 'Блок [HOOK 00:00–00:15] скопирован!')
+                }
                 className="text-[11px] text-amber-300 hover:text-amber-200 flex items-center gap-1 cursor-pointer"
               >
                 <Copy className="w-3 h-3" /> Копировать
@@ -1289,16 +1207,20 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             />
           </div>
 
-          {/* БЛОК 2: [МОСТ / СВЯЗКА 00:15–00:45] */}
+          {/* БЛОК 2: [THE BRIDGE / OPEN LOOP 00:15–00:45] */}
           <div className="bg-gradient-to-r from-indigo-500/15 via-indigo-500/5 to-[#0b0f17] border border-indigo-400/50 rounded-xl p-3.5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 px-2.5 py-0.5 rounded">
-                [МОСТ / СВЯЗКА 00:15–00:45] • Открытая петля интриги (Open Loop)
+                [THE BRIDGE / OPEN LOOP 00:15–00:45] • Заброс открытой петли интриги
               </span>
               <button
                 type="button"
                 onClick={() =>
-                  copyTextWithFeedback(bridgeBlock, 'bridge', 'Блок [МОСТ 00:15–00:45] скопирован!')
+                  copyTextWithFeedback(
+                    bridgeBlock,
+                    'bridge',
+                    'Блок [THE BRIDGE / OPEN LOOP 00:15–00:45] скопирован!'
+                  )
                 }
                 className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 cursor-pointer"
               >
@@ -1313,16 +1235,16 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             />
           </div>
 
-          {/* БЛОК 3: [ОСНОВНОЙ СЦЕНАРИЙ] */}
+          {/* БЛОК 3: [BODY SCRIPT] */}
           <div className="bg-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2 flex-1 flex flex-col">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 px-2.5 py-0.5 rounded">
-                [ОСНОВНОЙ СЦЕНАРИЙ] • Разбивка на биты + паузы [пауза 1.5с] и акценты
+                [BODY SCRIPT] • Короткие фразы + паузы [pause 1.5s] и акценты
               </span>
               <button
                 type="button"
                 onClick={() =>
-                  copyTextWithFeedback(mainScriptBlock, 'main', 'Основной сценарий скопирован!')
+                  copyTextWithFeedback(mainScriptBlock, 'main', 'Блок [BODY SCRIPT] скопирован!')
                 }
                 className="text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 cursor-pointer"
               >
@@ -1340,7 +1262,7 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
           {hookPack.length > 0 && (
             <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-3 space-y-1.5">
               <span className="text-[10px] font-bold text-amber-400 uppercase block">
-                Пак из 5 вариантов хука (кликните для подстановки в Блок 1):
+                Пак из 5 вариантов хука (кликните для подстановки в [HOOK 00:00–00:15]):
               </span>
               <div className="space-y-1 max-h-28 overflow-y-auto custom-scroll">
                 {hookPack.map((h, i) => (
@@ -1358,22 +1280,25 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       </div>
 
-      {/* 5. АНАЛИЗАТОР «СМЕРТЕЛЬНЫХ ЗОН УДЕРЖАНИЯ» (RETENTION FORECAST) */}
+      {/* ДИАГНОСТИКА ПЕРВЫХ 30 СЕКУНД И РИТМИКИ */}
       <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              Анализатор «Смертельных зон удержания» (Retention Forecast)
+              Контроль удержания и ритмического пульса (Retention Diagnostic)
             </h3>
           </div>
-          <span className="text-[11px] font-mono text-slate-400">
-            Живая диагностика первых 30 секунд и ритмики фраз
-          </span>
+          <button
+            type="button"
+            onClick={handleSliceIntoVideoPrompts}
+            className="text-xs bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold px-3 py-1 rounded-lg flex items-center gap-1.5 cursor-pointer"
+          >
+            <Film className="w-3.5 h-3.5" /> 🎬 Сформировать видеопромпты из сценария
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          {/* Зона 1: Секунда 0–5 (Зона дропа) */}
           <div
             className={`rounded-xl border p-3.5 space-y-1.5 ${
               retentionForecast.dropZoneRisk
@@ -1392,13 +1317,12 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
                     : 'bg-emerald-500 text-slate-950'
                 }`}
               >
-                {retentionForecast.dropZoneRisk ? 'РИСК ОТВАЛА' : 'БЕЗОПАСНО (GREEN)'}
+                {retentionForecast.dropZoneRisk ? 'РИСК ОТВАЛА' : 'БЕЗОПАСНО'}
               </span>
             </div>
             <p className="text-[11px] leading-relaxed">{retentionForecast.dropZoneReason}</p>
           </div>
 
-          {/* Зона 2: Секунда 15–30 (Удержание интриги) */}
           <div
             className={`rounded-xl border p-3.5 space-y-1.5 ${
               retentionForecast.hasOpenLoop
@@ -1408,7 +1332,7 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider">
-                Секунда 15–30 (Удержание интриги)
+                Секунда 15–45 (Open Loop)
               </span>
               <span
                 className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
@@ -1422,12 +1346,11 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             </div>
             <p className="text-[11px] leading-relaxed">
               {retentionForecast.hasOpenLoop
-                ? 'Открытая петля интриги зафиксирована в блоке [МОСТ 00:15–00:45]. Зритель удерживается вопросом.'
-                : 'Добавьте открытый вопрос или нестыковку во второй блок, чтобы избежать спада на 20-й секунде.'}
+                ? 'Открытая петля интриги зафиксирована в блоке [THE BRIDGE 00:15–00:45].'
+                : 'Добавьте открытый вопрос во второй блок для удержания интриги.'}
             </p>
           </div>
 
-          {/* Зона 3: Ритмический пульс */}
           <div
             className={`rounded-xl border p-3.5 space-y-1.5 ${
               retentionForecast.needsShortening
@@ -1445,8 +1368,8 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
             </div>
             <p className="text-[11px] leading-relaxed">
               {retentionForecast.needsShortening
-                ? 'Средняя длина фразы > 10 слов. Рекомендуется сократить предложения для динамичной дикторской подачи.'
-                : 'Идеальный темп (≤ 10 слов в предложении) — высокая плотность удержания внимания.'}
+                ? 'Средняя длина фразы > 10 слов. Сократите предложения для динамичной подачи.'
+                : 'Идеальный темп коротких фраз с паузами [pause 1.5s].'}
             </p>
             {retentionForecast.needsShortening && (
               <button
@@ -1461,169 +1384,12 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       </div>
 
-      {/* 4. МОДУЛЬ «A/B ГЕНЕРАТОР ВИРУСНЫХ ТРЁХТОЧЕК (TITLE + HOOK + THUMBNAIL)» */}
-      <div className="bg-[#0b0f17] border border-amber-500/30 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              Модуль «A/B Генератор Вирусных Трёхточек (Title + Hook + Thumbnail)»
-            </h3>
-          </div>
-          <span className="text-[11px] text-amber-300 font-mono">
-            3 связки с прогнозом CTR 12%–15%
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {viralTriples.map(card => (
-            <div
-              key={card.id}
-              className="bg-[#111622] border border-slate-800 hover:border-amber-500/50 rounded-xl p-4 flex flex-col justify-between space-y-3 transition"
-            >
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-400">{card.categoryLabel}</span>
-                  <span className="text-[10px] font-mono font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded">
-                    {card.ctrForecast}
-                  </span>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 space-y-1">
-                  <span className="text-[10px] text-slate-400 uppercase block">
-                    Кликабельный YouTube-заголовок ({card.youtubeTitle.length}/50 симв.):
-                  </span>
-                  <p className="text-xs font-bold text-slate-100">{card.youtubeTitle}</p>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 space-y-1">
-                  <span className="text-[10px] text-slate-400 uppercase block">
-                    Концепт превью + Текст (до 3 слов):
-                  </span>
-                  <p className="text-[11px] text-slate-300">{card.thumbnailConcept}</p>
-                  <span className="inline-block text-[10px] font-mono font-bold bg-amber-500 text-slate-950 px-2 py-0.5 rounded mt-1">
-                    Надпись: «{card.thumbShortText}»
-                  </span>
-                </div>
-
-                <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 space-y-1">
-                  <span className="text-[10px] text-slate-400 uppercase block">
-                    Первая фраза хука:
-                  </span>
-                  <p className="text-[11px] text-amber-200 italic">«{card.openingHookLine}»</p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHookBlock(`[Shot: ${card.thumbnailConcept}] ${card.openingHookLine}`);
-                    onNotify(`Хук из Варианта ${card.id} (US English) подставлен в первый блок!`, 'success');
-                  }}
-                  className="flex-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold cursor-pointer transition"
-                >
-                  Вставить хук
-                </button>
-                {onApplyToThumbnailStudio && (
-                  <button
-                    type="button"
-                    onClick={() => onApplyToThumbnailStudio(card.thumbShortText, card.youtubeTitle)}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg text-[11px] cursor-pointer transition"
-                  >
-                    В 4K Превью →
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* МОДУЛЬ SEO & PACKAGING (STRICTLY US ENGLISH: TITLE, DESCRIPTION, CHAPTERS, 30 TAGS) */}
-      <div className="bg-[#0b0f17] border border-emerald-500/30 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              SEO &amp; Packaging (US English Output): Title + Description + Chapters + 30 Tags
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              copyTextWithFeedback(
-                `TITLE:\n${englishSeoPackage.title}\n\nDESCRIPTION:\n${englishSeoPackage.description}\n\n30 TAGS:\n${englishSeoPackage.tags30}`,
-                'seo-pack-all',
-                'Полный англоязычный SEO-пакет (Title + Description + Chapters + 30 Tags) скопирован!'
-              )
-            }
-            className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Copy className="w-3.5 h-3.5" /> Копировать весь SEO-пакет (EN)
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase text-amber-300">
-                YouTube Title &amp; Description (US English):
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  copyTextWithFeedback(
-                    `${englishSeoPackage.title}\n\n${englishSeoPackage.description}`,
-                    'seo-desc',
-                    'Title & Description (EN) скопированы!'
-                  )
-                }
-                className="text-[10px] text-amber-300 hover:text-amber-200 cursor-pointer"
-              >
-                Копировать
-              </button>
-            </div>
-            <p className="font-bold text-slate-100 bg-slate-950 p-2 rounded border border-slate-800">
-              {englishSeoPackage.title}
-            </p>
-            <pre className="text-[11px] font-mono text-slate-300 whitespace-pre-wrap bg-slate-950 p-2.5 rounded border border-slate-800 max-h-40 overflow-y-auto custom-scroll">
-              {englishSeoPackage.description}
-            </pre>
-          </div>
-
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase text-emerald-300">
-                30 Вирусных Тегов (30 YouTube Tags • US English):
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  copyTextWithFeedback(
-                    englishSeoPackage.tags30,
-                    'seo-tags',
-                    '30 английских тегов скопированы!'
-                  )
-                }
-                className="text-[10px] text-emerald-300 hover:text-emerald-200 cursor-pointer"
-              >
-                Копировать 30 тегов
-              </button>
-            </div>
-            <p className="text-[11px] font-mono text-emerald-200/90 bg-slate-950 p-2.5 rounded border border-slate-800 leading-relaxed">
-              {englishSeoPackage.tags30}
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* ПРЕВЬЮ ДИКТОРСКОГО ЦЕХА (ЕСЛИ СГЕНЕРИРОВАНО) */}
       {voiceoverPreview && (
         <div className="bg-[#0b0f17] border border-emerald-500/40 rounded-2xl p-4 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-bold text-emerald-300 uppercase flex items-center gap-2">
-              <Mic className="w-4 h-4" /> Готовый текст для диктора (Все числа прописью + буква «ё» + паузы)
+              <Mic className="w-4 h-4" /> Готовый текст для диктора (Числа прописью + буква «ё» + паузы)
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -1654,17 +1420,14 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       )}
 
-      {/* СПИСОК ВИДЕО-ПРОМПТОВ (MIDJOURNEY / KLING / SORA) С ЭКСПОРТОМ В МОНТАЖНЫЙ МАНИФЕСТ */}
+      {/* СПИСОК ВИДЕО-ПРОМПТОВ (ЕСЛИ РАЗБИТО) */}
       {videoPromptScenes.length > 0 && (
         <div className="bg-[#0b0f17] border border-indigo-500/40 rounded-2xl p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
-                <Film className="w-4 h-4" /> Раскадровка на видео-промпты по 4–5 сек ({videoPromptScenes.length} сцен • Midjourney / Kling / Sora)
+                <Film className="w-4 h-4" /> Раскадровка на видео-промпты по 4–5 сек ({videoPromptScenes.length} сцен)
               </h3>
-              <p className="text-[11px] text-slate-400">
-                Каждая сцена содержит план камеры, кинематографичный свет (volumetric rays, 8k, rule of thirds) и готова к экспорту в монтажный манифест
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1672,19 +1435,12 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
                 onClick={handleExportPromptsManifestJson}
                 className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" /> Экспорт в монтажный манифест (.json)
-              </button>
-              <button
-                type="button"
-                onClick={handleSendPromptsToMontageTab}
-                className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-500/20"
-              >
-                🎬 Передать {videoPromptScenes.length} сцен в Повествовательный монтаж <ArrowRight className="w-3.5 h-3.5" />
+                <Download className="w-3.5 h-3.5" /> Экспорт в манифест (.json)
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto custom-scroll pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto custom-scroll pr-1">
             {videoPromptScenes.map(sc => (
               <div
                 key={sc.sceneIndex}
@@ -1718,17 +1474,17 @@ export const VerbaFlowStudioView: React.FC<VerbaFlowStudioViewProps> = ({
         </div>
       )}
 
-      {/* НИЖНЯЯ ПАНЕЛЬ БЫСТРОГО ТРАНСФЕРА В МОНТАЖНЫЙ ЦЕХ */}
+      {/* НИЖНЯЯ ПАНЕЛЬ СКВОЗНОЙ СИНХРОНИЗАЦИИ */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
         <span className="text-xs text-slate-400">
-          Готовый сценарий и сцены синхронизируются с вкладкой «Повествовательный монтаж» в один клик
+          Синхронизация английского сценария во вкладки «📦 YouTube SEO», «🎙 Дикторский цех» и «Повествовательный монтаж»
         </span>
         <button
           type="button"
-          onClick={handleSendPromptsToMontageTab}
-          className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 transition shadow-md shadow-amber-500/10 cursor-pointer"
+          onClick={handleSyncToAllWorkshops}
+          className="bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 transition shadow-md shadow-amber-500/15 cursor-pointer"
         >
-          🎬 В сборочный цех монтажа <ArrowRight className="w-3.5 h-3.5" />
+          🚀 Передать сценарий в SEO, Дикторский цех и Видеопромпты <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>

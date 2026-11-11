@@ -36,7 +36,10 @@ import {
   Sliders,
   CheckCircle2,
   CloudUpload,
-  Subtitles
+  Subtitles,
+  Mic,
+  Package,
+  Send
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
@@ -48,6 +51,8 @@ import {
 } from './components/MontageCombineView';
 import { VerbaFlowStudioView } from './components/VerbaFlowStudioView';
 import { ThumbnailStudioView } from './components/ThumbnailStudioView';
+import { VoiceStudioView } from './components/VoiceStudioView';
+import { YouTubeSeoView } from './components/YouTubeSeoView';
 import {
   LiveTerminal,
   TerminalLogEntry,
@@ -55,7 +60,7 @@ import {
   formatTerminalTime
 } from './components/StudioTerminal';
 
-type TabId = 'combine' | 'loop' | 'thumb' | 'hooks';
+type TabId = 'combine' | 'loop' | 'hooks' | 'voice' | 'seo' | 'thumb';
 
 type VerbaMode =
   | '15sec_rewrite'
@@ -175,7 +180,7 @@ interface LoopBuildManifest {
   spec_profile: string;
   hours: number;
   calculated_project_duration_sec: number;
-  resolution: '1080p' | '2k' | '4k';
+  resolution: '720p' | '1080p' | '2k' | '4k';
   video_codec: 'libx265' | 'libx264';
   fps: 24 | 30 | 60;
   audio_codec: 'aac';
@@ -185,9 +190,10 @@ interface LoopBuildManifest {
   crf: number;
   export_settings: {
     video_codec: 'libx264' | 'libx265';
-    preset: 'veryfast' | 'medium';
+    preset: 'ultrafast' | 'veryfast' | 'medium';
+    draft_mode?: boolean;
     crf: number;
-    resolution: '1080p' | '2k' | '4k';
+    resolution: '720p' | '1080p' | '2k' | '4k';
     fps: 24 | 30 | 60;
     audio_bitrate_kbps: 320 | 256 | 192;
     subtitles: SubtitlesFlexibleConfig;
@@ -482,13 +488,14 @@ jobs:
           cfg = json.loads(raw_json)
 
           exp = cfg.get("export_settings") or {}
-          res = exp.get("resolution") or cfg.get("resolution", "4k")
+          res = str(exp.get("resolution") or cfg.get("resolution", "4k")).lower()
           v_codec = exp.get("video_codec") or cfg.get("video_codec", "libx264")
+          preset = exp.get("preset") or ("ultrafast" if res == "720p" else ("veryfast" if v_codec == "libx264" else "medium"))
           fps = int(exp.get("fps") or cfg.get("fps", 24))
           a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps', 320))}k"
-          scale_map = {"4k": "3840:2160", "2k": "2560:1440", "1080p": "1920:1080"}
+          scale_map = {"4k": "3840:2160", "2k": "2560:1440", "1080p": "1920:1080", "720p": "1280:720"}
           scale_wh = scale_map.get(res, "3840:2160")
-          default_crf = "22" if v_codec == "libx265" else "20"
+          default_crf = "26" if res == "720p" else ("22" if v_codec == "libx265" else "20")
           crf = str(exp.get("crf") or cfg.get("crf") or default_crf)
           folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
@@ -732,7 +739,7 @@ jobs:
               "-map", "[a_master]",
               "-t", str(total_duration),
               "-r", str(fps),
-              "-c:v", v_codec, "-preset", "fast", "-crf", crf, "-pix_fmt", "yuv420p",
+              "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
               "-c:a", "aac", "-b:a", a_bitrate,
               "-movflags", "+faststart", out_name
           ]
@@ -750,6 +757,11 @@ jobs:
                       "rclone", "copy", output_srt_path, "gdrive:",
                       "--drive-root-folder-id", folder_id, "-P"
                   ], check=True)
+              if os.path.isdir("./output/shorts"):
+                  subprocess.run([
+                      "rclone", "copy", "./output/shorts", "gdrive:shorts",
+                      "--drive-root-folder-id", folder_id, "-P"
+                  ], check=True)
           EOF`;
 
 export default function App() {
@@ -763,6 +775,18 @@ export default function App() {
   const [filmResolution, setFilmResolution] = useState<string>('4k');
   const [transferredScript, setTransferredScript] = useState<string>('');
   const [externalNarrativeScenes, setExternalNarrativeScenes] = useState<NarrativeSceneItem[] | null>(null);
+  const [activeNarrativeScenes, setActiveNarrativeScenes] = useState<NarrativeSceneItem[]>([]);
+  const [externalMasterAudioFile, setExternalMasterAudioFile] = useState<{
+    fileName: string;
+    file?: File;
+    durationSec?: number;
+  } | null>(null);
+  const [voiceStudioScript, setVoiceStudioScript] = useState<string>(
+    'In the classified archives of the alpine station, a strange low-frequency hum was recorded. [pause 1.5s] Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order.'
+  );
+  const [seoScriptText, setSeoScriptText] = useState<string>(
+    'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.'
+  );
 
   // Loop studio state (Universal dynamic manifest state)
   const [loopProjectName, setLoopProjectName] = useState<string>('Ambient Loop 4K');
@@ -807,7 +831,8 @@ export default function App() {
     random_interval: [1200, 2400]
   });
   const [loopHours, setLoopHours] = useState<number>(3);
-  const [loopResolution, setLoopResolution] = useState<'1080p' | '2k' | '4k'>('4k');
+  const [loopResolution, setLoopResolution] = useState<'720p' | '1080p' | '2k' | '4k'>('4k');
+  const [loopDraftMode, setLoopDraftMode] = useState<boolean>(false);
   const [bitratePreset, setBitratePreset] = useState<'standard' | 'cinema' | 'eco'>('cinema');
   const [seamlessTransitionMode, setSeamlessTransitionMode] = useState<'crossfade' | 'pingpong'>('crossfade');
   const [seamlessStitchEnabled, setSeamlessStitchEnabled] = useState<boolean>(true);
@@ -823,7 +848,7 @@ export default function App() {
   // Гибкая система субтитров для текущего манифеста (Hardsub / Softsub / Скачивание .SRT)
   const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
   const [loopUploadSrtToDrive, setLoopUploadSrtToDrive] = useState<boolean>(true);
-  const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'original'>('en');
+  const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'>('en');
   const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>('');
 
   // Thumbnail studio state
@@ -861,6 +886,12 @@ export default function App() {
   const [gdriveSaKey, setGdriveSaKey] = useState<string>(
     () => localStorage.getItem('ac_gdrive_sa_key') || ''
   );
+  const [telegramBotToken, setTelegramBotToken] = useState<string>(
+    () => localStorage.getItem('ac_tg_bot_token') || ''
+  );
+  const [telegramChatId, setTelegramChatId] = useState<string>(
+    () => localStorage.getItem('ac_tg_chat_id') || ''
+  );
 
   // Modal state
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(false);
@@ -870,6 +901,8 @@ export default function App() {
   const [modalBranch, setModalBranch] = useState<string>('main');
   const [modalGdriveFolderId, setModalGdriveFolderId] = useState<string>('');
   const [modalGdriveSaKey, setModalGdriveSaKey] = useState<string>('');
+  const [modalTelegramBotToken, setModalTelegramBotToken] = useState<string>('');
+  const [modalTelegramChatId, setModalTelegramChatId] = useState<string>('');
 
   // Состояние авторизации Google Drive (OAuth 2.0 Resumable Upload в текущую папку)
   const [driveUser, setDriveUser] = useState<User | null>(null);
@@ -1008,6 +1041,35 @@ export default function App() {
       // Игнорируем ограничения iframe/браузера для Notification
     }
   }, []);
+
+  // Уведомление в Telegram по завершении или при ошибке рендера
+  const sendTelegramRenderAlert = useCallback(
+    async (statusType: 'success' | 'error', messageDetails: string, runUrl?: string) => {
+      const botToken = telegramBotToken.trim();
+      const chatId = telegramChatId.trim();
+      if (!botToken || !chatId) return;
+      try {
+        const icon = statusType === 'success' ? '✅' : '❌';
+        const text =
+          `${icon} *AetherCombine 4K Cloud Render*\n` +
+          `${messageDetails}\n` +
+          `📁 Google Drive Folder: \`${gdriveFolderId || 'not set'}\`\n` +
+          (runUrl ? `🔗 [GitHub Actions Run](${runUrl})` : '');
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text,
+            parse_mode: 'Markdown'
+          })
+        });
+      } catch {
+        // Игнорируем сетевые ошибки Telegram API
+      }
+    },
+    [telegramBotToken, telegramChatId, gdriveFolderId]
+  );
 
   // Перевод имени шага GitHub Actions на понятный русский статус для нижней панели
   const mapGitHubStepToRussian = useCallback((rawStepName?: string, stepIdx?: number): string => {
@@ -1296,6 +1358,11 @@ export default function App() {
             }));
             playRenderSuccessChime();
             triggerBrowserRenderNotification();
+            void sendTelegramRenderAlert(
+              'success',
+              `Рендер успешно завершён за ${finalTimeStr}! Видео и субтитры выгружены на Google Диск.`,
+              runUrl
+            );
             showToast(
               '✅ Готово! 4K мастер успешно собран и выгружен на Google Drive',
               'success'
@@ -1352,6 +1419,11 @@ export default function App() {
                 ? `Ошибка на шаге: ${failedStepName}`
                 : 'Шаг завершился с ошибкой выполнения в GitHub Actions'
             }));
+            void sendTelegramRenderAlert(
+              'error',
+              `Сбой облачной сборки ${errStepInfo} (${finalTimeStr}).`,
+              runUrl
+            );
             showToast(`Ошибка рендера в GitHub Actions ${errStepInfo}`, 'error');
 
             // Подгрузка полного текста лога задачи при ошибке
@@ -1425,6 +1497,7 @@ export default function App() {
     mapGitHubStepToRussian,
     playRenderSuccessChime,
     triggerBrowserRenderNotification,
+    sendTelegramRenderAlert,
     showToast,
     appendTerminalLog
   ]);
@@ -1452,18 +1525,30 @@ export default function App() {
         ? 6.4
         : 3.8;
     const resMultiplier =
-      loopResolution === '4k' ? 1.0 : loopResolution === '2k' ? 0.48 : 0.24;
+      loopResolution === '4k'
+        ? 1.0
+        : loopResolution === '2k'
+        ? 0.48
+        : loopResolution === '1080p'
+        ? 0.24
+        : 0.11;
     const rawGb = loopHours * base4kGbPerHour * resMultiplier;
     return Math.round(rawGb * 10) / 10;
   }, [loopHours, loopResolution, bitratePreset, videoCodec]);
 
-  const getScaleFilter = (res: '1080p' | '2k' | '4k') =>
-    res === '4k' ? 'scale=3840:2160' : res === '2k' ? 'scale=2560:1440' : 'scale=1920:1080';
+  const getScaleFilter = (res: '720p' | '1080p' | '2k' | '4k') =>
+    res === '4k'
+      ? 'scale=3840:2160'
+      : res === '2k'
+      ? 'scale=2560:1440'
+      : res === '1080p'
+      ? 'scale=1920:1080'
+      : 'scale=1280:720';
 
   const getCrfValue = (_preset?: 'standard' | 'cinema' | 'eco') => videoCrf;
 
-  const getResolutionLabel = (res: '1080p' | '2k' | '4k') =>
-    res === '4k' ? '4K' : res === '2k' ? '2K' : '1080p';
+  const getResolutionLabel = (res: '720p' | '1080p' | '2k' | '4k') =>
+    res === '4k' ? '4K' : res === '2k' ? '2K' : res === '1080p' ? '1080p' : 'Draft 720p';
 
   const getPresetShortLabel = (preset: 'standard' | 'cinema' | 'eco') =>
     preset === 'cinema'
@@ -1519,6 +1604,8 @@ export default function App() {
     setModalBranch(ghBranch || 'main');
     setModalGdriveFolderId(gdriveFolderId);
     setModalGdriveSaKey(gdriveSaKey);
+    setModalTelegramBotToken(telegramBotToken);
+    setModalTelegramChatId(telegramChatId);
     setIsConfigOpen(true);
   };
 
@@ -1532,21 +1619,27 @@ export default function App() {
     const trimmedBranch = modalBranch.trim() || 'main';
     const trimmedFolder = modalGdriveFolderId.trim();
     const trimmedSaKey = modalGdriveSaKey.trim();
+    const trimmedTgToken = modalTelegramBotToken.trim();
+    const trimmedTgChat = modalTelegramChatId.trim();
 
     setGhToken(trimmedToken);
     setGhRepo(trimmedRepo);
     setGhBranch(trimmedBranch);
     setGdriveFolderId(trimmedFolder);
     setGdriveSaKey(trimmedSaKey);
+    setTelegramBotToken(trimmedTgToken);
+    setTelegramChatId(trimmedTgChat);
 
     localStorage.setItem('ac_gh_token', trimmedToken);
     localStorage.setItem('ac_gh_repo', trimmedRepo);
     localStorage.setItem('ac_gh_branch', trimmedBranch);
     localStorage.setItem('ac_gdrive_folder_id', trimmedFolder);
     localStorage.setItem('ac_gdrive_sa_key', trimmedSaKey);
+    localStorage.setItem('ac_tg_bot_token', trimmedTgToken);
+    localStorage.setItem('ac_tg_chat_id', trimmedTgChat);
 
     closeConfigModal();
-    showToast('Конфигурация GitHub Actions и Google Drive сохранена', 'success');
+    showToast('Конфигурация GitHub Actions, Google Drive и Telegram сохранена', 'success');
   };
 
   const copyWorkflowTemplate = () => {
@@ -2059,7 +2152,9 @@ export default function App() {
         ? '3840:2160'
         : loopResolution === '2k'
         ? '2560:1440'
-        : '1920:1080';
+        : loopResolution === '1080p'
+        ? '1920:1080'
+        : '1280:720';
 
     const inputsArgs: string[] = [];
     const filterLines: string[] = [];
@@ -2320,10 +2415,11 @@ export default function App() {
     }
 
     const crfVal = videoCrf;
+    const h264Preset = loopDraftMode || loopResolution === '720p' ? 'ultrafast' : 'veryfast';
     const codecFlags =
       videoCodec === 'libx265'
         ? `-c:v libx265 -preset medium -crf ${crfVal} -tag:v hvc1 -pix_fmt yuv420p -r ${videoFps}`
-        : `-c:v libx264 -preset veryfast -crf ${crfVal} -pix_fmt yuv420p -r ${videoFps}`;
+        : `-c:v libx264 -preset ${h264Preset} -crf ${crfVal} -pix_fmt yuv420p -r ${videoFps}`;
     const audioFlags = `-c:a aac -b:a ${audioBitrateKbps}k -ar 48000`;
     const encodingFlags = `${codecFlags} ${audioFlags}`;
 
@@ -2331,6 +2427,7 @@ export default function App() {
   }, [
     timelineSlots,
     loopResolution,
+    loopDraftMode,
     internalLoopCrossfadeSec,
     videoFps,
     actCrossfadeSec,
@@ -2358,9 +2455,9 @@ export default function App() {
   };
 
   const buildLoopSrtContent = useCallback(
-    (lang: 'en' | 'ru' | 'es' | 'de' | 'original' = loopSubtitleLanguage): string => {
+    (lang: 'en' | 'ru' | 'es' | 'de' | 'fr' | 'original' = loopSubtitleLanguage): string => {
       let cursor = 0;
-      const localizedDefaults: Record<'en' | 'ru' | 'es' | 'de' | 'original', string[]> = {
+      const localizedDefaults: Record<'en' | 'ru' | 'es' | 'de' | 'fr' | 'original', string[]> = {
         en: [
           'Act I: The Frozen Perimeter & Distant Wind',
           'Act II: Deepening Blizzard & Sub-Zero Resonance',
@@ -2392,6 +2489,14 @@ export default function App() {
           'Akt IV: Auge des Sturms und stille Telemetrie',
           'Akt V: Gletscherechos und starker Schneefall',
           'Akt VI: Letzte Glut und Morgendämmerung'
+        ],
+        fr: [
+          'Acte I : Le périmètre gelé et le vent lointain',
+          'Acte II : Blizzard intense et résonance sous zéro',
+          'Acte III : Horizon blanc et impulsion de minuit',
+          'Acte IV : L’œil de la tempête et télémétrie silencieuse',
+          'Acte V : Échos glaciaires et fortes chutes de neige',
+          'Acte VI : Dernières braises et calme de l’aube'
         ],
         original: [
           'Act I: The Frozen Perimeter & Distant Wind',
@@ -2479,7 +2584,13 @@ export default function App() {
     crf: videoCrf,
     export_settings: {
       video_codec: videoCodec,
-      preset: videoCodec === 'libx264' ? 'veryfast' : 'medium',
+      preset:
+        loopDraftMode || loopResolution === '720p'
+          ? 'ultrafast'
+          : videoCodec === 'libx264'
+          ? 'veryfast'
+          : 'medium',
+      draft_mode: loopDraftMode || loopResolution === '720p',
       crf: videoCrf,
       resolution: loopResolution,
       fps: videoFps,
@@ -2935,18 +3046,22 @@ export default function App() {
       setLoopHours(h);
     }
 
-    // 4. Resolution ('1080p' | '2k' | '4k')
+    // 4. Resolution ('720p' | '1080p' | '2k' | '4k')
     const rawRes = raw.resolution ?? exportSettingsObj?.resolution;
     if (typeof rawRes === 'string') {
       const normRes = rawRes.toLowerCase();
-      if (normRes === '1080p' || normRes === '2k' || normRes === '4k') {
+      if (normRes === '720p' || normRes === '1080p' || normRes === '2k' || normRes === '4k') {
         setLoopResolution(normRes);
+        setLoopDraftMode(normRes === '720p');
       } else if (normRes.includes('3840') || normRes.includes('2160')) {
         setLoopResolution('4k');
       } else if (normRes.includes('2560') || normRes.includes('1440')) {
         setLoopResolution('2k');
       } else if (normRes.includes('1920') || normRes.includes('1080')) {
         setLoopResolution('1080p');
+      } else if (normRes.includes('1280') || normRes.includes('720')) {
+        setLoopResolution('720p');
+        setLoopDraftMode(true);
       }
     }
 
@@ -3049,6 +3164,7 @@ export default function App() {
         if (l.startsWith('ru')) setLoopSubtitleLanguage('ru');
         else if (l.startsWith('es')) setLoopSubtitleLanguage('es');
         else if (l.startsWith('de')) setLoopSubtitleLanguage('de');
+        else if (l.startsWith('fr')) setLoopSubtitleLanguage('fr');
         else if (l.startsWith('orig')) setLoopSubtitleLanguage('original');
         else setLoopSubtitleLanguage('en');
       }
@@ -3612,86 +3728,114 @@ export default function App() {
           </div>
         </div>
 
-        {/* Верхнее навигационное меню с цветными акцентами */}
-        <nav className="flex flex-wrap items-center gap-1 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner">
-          {/* 1. Повествовательный монтаж (8–16 мин / 100+ сцен): кинематографичный фиолетово-синий акцент (#818cf8 / text-indigo-400) */}
+        {/* Верхнее навигационное меню с сочными цветными 3D-градиентными значками (32x32px) */}
+        <nav className="flex flex-wrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner">
+          {/* 1. 🎬 Повествовательный монтаж */}
           <button
             onClick={() => setActiveTab('combine')}
             id="tab-combine"
-            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab-combine flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'combine'
-                ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-400/50 shadow-[0_0_15px_rgba(129,140,248,0.28)]'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-purple-500/30'
             }`}
           >
-            <Clapperboard
-              className={`w-4 h-4 text-indigo-400 transition-transform duration-200 group-hover:scale-110 ${
-                activeTab === 'combine'
-                  ? 'drop-shadow-[0_0_8px_rgba(129,140,248,0.85)]'
-                  : 'drop-shadow-[0_0_4px_rgba(129,140,248,0.45)]'
-              }`}
-            />
-            <span>Повествовательный монтаж (8–16 мин / 100+ сцен)</span>
+            <span className="nav-icon-box nav-icon-combine" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
+                🎬
+              </span>
+            </span>
+            <span className="text-white tracking-wide">Повествовательный монтаж</span>
           </button>
 
-          {/* 2. Многочасовой Луп (N-Слотов): яркий янтарно-оранжевый (#fbbf24 / text-amber-400 с эффектом свечения) */}
+          {/* 2. 🔄 Многочасовой Луп (N-Слотов) */}
           <button
             onClick={() => setActiveTab('loop')}
             id="tab-loop"
-            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab-loop flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'loop'
-                ? 'bg-amber-500/20 text-amber-200 border border-amber-400/60 shadow-[0_0_18px_rgba(251,191,36,0.35)]'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-amber-500/30'
             }`}
           >
-            <Repeat
-              className={`w-4 h-4 text-amber-400 transition-transform duration-200 group-hover:scale-110 ${
-                activeTab === 'loop'
-                  ? 'drop-shadow-[0_0_10px_rgba(251,191,36,0.95)]'
-                  : 'drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]'
-              }`}
-            />
-            <span>Многочасовой Луп (N-Слотов)</span>
+            <span className="nav-icon-box nav-icon-loop" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
+                🔁
+              </span>
+            </span>
+            <span className="text-white tracking-wide">Многочасовой Луп (N-Слотов)</span>
           </button>
 
-          {/* 3. Студия 4K Превью: неоновый изумрудно-бирюзовый (#34d399 / text-emerald-400) */}
-          <button
-            onClick={() => setActiveTab('thumb')}
-            id="tab-thumb"
-            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
-              activeTab === 'thumb'
-                ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/50 shadow-[0_0_15px_rgba(52,211,153,0.3)]'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
-            }`}
-          >
-            <ImageIcon
-              className={`w-4 h-4 text-emerald-400 transition-transform duration-200 group-hover:scale-110 ${
-                activeTab === 'thumb'
-                  ? 'drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]'
-                  : 'drop-shadow-[0_0_4px_rgba(52,211,153,0.45)]'
-              }`}
-            />
-            <span>Студия 4K Превью</span>
-          </button>
-
-          {/* 4. Вирусный Текст & Хуки: яркий электрический жёлтый / молния (#fde047 / text-yellow-300) */}
+          {/* 3. ⚡ Сценарий и Хуки */}
           <button
             onClick={() => setActiveTab('hooks')}
             id="tab-hooks"
-            className={`group tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab-hooks flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'hooks'
-                ? 'bg-yellow-400/20 text-yellow-100 border border-yellow-300/60 shadow-[0_0_16px_rgba(253,224,71,0.32)]'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border border-transparent'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-yellow-400/30'
             }`}
           >
-            <Zap
-              className={`w-4 h-4 text-yellow-300 fill-yellow-300/25 transition-transform duration-200 group-hover:scale-110 ${
-                activeTab === 'hooks'
-                  ? 'drop-shadow-[0_0_9px_rgba(253,224,71,0.95)]'
-                  : 'drop-shadow-[0_0_5px_rgba(253,224,71,0.55)]'
-              }`}
-            />
-            <span>Вирусный Текст &amp; Хуки</span>
+            <span className="nav-icon-box nav-icon-hooks" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
+                ⚡
+              </span>
+            </span>
+            <span className="text-white tracking-wide">Сценарий и Хуки</span>
+          </button>
+
+          {/* 4. 🎙️ Дикторский цех */}
+          <button
+            onClick={() => setActiveTab('voice')}
+            id="tab-voice"
+            className={`group tab-btn nav-tab-voice flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+              activeTab === 'voice'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-pink-500/30'
+            }`}
+          >
+            <span className="nav-icon-box nav-icon-voice" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
+                🎙️
+              </span>
+            </span>
+            <span className="text-white tracking-wide">Дикторский цех</span>
+          </button>
+
+          {/* 5. 📦 YouTube SEO */}
+          <button
+            onClick={() => setActiveTab('seo')}
+            id="tab-seo"
+            className={`group tab-btn nav-tab-seo flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+              activeTab === 'seo'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-sky-400/30'
+            }`}
+          >
+            <span className="nav-icon-box nav-icon-seo" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
+                📦
+              </span>
+            </span>
+            <span className="text-white tracking-wide">YouTube SEO</span>
+          </button>
+
+          {/* 6. 🎨 4K Превью и Арт-цех */}
+          <button
+            onClick={() => setActiveTab('thumb')}
+            id="tab-thumb"
+            className={`group tab-btn nav-tab-thumb flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+              activeTab === 'thumb'
+                ? 'tab-btn-active'
+                : 'border border-transparent hover:bg-slate-800/75 hover:border-emerald-400/30'
+            }`}
+          >
+            <span className="nav-icon-box nav-icon-thumb" aria-hidden="true">
+              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
+                🎨
+              </span>
+            </span>
+            <span className="text-white tracking-wide">4K Превью и Арт-цех</span>
           </button>
         </nav>
 
@@ -3763,6 +3907,11 @@ export default function App() {
             onClearTransferredScript={() => setTransferredScript('')}
             externalScenes={externalNarrativeScenes}
             onConsumeExternalScenes={() => setExternalNarrativeScenes(null)}
+            externalMasterAudioFile={externalMasterAudioFile}
+            onConsumeExternalMasterAudio={() => setExternalMasterAudioFile(null)}
+            onScenesChange={setActiveNarrativeScenes}
+            telegramBotToken={telegramBotToken}
+            telegramChatId={telegramChatId}
             onOpenConfigModal={openConfigModal}
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
@@ -5122,18 +5271,43 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Выпадающий список разрешения */}
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-400 uppercase block mb-1">
-                      Разрешение рендера:
-                    </label>
+                  {/* Выпадающий список разрешения + Черновик Draft 720p ultrafast */}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-[11px] font-semibold text-slate-400 uppercase block">
+                        Разрешение рендера:
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={loopDraftMode || loopResolution === '720p'}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setLoopDraftMode(checked);
+                            if (checked) {
+                              setVideoCodec('libx264');
+                              setLoopResolution('720p');
+                            } else if (loopResolution === '720p') {
+                              setLoopResolution('4k');
+                            }
+                          }}
+                          className="accent-amber-500 w-3.5 h-3.5"
+                        />
+                        <span>⚡ Черновик Draft 720p ultrafast (проверка за 1 мин)</span>
+                      </label>
+                    </div>
                     <select
                       value={loopResolution}
-                      onChange={e =>
-                        setLoopResolution(e.target.value as '1080p' | '2k' | '4k')
-                      }
+                      onChange={e => {
+                        const nextRes = e.target.value as '720p' | '1080p' | '2k' | '4k';
+                        setLoopResolution(nextRes);
+                        setLoopDraftMode(nextRes === '720p');
+                      }}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
                     >
+                      <option value="720p">
+                        [ Черновик Draft 720p (1280x720, preset ultrafast) ] — тестовый прогон склеек за 1 минуту
+                      </option>
                       <option value="1080p">
                         [ 1080p Full HD (1920x1080) ] — быстрый рендер, меньший объем диска
                       </option>
@@ -5154,7 +5328,7 @@ export default function App() {
                       Динамический калькулятор итогового веса ({videoCodec.toUpperCase()} {videoFps}fps):
                     </span>
                     <span className="text-sm font-bold text-slate-100">
-                      «{getResolutionLabel(loopResolution)} • {videoCodec === 'libx264' ? 'H.264 Fast' : getPresetShortLabel(bitratePreset)} •{' '}
+                      «{getResolutionLabel(loopResolution)} • {loopDraftMode || loopResolution === '720p' ? 'H.264 Ultrafast' : videoCodec === 'libx264' ? 'H.264 Fast' : getPresetShortLabel(bitratePreset)} •{' '}
                       {loopHours} {loopHours >= 5 ? 'часов' : 'часа'} ~ {estimatedGb} ГБ»
                     </span>
                   </div>
@@ -5173,15 +5347,16 @@ export default function App() {
                       value={loopSubtitleLanguage}
                       onChange={e =>
                         setLoopSubtitleLanguage(
-                          e.target.value as 'en' | 'ru' | 'es' | 'de' | 'original'
+                          e.target.value as 'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'
                         )
                       }
                       className="bg-slate-900 border border-indigo-500/40 rounded-lg px-2 py-1 text-[11px] font-mono text-indigo-200 outline-none"
                     >
                       <option value="en">Lang: en (US English)</option>
                       <option value="ru">Lang: ru (Русский)</option>
-                      <option value="es">Lang: es (Español)</option>
                       <option value="de">Lang: de (Deutsch)</option>
+                      <option value="es">Lang: es (Español)</option>
+                      <option value="fr">Lang: fr (Français)</option>
                       <option value="original">Lang: original</option>
                     </select>
                   </div>
@@ -5307,96 +5482,29 @@ export default function App() {
               onCancelRun={cancelActiveRenderRun}
             />
 
-            {/* ГЕНЕРАТОР КЛИКАБЕЛЬНЫХ ТАЙМКОДОВ И SEO УПАКОВКИ ДЛЯ ОПИСАНИЯ YOUTUBE (СТРОГО US ENGLISH) */}
-            <div className="bg-[#0b0f17] border border-amber-500/30 rounded-2xl p-5 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
-                <div>
-                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="w-4 h-4" /> Генератор кликабельных таймкодов для описания YouTube (YouTube Chapters &amp; SEO • US English)
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Автоматически формирует англоязычные таймкоды (Chapters), Title, Description и 30 Tags по вашим слотам таймлайна
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    let accumSec = 0;
-                    const englishActNames = [
-                      'Act I: The Frozen Perimeter & Distant Wind',
-                      'Act II: Deepening Blizzard & Sub-Zero Resonance',
-                      'Act III: Whiteout Horizon & Midnight Pulse',
-                      'Act IV: Eye of the Storm & Silent Telemetry',
-                      'Act V: Glacial Echoes & Heavy Snowfall',
-                      'Act VI: Final Embers & Dawn Stillness'
-                    ];
-                    const chapterLines = timelineSlots.map((sl, idx) => {
-                      const h = String(Math.floor(accumSec / 3600)).padStart(2, '0');
-                      const m = String(Math.floor((accumSec % 3600) / 60)).padStart(2, '0');
-                      const s = String(Math.floor(accumSec % 60)).padStart(2, '0');
-                      const isLast = idx === timelineSlots.length - 1;
-                      const overlap =
-                        !isLast && sl.slot_transition_out.type !== 'none'
-                          ? sl.slot_transition_out.duration_sec
-                          : 0;
-                      accumSec += Math.max(1, sl.slot_duration_sec - overlap);
-                      const rawTitle = (sl.act_title || sl.title || '').trim();
-                      const cleanEnTitle = /[а-яёА-ЯЁ]/.test(rawTitle) || !rawTitle
-                        ? englishActNames[idx % englishActNames.length]
-                        : rawTitle;
-                      return `${h}:${m}:${s} - ${cleanEnTitle}`;
-                    });
-                    const fullChaptersText =
-                      `TITLE: ${loopProjectName || 'Ambient Loop 4K'} — ${loopHours} Hours 4K Ultra HD Ambience\n\n` +
-                      `DESCRIPTION:\nImmerse yourself in ${loopHours} hours of seamless 4K Ultra HD atmospheric ambience with mastered spatial audio (-16 LUFS). Designed for deep focus, sleep, study, and cinematic relaxation.\n\n` +
-                      `YOUTUBE CHAPTERS:\n${chapterLines.join('\n')}\n\n` +
-                      `30 TAGS:\n4k ambience, ${loopHours} hours loop, snowstorm ambience, winter blizzard sounds, howling wind 4k, deep sleep ambience, study ambience, dark screen ambience, cozy cabin storm, arctic wind soundscape, seamless loop 4k, relaxation video, white noise sleep, atmospheric soundscape, cinematic ambience, heavy snowstorm, insomnia relief, meditation nature sounds, binaural wind, ultra hd 4k loop, ambient drone, deep focus audio, storm outside window, arctic outpost ambience, night blizzard 4k, peaceful winter night, sleep aid 4k, ambient study music, nature soundscape, aethercombine 4k`;
-                    navigator.clipboard.writeText(fullChaptersText);
-                    showToast('YouTube Chapters + SEO Packaging (US English) скопированы в буфер обмена!', 'success');
-                  }}
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5" /> Копировать YouTube Chapters &amp; SEO (EN)
-                </button>
+            {/* БЫСТРЫЙ ПЕРЕХОД В ОТДЕЛЬНЫЙ ЦЕХ YOUTUBE SEO & УПАКОВКИ */}
+            <div className="bg-[#0b0f17] border border-sky-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-2">
+                  <Package className="w-4 h-4" /> Упаковка слотов таймлайна в YouTube SEO (A/B Titles, Description, Chapters, 30 Tags)
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Вся текстовая мета-упаковка и генерация на базе Gemini вынесены в отдельную вкладку «📦 YouTube SEO»
+                </p>
               </div>
-
-              <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-emerald-300 whitespace-pre-wrap max-h-48 overflow-y-auto custom-scroll leading-relaxed">
-                {(() => {
-                  let accumSec = 0;
-                  const englishActNames = [
-                    'Act I: The Frozen Perimeter & Distant Wind',
-                    'Act II: Deepening Blizzard & Sub-Zero Resonance',
-                    'Act III: Whiteout Horizon & Midnight Pulse',
-                    'Act IV: Eye of the Storm & Silent Telemetry',
-                    'Act V: Glacial Echoes & Heavy Snowfall',
-                    'Act VI: Final Embers & Dawn Stillness'
-                  ];
-                  return timelineSlots
-                    .map((sl, idx) => {
-                      const h = String(Math.floor(accumSec / 3600)).padStart(2, '0');
-                      const m = String(Math.floor((accumSec % 3600) / 60)).padStart(2, '0');
-                      const s = String(Math.floor(accumSec % 60)).padStart(2, '0');
-                      const isLast = idx === timelineSlots.length - 1;
-                      const overlap =
-                        !isLast && sl.slot_transition_out.type !== 'none'
-                          ? sl.slot_transition_out.duration_sec
-                          : 0;
-                      accumSec += Math.max(1, sl.slot_duration_sec - overlap);
-                      const rawTitle = (sl.act_title || sl.title || '').trim();
-                      const cleanEnTitle = /[а-яёА-ЯЁ]/.test(rawTitle) || !rawTitle
-                        ? englishActNames[idx % englishActNames.length]
-                        : rawTitle;
-                      return `${h}:${m}:${s} - ${cleanEnTitle}`;
-                    })
-                    .join('\n');
-                })()}
-              </pre>
+              <button
+                type="button"
+                onClick={() => setActiveTab('seo')}
+                className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition"
+              >
+                <Package className="w-3.5 h-3.5" /> Открыть «📦 YouTube SEO» →
+              </button>
             </div>
           </div>
         </section>
 
         {/* =========================================
-            ЦЕХ 3: СТУДИЯ 4K ПРЕВЬЮ (A/B ТЕСТЕР + ЗАХВАТ КАДРА + YOUTUBE MOCKUP)
+            ЦЕХ 3: 4K ПРЕВЬЮ И АРТ-ЦЕХ (IMAGEN 3 + A/B ТЕСТЕР + YOUTUBE MOCKUP)
            ========================================= */}
         <section
           id="view-thumb"
@@ -5412,7 +5520,7 @@ export default function App() {
         </section>
 
         {/* =========================================
-            ЦЕХ 4: МОДУЛЬ УДЕРЖАНИЯ VERBAFLOW ENGINE
+            ЦЕХ 4: СЦЕНАРИЙ И ХУКИ (VERBAFLOW ENGINE)
            ========================================= */}
         <section
           id="view-hooks"
@@ -5430,6 +5538,7 @@ export default function App() {
             complianceDictionary={COMPLIANCE_DICTIONARY}
             onTransferToNarrativeMontage={(newScenes, fullScript) => {
               setExternalNarrativeScenes(newScenes);
+              setActiveNarrativeScenes(newScenes);
               setTransferredScript(fullScript);
               setActiveTab('combine');
               showToast(
@@ -5437,10 +5546,83 @@ export default function App() {
                 'success'
               );
             }}
-            onApplyToThumbnailStudio={(shortText, ytTitle) => {
-              setThumbTitle(shortText);
+            onSendToVoiceStudio={ttsReadyText => {
+              setVoiceStudioScript(ttsReadyText);
+              setActiveTab('voice');
+              showToast('🎙 Сценарий с разметкой пауз передан в Дикторский цех!', 'success');
+            }}
+            onSyncAllWorkshops={(newScenes, fullScript, ttsScript) => {
+              setExternalNarrativeScenes(newScenes);
+              setActiveNarrativeScenes(newScenes);
+              setTransferredScript(fullScript);
+              setVoiceStudioScript(ttsScript);
+              setSeoScriptText(fullScript);
+              setActiveTab('seo');
+              showToast(
+                `🚀 Сценарий синхронизирован в YouTube SEO, Дикторский цех и Видеопромпты (${newScenes.length} сцен)!`,
+                'success'
+              );
+            }}
+            onNotify={showToast}
+          />
+        </section>
+
+        {/* =========================================
+            ЦЕХ 5: ДИКТОРСКИЙ ЦЕХ (VOICE STUDIO — ELEVENLABS DUAL-KEY & EDGE TTS)
+           ========================================= */}
+        <section
+          id="view-voice"
+          className={`studio-view space-y-6 ${activeTab === 'voice' ? '' : 'hidden'}`}
+        >
+          <VoiceStudioView
+            scriptText={voiceStudioScript || transferredScript || sourceText}
+            onScriptTextChange={setVoiceStudioScript}
+            onMasterVoiceoverReady={(audioFileName, audioFile, durationSec) => {
+              setExternalMasterAudioFile({
+                fileName: audioFileName,
+                file: audioFile,
+                durationSec
+              });
+              setLoopMasterAudio(prev => ({
+                ...prev,
+                enabled: true,
+                file_name: audioFileName
+              }));
+              showToast(
+                `🎙 Файл «${audioFileName}» автоматически подставлен в мастер-аудиодорожку манифеста!`,
+                'success'
+              );
+            }}
+            onNotify={showToast}
+          />
+        </section>
+
+        {/* =========================================
+            ЦЕХ 6: YOUTUBE SEO & УПАКОВКА (SEO HUB — GEMINI US ENGLISH)
+           ========================================= */}
+        <section
+          id="view-seo"
+          className={`studio-view space-y-6 ${activeTab === 'seo' ? '' : 'hidden'}`}
+        >
+          <YouTubeSeoView
+            projectName={loopProjectName}
+            scriptContext={seoScriptText || transferredScript || sourceText}
+            narrativeScenes={activeNarrativeScenes}
+            loopSlots={timelineSlots}
+            onApplyTitleToThumbnail={selectedTitle => {
+              const words = selectedTitle
+                .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 3)
+                .join(' ')
+                .toUpperCase();
+              if (words) {
+                setThumbTitle(words);
+              }
               setActiveTab('thumb');
-              showToast(`Хук-надпись «${shortText}» (${ytTitle}) передана в Студию 4K Превью!`, 'success');
+              showToast(`Хук «${words}» передан на 4K обложку!`, 'success');
             }}
             onNotify={showToast}
           />
@@ -5694,6 +5876,42 @@ export default function App() {
                   <span className="text-[10px] text-slate-500">
                     Сохраните этот JSON также в GitHub Secrets как `GDRIVE_SERVICE_ACCOUNT_JSON`.
                   </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Секция 3: Telegram-уведомления о завершении или сбое рендера */}
+            <div className="bg-[#0b0f17] p-4 rounded-xl border border-sky-500/30 space-y-3">
+              <div className="text-xs font-bold text-sky-400 uppercase flex items-center gap-1.5">
+                <Send className="w-4 h-4" /> 3. Уведомления в Telegram (Telegram Bot API)
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Мгновенная отправка сообщения в ваш Telegram при успешной выгрузке 4K-файла в Google Drive или при сбое облачной сборки.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">
+                    Telegram Bot Token:
+                  </label>
+                  <input
+                    type="password"
+                    value={modalTelegramBotToken}
+                    onChange={e => setModalTelegramBotToken(e.target.value)}
+                    placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-sky-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">
+                    Telegram Chat ID:
+                  </label>
+                  <input
+                    type="text"
+                    value={modalTelegramChatId}
+                    onChange={e => setModalTelegramChatId(e.target.value)}
+                    placeholder="-1001234567890 или 123456789"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-sky-400 font-mono"
+                  />
                 </div>
               </div>
             </div>

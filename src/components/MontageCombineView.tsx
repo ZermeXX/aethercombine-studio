@@ -69,13 +69,14 @@ export type SubtitleTargetLanguage =
   | 'ru-RU'
   | 'es-ES'
   | 'de-DE'
+  | 'fr-FR'
   | 'original';
 
 export interface SubtitlesFlexibleConfig {
   enabled: boolean;
   burn_in: boolean;       // вшивать ли через FFmpeg фильтр (Hardsub)
   upload_srt: boolean;    // сохранять ли файл на Google Диск (Softsub)
-  language: string;       // "en", "ru", "es", "de", "original"
+  language: string;       // "en", "ru", "es", "de", "fr", "original"
   target_language?: SubtitleTargetLanguage;
   srt_filename?: string;
   srt_content: string;    // полный текст сгенерированных таймкодов
@@ -93,11 +94,23 @@ export interface BurnInSrtConfig {
   ffmpeg_filter: string;
 }
 
+export interface ShortsAutoSliceConfig {
+  enabled: boolean;
+  count: 2 | 3;
+  aspect_ratio: '9:16';
+  resolution: '1080x1920';
+  crop_mode: 'center';
+  hook_text_en: string;
+  output_dir: './output/shorts/';
+  upload_to_gdrive: boolean;
+}
+
 export interface NarrativeExportSettings {
-  resolution: '4k' | '1080p';
+  resolution: '4k' | '1080p' | '720p';
   aspect_ratio: '16:9' | '9:16';
   video_codec: 'libx265' | 'libx264';
-  preset?: 'veryfast' | 'medium';
+  preset?: 'veryfast' | 'ultrafast' | 'medium';
+  draft_mode?: boolean;
   bitrate_mbps: number;
   crf: number;
   fps: 24 | 30 | 60;
@@ -121,6 +134,12 @@ export interface NarrativeMontageManifest {
   export_settings: NarrativeExportSettings;
   subtitles: SubtitlesFlexibleConfig;
   subtitles_burn_in?: BurnInSrtConfig;
+  shorts_config?: ShortsAutoSliceConfig;
+  telegram_notifications?: {
+    enabled: boolean;
+    bot_token: string;
+    chat_id: string;
+  };
   drift_guard?: {
     video_duration_sec: number;
     audio_duration_sec: number;
@@ -143,6 +162,11 @@ interface MontageCombineViewProps {
   onClearTransferredScript: () => void;
   externalScenes?: NarrativeSceneItem[] | null;
   onConsumeExternalScenes?: () => void;
+  externalMasterAudioFile?: { fileName: string; file?: File; durationSec?: number } | null;
+  onConsumeExternalMasterAudio?: () => void;
+  onScenesChange?: (scenes: NarrativeSceneItem[]) => void;
+  telegramBotToken?: string;
+  telegramChatId?: string;
   onOpenConfigModal: () => void;
   onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
   onCancelRenderRun: () => void;
@@ -197,6 +221,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onClearTransferredScript,
   externalScenes,
   onConsumeExternalScenes,
+  externalMasterAudioFile,
+  onConsumeExternalMasterAudio,
+  onScenesChange,
+  telegramBotToken,
+  telegramChatId,
   onOpenConfigModal,
   onStartRenderStatus,
   onCancelRenderRun,
@@ -236,6 +265,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
   }, [externalScenes, onConsumeExternalScenes]);
 
+  // Синхронизация текущих сцен с родительским App (для автоматического расчета глав YouTube SEO)
+  useEffect(() => {
+    onScenesChange?.(narrativeScenes);
+  }, [narrativeScenes, onScenesChange]);
+
   // Состояние скролла и фильтра для виртуализированной компактной сетки
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -272,6 +306,23 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     uploaded: false
   });
 
+  // Авто-подстановка master_voiceover.mp3 из Дикторского цеха (Voice Studio)
+  useEffect(() => {
+    if (externalMasterAudioFile && externalMasterAudioFile.fileName) {
+      setMasterAudio(prev => ({
+        ...prev,
+        file_name: externalMasterAudioFile.fileName
+      }));
+      if (externalMasterAudioFile.file) {
+        setMasterAudioFile(externalMasterAudioFile.file);
+      }
+      if (externalMasterAudioFile.durationSec && externalMasterAudioFile.durationSec > 0) {
+        setMasterAudioDurationSec(externalMasterAudioFile.durationSec);
+      }
+      onConsumeExternalMasterAudio?.();
+    }
+  }, [externalMasterAudioFile, onConsumeExternalMasterAudio]);
+
   // Гибкая система субтитров: Hardsub (burn_in) / Softsub (upload_srt на Google Диск) / Скачивание .SRT
   const [burnInSrtEnabled, setBurnInSrtEnabled] = useState<boolean>(false);
   const [uploadSrtToDriveEnabled, setUploadSrtToDriveEnabled] = useState<boolean>(true);
@@ -280,12 +331,18 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [srtTextContent, setSrtTextContent] = useState<string>('');
   const srtFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Авто-нарезка вирусных Shorts (9:16, 1080x1920, центрированный кроп + текстовый хук на английском)
+  const [shortsAutoSliceEnabled, setShortsAutoSliceEnabled] = useState<boolean>(false);
+  const [shortsSliceCount, setShortsSliceCount] = useState<2 | 3>(3);
+  const [shortsHookTextEn, setShortsHookTextEn] = useState<string>('WAIT FOR THE 14TH SECOND...');
+
   // Параметры кодирования для N-сцен (по умолчанию H.264 libx264, preset veryfast, CRF 20 — скоростной монтаж)
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
     resolution: '4k',
     aspect_ratio: '16:9',
     video_codec: 'libx264',
     preset: 'veryfast',
+    draft_mode: false,
     bitrate_mbps: 35,
     crf: 20,
     fps: 24,
@@ -645,6 +702,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         if (l.startsWith('ru')) setSubtitleLanguage('ru-RU');
         else if (l.startsWith('es')) setSubtitleLanguage('es-ES');
         else if (l.startsWith('de')) setSubtitleLanguage('de-DE');
+        else if (l.startsWith('fr')) setSubtitleLanguage('fr-FR');
         else if (l.startsWith('orig')) setSubtitleLanguage('original');
         else setSubtitleLanguage('en-US');
       }
@@ -893,6 +951,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       'По сей день финальная кассета остаётся под замком в спецхранилище.'
     ];
 
+    const frFallbacks = [
+      'Dans les archives classifiées de la station alpine, un étrange bourdonnement basse fréquence a été enregistré.',
+      'En vingt-quatre heures, toute la station a été scellée sous un accord de confidentialité de cinquante ans.',
+      'Le rapport officiel a invoqué une avalanche, mais tous les instruments ont continué à émettre pendant trois semaines.',
+      'À la quatorzième seconde de la bande, une anomalie acoustique inexplicable apparaît.',
+      'Lorsque l’équipe a ouvert le bunker, les émetteurs fonctionnaient toujours à pleine puissance.',
+      'Personne n’avait accès à la console, pourtant le signal revenait exactement à la même heure chaque nuit.',
+      'Aujourd’hui encore, l’enregistrement final reste enfermé dans le coffre.'
+    ];
+
     if (lang === 'en-US') {
       if (!clean || hasCyrillic) {
         return enFallbacks[(sceneIndex - 1) % enFallbacks.length];
@@ -915,6 +983,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       return deFallbacks[(sceneIndex - 1) % deFallbacks.length];
     }
 
+    if (lang === 'fr-FR') {
+      return frFallbacks[(sceneIndex - 1) % frFallbacks.length];
+    }
+
     return clean || enFallbacks[(sceneIndex - 1) % enFallbacks.length];
   };
 
@@ -924,6 +996,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       'ru-RU': 'ru',
       'es-ES': 'es',
       'de-DE': 'de',
+      'fr-FR': 'fr',
       original: 'original'
     };
     return map[lang] || 'en';
@@ -1155,7 +1228,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       },
       export_settings: {
         ...exportSettings,
-        preset: exportSettings.video_codec === 'libx264' ? 'veryfast' : 'medium',
+        preset: exportSettings.draft_mode
+          ? 'ultrafast'
+          : exportSettings.video_codec === 'libx264'
+          ? 'veryfast'
+          : 'medium',
         subtitles: subtitlesConfigObject
       },
       subtitles: subtitlesConfigObject,
@@ -1172,6 +1249,25 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           : '',
         ffmpeg_filter: burnInSrtEnabled ? burnInFfmpegFilter : ''
       },
+      shorts_config: {
+        enabled: shortsAutoSliceEnabled,
+        count: shortsSliceCount,
+        aspect_ratio: '9:16',
+        resolution: '1080x1920',
+        crop_mode: 'center',
+        hook_text_en: shortsHookTextEn.trim() || 'WAIT FOR THE 14TH SECOND...',
+        output_dir: './output/shorts/',
+        upload_to_gdrive: true
+      },
+      ...(telegramBotToken && telegramChatId
+        ? {
+            telegram_notifications: {
+              enabled: true,
+              bot_token: telegramBotToken.trim(),
+              chat_id: telegramChatId.trim()
+            }
+          }
+        : {}),
       drift_guard: {
         video_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
         audio_duration_sec: masterAudioDurationSec,
@@ -1203,6 +1299,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       uploadSrtToDriveEnabled,
       subtitleLanguage,
       burnInFfmpegFilter,
+      shortsAutoSliceEnabled,
+      shortsSliceCount,
+      shortsHookTextEn,
+      telegramBotToken,
+      telegramChatId,
       driftDiffSec,
       isDriftWithinTolerance,
       encodeManifestBase64
@@ -1611,26 +1712,47 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           <div className="space-y-3 text-xs">
-            {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs H.265 preset medium CRF 22) */}
+            {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs Draft 720p ultrafast vs H.265 preset medium CRF 22) */}
             <div>
               <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
-                Селектор видеокодека (H.264 vs H.265):
+                Селектор видеокодека и режима сборки (H.264 / Draft 720p ultrafast / H.265):
               </label>
               <select
-                value={exportSettings.video_codec}
+                value={
+                  exportSettings.draft_mode
+                    ? 'draft_720p'
+                    : exportSettings.video_codec
+                }
                 onChange={e => {
-                  const codec = e.target.value as 'libx264' | 'libx265';
-                  setExportSettings(prev => ({
-                    ...prev,
-                    video_codec: codec,
-                    preset: codec === 'libx264' ? 'veryfast' : 'medium',
-                    crf: codec === 'libx264' ? 20 : 22
-                  }));
+                  const val = e.target.value;
+                  if (val === 'draft_720p') {
+                    setExportSettings(prev => ({
+                      ...prev,
+                      resolution: '720p',
+                      video_codec: 'libx264',
+                      preset: 'ultrafast',
+                      draft_mode: true,
+                      crf: 26
+                    }));
+                  } else {
+                    const codec = val as 'libx264' | 'libx265';
+                    setExportSettings(prev => ({
+                      ...prev,
+                      resolution: prev.resolution === '720p' ? '4k' : prev.resolution,
+                      video_codec: codec,
+                      preset: codec === 'libx264' ? 'veryfast' : 'medium',
+                      draft_mode: false,
+                      crf: codec === 'libx264' ? 20 : 22
+                    }));
+                  }
                 }}
                 className="w-full bg-slate-900 border border-indigo-500/40 rounded-lg px-3 py-2 text-xs font-mono text-indigo-200 outline-none focus:border-indigo-400"
               >
                 <option value="libx264">
-                  H.264 (libx264, preset veryfast, CRF 20) — Скоростной монтаж (рекомендуется для YouTube 4K) [ПО УМОЛЧАНИЮ]
+                  H.264 (libx264, veryfast, CRF 20) — Скоростной монтаж (по умолчанию)
+                </option>
+                <option value="draft_720p">
+                  ⚡ Черновик Draft 720p ultrafast (libx264, preset ultrafast, CRF 26) — Быстрая проверка за 1 минуту
                 </option>
                 <option value="libx265">
                   H.265 (libx265, preset medium, CRF 22) — Архивное сжатие
@@ -1645,16 +1767,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 </label>
                 <select
                   value={exportSettings.resolution}
-                  onChange={e =>
+                  onChange={e => {
+                    const res = e.target.value as '4k' | '1080p' | '720p';
                     setExportSettings(prev => ({
                       ...prev,
-                      resolution: e.target.value as '4k' | '1080p'
-                    }))
-                  }
+                      resolution: res,
+                      draft_mode: res === '720p',
+                      preset: res === '720p' ? 'ultrafast' : prev.video_codec === 'libx264' ? 'veryfast' : 'medium'
+                    }));
+                  }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
                 >
                   <option value="4k">4K Ultra HD (3840×2160)</option>
                   <option value="1080p">1080p Full HD (1920×1080)</option>
+                  <option value="720p">Draft 720p HD (1280×720 ultrafast)</option>
                 </select>
               </div>
 
@@ -1741,96 +1867,156 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         </div>
       </div>
 
-      {/* 3B. МАТРИЦА РАССИНХРОНА (AUDIO-TO-VIDEO DRIFT GUARD) & АВТОМАТИЧЕСКИЙ ГЕНЕРАТОР ТИТРОВ (BURN-IN SRT) */}
+      {/* 3B. МАТРИЦА РАССИНХРОНА (AUDIO-TO-VIDEO DRIFT GUARD) & ГИБКАЯ СИСТЕМА СУБТИТРОВ + АВТО-НАРЕЗКА SHORTS (9:16) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Матрица рассинхрона (Audio-to-Video Drift Guard) */}
-        <div
-          className={`rounded-2xl p-5 border space-y-3 transition ${
-            isDriftWithinTolerance
-              ? 'bg-emerald-950/15 border-emerald-500/40'
-              : 'bg-amber-950/15 border-amber-500/50'
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-            <div className="flex items-center gap-2">
-              {isDriftWithinTolerance ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-              )}
-              <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                Матрица рассинхрона (Audio-to-Video Drift Guard)
-              </h3>
+        {/* Матрица рассинхрона + Авто-нарезка вирусных Shorts (9:16) */}
+        <div className="space-y-4">
+          <div
+            className={`rounded-2xl p-5 border space-y-3 transition ${
+              isDriftWithinTolerance
+                ? 'bg-emerald-950/15 border-emerald-500/40'
+                : 'bg-amber-950/15 border-amber-500/50'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2">
+                {isDriftWithinTolerance ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                )}
+                <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                  Матрица рассинхрона (Audio-to-Video Drift Guard)
+                </h3>
+              </div>
+              <span
+                className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
+                  isDriftWithinTolerance
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                }`}
+              >
+                {isDriftWithinTolerance
+                  ? `В пределах нормы (±2 сек)`
+                  : driftDiffSec > 0
+                  ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
+                  : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
+              </span>
             </div>
-            <span
-              className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
-                isDriftWithinTolerance
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                  : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-              }`}
-            >
-              {isDriftWithinTolerance
-                ? `В пределах нормы (±2 сек)`
-                : driftDiffSec > 0
-                ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
-                : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
-            </span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase block">
+                  Сумма видео-сцен:
+                </span>
+                <span className="text-sm font-bold font-mono text-indigo-300">
+                  {Math.round(totalNarrativeDurationSec * 10) / 10} сек ({formatTimecode(totalNarrativeDurationSec)})
+                </span>
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+                <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
+                  Длительность мастер-аудио (сек):
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={36000}
+                  step={1}
+                  value={masterAudioDurationSec}
+                  onChange={e => setMasterAudioDurationSec(Math.max(1, Number(e.target.value) || 60))}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none"
+                />
+              </div>
+
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                <span className="text-[10px] text-slate-400 uppercase block">
+                  Статус синхронизации:
+                </span>
+                {isDriftWithinTolerance ? (
+                  <span className="text-xs font-bold text-emerald-400">
+                    ✓ Идеальный баланс ({driftDiffSec >= 0 ? `+${driftDiffSec}` : driftDiffSec} сек)
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-amber-300">
+                    ⚠️ {driftDiffSec > 0
+                      ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
+                      : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-slate-400">
+                Автоматический контроль длины 100–150+ сцен против хронометража дикторской озвучки.
+              </span>
+              <button
+                type="button"
+                onClick={syncScenesDurationToMasterAudio}
+                className="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({masterAudioDurationSec}с)
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-              <span className="text-[10px] text-slate-400 uppercase block">
-                Сумма видео-сцен:
-              </span>
-              <span className="text-sm font-bold font-mono text-indigo-300">
-                {Math.round(totalNarrativeDurationSec * 10) / 10} сек ({formatTimecode(totalNarrativeDurationSec)})
+          {/* 2. АВТО-НАРЕЗКА SHORTS (9:16 • 1080x1920 • ./output/shorts/) */}
+          <div className="bg-[#0b0f17] border border-amber-500/35 rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                  Авто-нарезка Shorts (9:16 • 1080×1920 • Центрированный кроп)
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-400/30 text-amber-300 px-2 py-0.5 rounded">
+                ./output/shorts/ → Google Drive
               </span>
             </div>
 
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-              <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
-                Длительность мастер-аудио (сек):
-              </label>
+            <label className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-800 hover:border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-amber-200 cursor-pointer select-none transition">
               <input
-                type="number"
-                min={1}
-                max={36000}
-                step={1}
-                value={masterAudioDurationSec}
-                onChange={e => setMasterAudioDurationSec(Math.max(1, Number(e.target.value) || 60))}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none"
+                type="checkbox"
+                checked={shortsAutoSliceEnabled}
+                onChange={e => setShortsAutoSliceEnabled(e.target.checked)}
+                className="accent-amber-500 w-4 h-4 shrink-0"
               />
+              <span>Сгенерировать 2–3 вирусных Shorts (9:16) из лучших сцен</span>
+            </label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Количество Shorts:
+                </label>
+                <select
+                  value={shortsSliceCount}
+                  onChange={e => setShortsSliceCount(Number(e.target.value) as 2 | 3)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
+                >
+                  <option value={2}>2 вирусных клипа (9:16)</option>
+                  <option value={3}>3 вирусных клипа (9:16)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                  Текстовый хук на английском (Hook Text Overlay):
+                </label>
+                <input
+                  type="text"
+                  value={shortsHookTextEn}
+                  onChange={e => setShortsHookTextEn(e.target.value)}
+                  placeholder="WAIT FOR THE 14TH SECOND..."
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none"
+                />
+              </div>
             </div>
 
-            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
-              <span className="text-[10px] text-slate-400 uppercase block">
-                Статус синхронизации:
-              </span>
-              {isDriftWithinTolerance ? (
-                <span className="text-xs font-bold text-emerald-400">
-                  ✓ Идеальный баланс ({driftDiffSec >= 0 ? `+${driftDiffSec}` : driftDiffSec} сек)
-                </span>
-              ) : (
-                <span className="text-xs font-bold text-amber-300">
-                  ⚠️ {driftDiffSec > 0
-                    ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
-                    : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
-                </span>
-              )}
+            <div className="text-[11px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5">
+              FFmpeg: <code className="text-amber-300">crop=ih*9/16:ih,scale=1080:1920</code> + английский хук-титр → сохранение в <code className="text-emerald-300">./output/shorts/</code> и выгрузка в Google Drive.
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-slate-400">
-              Автоматический контроль длины 100–150+ сцен против хронометража дикторской озвучки.
-            </span>
-            <button
-              type="button"
-              onClick={syncScenesDurationToMasterAudio}
-              className="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({masterAudioDurationSec}с)
-            </button>
           </div>
         </div>
 
@@ -1840,7 +2026,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <div className="flex items-center gap-2">
               <Subtitles className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                Система субтитров: Гибкие режимы (Hardsub / Softsub / .SRT)
+                Гибкие субтитры (Hardsub / Softsub / .SRT)
               </h3>
             </div>
             <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
@@ -1857,7 +2043,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 onChange={e => setBurnInSrtEnabled(e.target.checked)}
                 className="accent-indigo-500 w-4 h-4 shrink-0"
               />
-              <span>Вшить субтитры в видеоряд (Hardsub)</span>
+              <span>Вшить субтитры в 4K видео (Hardsub)</span>
             </label>
 
             <label className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs font-semibold text-emerald-300 cursor-pointer select-none transition">
@@ -1867,7 +2053,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 onChange={e => setUploadSrtToDriveEnabled(e.target.checked)}
                 className="accent-emerald-500 w-4 h-4 shrink-0"
               />
-              <span>Выгрузить файл субтитров (.srt) на Google Диск</span>
+              <span>Выгрузить .SRT файл на Google Диск</span>
             </label>
           </div>
 
@@ -1885,10 +2071,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               }}
               className="bg-slate-950 border border-indigo-500/40 rounded-lg px-3 py-1.5 text-xs font-semibold text-indigo-200 outline-none focus:border-indigo-400"
             >
-              <option value="en-US">English (US) [en — по умолчанию]</option>
+              <option value="en-US">English US [en — по умолчанию]</option>
               <option value="ru-RU">Русский [ru]</option>
-              <option value="es-ES">Español [es]</option>
               <option value="de-DE">Deutsch [de]</option>
+              <option value="es-ES">Español [es]</option>
+              <option value="fr-FR">Français [fr]</option>
               <option value="original">Оригинальный язык сценария [original]</option>
             </select>
           </div>
