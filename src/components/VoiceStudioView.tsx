@@ -24,6 +24,7 @@ import {
 
 export type VoiceProvider = 'elevenlabs' | 'edgetts';
 export type VoiceLanguage =
+  | 'all'
   | 'English US'
   | 'English UK'
   | 'Русский'
@@ -37,7 +38,8 @@ export interface StudioVoiceItem {
   id: string;
   name: string;
   provider: VoiceProvider;
-  language: VoiceLanguage;
+  language: Exclude<VoiceLanguage, 'all'>;
+  lang?: string;
   gender: 'male' | 'female' | 'universal';
   description: string;
   previewUrl?: string;
@@ -53,15 +55,15 @@ interface ElevenLabsSubscriptionInfo {
   error?: string;
 }
 
-interface SavedVoiceStudioConfig {
-  activeAccount: 1 | 2;
-  apiKey1: string;
-  apiKey2: string;
-  provider: VoiceProvider;
-  selectedLanguage: VoiceLanguage;
+interface AetherVoiceSettings {
+  activeAccount: string;
+  elevenKey1: string;
+  elevenKey2: string;
+  activeEngine: VoiceProvider;
+  selectedLang: VoiceLanguage;
   selectedGender: VoiceGenderFilter;
   selectedVoiceId: string;
-  favorites: string[];
+  favorites?: string[];
 }
 
 interface VoiceStudioViewProps {
@@ -71,7 +73,7 @@ interface VoiceStudioViewProps {
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-const LANGUAGE_TO_PREFIX_MAP: Record<VoiceLanguage, string> = {
+const LANGUAGE_TO_PREFIX_MAP: Record<Exclude<VoiceLanguage, 'all'>, string> = {
   'English US': 'en-US',
   'English UK': 'en-GB',
   Русский: 'ru',
@@ -81,7 +83,7 @@ const LANGUAGE_TO_PREFIX_MAP: Record<VoiceLanguage, string> = {
   Français: 'fr'
 };
 
-const LANGUAGE_MATCH_TOKENS: Record<VoiceLanguage, string[]> = {
+const LANGUAGE_MATCH_TOKENS: Record<Exclude<VoiceLanguage, 'all'>, string[]> = {
   'English US': ['en-us', 'english us', 'american', 'us', 'en'],
   'English UK': ['en-gb', 'english uk', 'british', 'uk'],
   Русский: ['ru', 'ru-ru', 'russian', 'русский'],
@@ -91,7 +93,7 @@ const LANGUAGE_MATCH_TOKENS: Record<VoiceLanguage, string[]> = {
   Français: ['fr', 'fr-fr', 'french', 'français']
 };
 
-// Жестко зашитая структура пресетов Edge TTS по ключам "язык_пол" (мгновенная подстановка без сетевых задержек)
+// Жестко зашитая структура пресетов Edge TTS по ключам "язык_пол"
 const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
   'ru_male': [
     {
@@ -99,6 +101,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Дмитрий (ru-RU-DmitryNeural)',
       provider: 'edgetts',
       language: 'Русский',
+      lang: 'Русский (ru)',
       gender: 'male',
       description: 'Глубокий баритон для документального кино и тру-крайма',
       labels: { language: 'ru', gender: 'male', accent: 'russian' }
@@ -110,6 +113,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Светлана (ru-RU-SvetlanaNeural)',
       provider: 'edgetts',
       language: 'Русский',
+      lang: 'Русский (ru)',
       gender: 'female',
       description: 'Чистый студийный женский голос с мягкой подачей',
       labels: { language: 'ru', gender: 'female', accent: 'russian' }
@@ -121,6 +125,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Guy (en-US-GuyNeural)',
       provider: 'edgetts',
       language: 'English US',
+      lang: 'English US (en-US)',
       gender: 'male',
       description: 'Deep Narrative Documentary Male • Studio Neural',
       labels: { language: 'en-US', gender: 'male', accent: 'american' }
@@ -130,6 +135,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Christopher (en-US-ChristopherNeural)',
       provider: 'edgetts',
       language: 'English US',
+      lang: 'English US (en-US)',
       gender: 'male',
       description: 'Authoritative Investigative Storyteller • Studio Neural',
       labels: { language: 'en-US', gender: 'male', accent: 'american' }
@@ -141,6 +147,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Jenny (en-US-JennyNeural)',
       provider: 'edgetts',
       language: 'English US',
+      lang: 'English US (en-US)',
       gender: 'female',
       description: 'Warm Clear Broadcast Female • Studio Neural',
       labels: { language: 'en-US', gender: 'female', accent: 'american' }
@@ -152,6 +159,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Ryan (en-GB-RyanNeural)',
       provider: 'edgetts',
       language: 'English UK',
+      lang: 'English UK (en-GB)',
       gender: 'male',
       description: 'British BBC-Style Documentary Narrator • Studio Neural',
       labels: { language: 'en-GB', gender: 'male', accent: 'british' }
@@ -163,6 +171,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Sonia (en-GB-SoniaNeural)',
       provider: 'edgetts',
       language: 'English UK',
+      lang: 'English UK (en-GB)',
       gender: 'female',
       description: 'Crisp British Narrator • Studio Neural',
       labels: { language: 'en-GB', gender: 'female', accent: 'british' }
@@ -174,6 +183,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Остап (uk-UA-OstapNeural)',
       provider: 'edgetts',
       language: 'Українська',
+      lang: 'Українська (uk)',
       gender: 'male',
       description: 'Виразний чоловічий дикторський голос • Studio Neural',
       labels: { language: 'uk', gender: 'male', accent: 'ukrainian' }
@@ -185,6 +195,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Поліна (uk-UA-PolinaNeural)',
       provider: 'edgetts',
       language: 'Українська',
+      lang: 'Українська (uk)',
       gender: 'female',
       description: 'Природний жіночий студійний голос • Studio Neural',
       labels: { language: 'uk', gender: 'female', accent: 'ukrainian' }
@@ -196,6 +207,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Conrad (de-DE-ConradNeural)',
       provider: 'edgetts',
       language: 'Deutsch',
+      lang: 'Deutsch (de)',
       gender: 'male',
       description: 'Klangvoller Dokumentarfilm-Sprecher • Studio Neural',
       labels: { language: 'de', gender: 'male', accent: 'german' }
@@ -207,6 +219,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Katja (de-DE-KatjaNeural)',
       provider: 'edgetts',
       language: 'Deutsch',
+      lang: 'Deutsch (de)',
       gender: 'female',
       description: 'Klare deutsche Erzählstimme • Studio Neural',
       labels: { language: 'de', gender: 'female', accent: 'german' }
@@ -218,6 +231,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Alvaro (es-ES-AlvaroNeural)',
       provider: 'edgetts',
       language: 'Español',
+      lang: 'Español (es)',
       gender: 'male',
       description: 'Narrador cinematográfico profundo • Studio Neural',
       labels: { language: 'es', gender: 'male', accent: 'spanish' }
@@ -229,6 +243,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Elvira (es-ES-ElviraNeural)',
       provider: 'edgetts',
       language: 'Español',
+      lang: 'Español (es)',
       gender: 'female',
       description: 'Voz femenina cálida y clara • Studio Neural',
       labels: { language: 'es', gender: 'female', accent: 'spanish' }
@@ -240,6 +255,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Henri (fr-FR-HenriNeural)',
       provider: 'edgetts',
       language: 'Français',
+      lang: 'Français (fr)',
       gender: 'male',
       description: 'Voix masculine documentaire • Studio Neural',
       labels: { language: 'fr', gender: 'male', accent: 'french' }
@@ -251,6 +267,7 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
       name: 'Denise (fr-FR-DeniseNeural)',
       provider: 'edgetts',
       language: 'Français',
+      lang: 'Français (fr)',
       gender: 'female',
       description: 'Voix féminine narrative • Studio Neural',
       labels: { language: 'fr', gender: 'female', accent: 'french' }
@@ -260,13 +277,13 @@ const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
 
 const EDGE_TTS_PRESET_VOICES: StudioVoiceItem[] = Object.values(EDGE_TTS_PRESETS_BY_KEY).flat();
 
-// Базовые кинематографичные голоса ElevenLabs (дополняются живым запросом GET /v1/voices)
 const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
   {
     id: 'pNInz6obpgDQGcFmaJgB',
     name: 'Adam (Deep Documentary Baritone)',
     provider: 'elevenlabs',
     language: 'English US',
+    lang: 'English US (en-US)',
     gender: 'male',
     description: 'ElevenLabs Multilingual v2 • Iconic Deep Mystery Narrator',
     labels: { language: 'en-US', accent: 'american', gender: 'male' }
@@ -276,6 +293,7 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     name: 'Antoni (Crisp Storyteller)',
     provider: 'elevenlabs',
     language: 'English US',
+    lang: 'English US (en-US)',
     gender: 'male',
     description: 'ElevenLabs Multilingual v2 • Paced Investigative Tone',
     labels: { language: 'en-US', accent: 'american', gender: 'male' }
@@ -285,6 +303,7 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     name: 'Rachel (Calm Narrative Female)',
     provider: 'elevenlabs',
     language: 'English US',
+    lang: 'English US (en-US)',
     gender: 'female',
     description: 'ElevenLabs Multilingual v2 • Smooth Broadcast Voice',
     labels: { language: 'en-US', accent: 'american', gender: 'female' }
@@ -294,6 +313,7 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     name: 'Daniel (British Documentary)',
     provider: 'elevenlabs',
     language: 'English UK',
+    lang: 'English UK (en-GB)',
     gender: 'male',
     description: 'ElevenLabs Multilingual v2 • Authoritative UK Presenter',
     labels: { language: 'en-GB', accent: 'british', gender: 'male' }
@@ -303,6 +323,7 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     name: 'Callum (Universal Multilingual)',
     provider: 'elevenlabs',
     language: 'English US',
+    lang: 'universal',
     gender: 'universal',
     description: 'ElevenLabs Multilingual v2 • Другие / Универсальные (без явных меток языка/пола)',
     labels: {},
@@ -310,7 +331,6 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
   }
 ];
 
-// Словарь принудительной расстановки буквы «ё»
 const YO_DICTIONARY: Array<[RegExp, string]> = [
   [/\bеще\b/gi, 'ещё'],
   [/\bвсе\b/gi, 'всё'],
@@ -414,7 +434,6 @@ function numberToRussianWordsSimple(n: number): string {
   return map[n] || numberToEnglishWords(n);
 }
 
-// Генератор валидного WAV/MP3 аудио-буфера для мгновенного скачивания и подстановки master_voiceover.mp3
 function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
   const sampleRate = 22050;
   const numSamples = Math.max(
@@ -462,14 +481,72 @@ function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
   return new Blob([buffer], { type: 'audio/mpeg' });
 }
 
-function loadSavedVoiceStudioConfig(): Partial<SavedVoiceStudioConfig> {
+/**
+ * Чтение настроек дикторского цеха из localStorage ('aether_voice_settings' и 'config_voice_studio')
+ */
+export function loadVoiceStudioSettings(): Partial<AetherVoiceSettings> {
   try {
-    const raw = localStorage.getItem('config_voice_studio');
-    if (!raw) return {};
-    return JSON.parse(raw) as Partial<SavedVoiceStudioConfig>;
-  } catch {
-    return {};
+    const rawAether = localStorage.getItem('aether_voice_settings');
+    if (rawAether) {
+      const s = JSON.parse(rawAether) as Partial<AetherVoiceSettings>;
+      const elKey1 = document.getElementById('eleven_key_1') as HTMLInputElement | null;
+      const elKey2 = document.getElementById('eleven_key_2') as HTMLInputElement | null;
+      const elEngine = document.getElementById('voice_engine_select') as HTMLSelectElement | null;
+      const elLang = document.getElementById('voice_lang_select') as HTMLSelectElement | null;
+      const elGender = document.getElementById('voice_gender_select') as HTMLSelectElement | null;
+      const elVoice = document.getElementById('voice_id_select') as HTMLSelectElement | null;
+
+      if (s.elevenKey1 && elKey1) elKey1.value = s.elevenKey1;
+      if (s.elevenKey2 && elKey2) elKey2.value = s.elevenKey2;
+      if (s.activeEngine && elEngine) elEngine.value = s.activeEngine;
+      if (s.selectedLang && elLang) elLang.value = s.selectedLang;
+      if (s.selectedGender && elGender) elGender.value = s.selectedGender;
+      if (s.selectedVoiceId && elVoice) elVoice.value = s.selectedVoiceId;
+      return s;
+    }
+
+    const rawConfig = localStorage.getItem('config_voice_studio');
+    if (rawConfig) {
+      const c = JSON.parse(rawConfig) as Record<string, unknown>;
+      return {
+        activeAccount: String(c.activeAccount || '1'),
+        elevenKey1: String(c.apiKey1 || ''),
+        elevenKey2: String(c.apiKey2 || ''),
+        activeEngine: (c.provider as VoiceProvider) || 'edgetts',
+        selectedLang: (c.selectedLanguage as VoiceLanguage) || 'English US',
+        selectedGender: (c.selectedGender as VoiceGenderFilter) || 'all',
+        selectedVoiceId: String(c.selectedVoiceId || 'en-US-ChristopherNeural'),
+        favorites: Array.isArray(c.favorites) ? (c.favorites as string[]) : undefined
+      };
+    }
+  } catch (err) {
+    console.warn('Ошибка загрузки настроек голосов:', err);
   }
+  return {};
+}
+
+/**
+ * Фильтрация голосов (Edge TTS / ElevenLabs) по языку и полу
+ */
+export function filterAndPopulateVoices(
+  voicesList: StudioVoiceItem[],
+  langOverride?: string,
+  genderOverride?: string
+): StudioVoiceItem[] {
+  const langEl = document.getElementById('voice_lang_select') as HTMLSelectElement | null;
+  const genderEl = document.getElementById('voice_gender_select') as HTMLSelectElement | null;
+  const lang = langOverride ?? langEl?.value ?? 'all';
+  const gender = genderOverride ?? genderEl?.value ?? 'all';
+
+  return voicesList.filter(voice => {
+    const voiceLangStr = `${voice.lang || ''} ${voice.language || ''} ${voice.labels?.language || ''} ${voice.labels?.accent || ''}`.toLowerCase();
+    const matchLang = lang === 'all' || voiceLangStr.includes(lang.toLowerCase());
+    const matchGender =
+      gender === 'all' ||
+      voice.gender === 'universal' ||
+      (voice.gender && voice.gender.toLowerCase() === gender.toLowerCase());
+    return matchLang && matchGender;
+  });
 }
 
 export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
@@ -478,20 +555,18 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   onMasterVoiceoverReady,
   onNotify
 }) => {
-  // Чтение сохраненного объекта config_voice_studio при загрузке страницы
-  const initialSavedConfig = useMemo(() => loadSavedVoiceStudioConfig(), []);
+  const initialSavedConfig = useMemo(() => loadVoiceStudioSettings(), []);
 
   // 1. Мульти-аккаунт ElevenLabs (2 API-ключа + активный аккаунт)
   const [apiKey1, setApiKey1] = useState<string>(
-    () => initialSavedConfig.apiKey1 ?? localStorage.getItem('elevenlabs_api_key_1') ?? ''
+    () => initialSavedConfig.elevenKey1 ?? localStorage.getItem('elevenlabs_api_key_1') ?? ''
   );
   const [apiKey2, setApiKey2] = useState<string>(
-    () => initialSavedConfig.apiKey2 ?? localStorage.getItem('elevenlabs_api_key_2') ?? ''
+    () => initialSavedConfig.elevenKey2 ?? localStorage.getItem('elevenlabs_api_key_2') ?? ''
   );
   const [activeKeySlot, setActiveKeySlot] = useState<1 | 2>(() => {
-    if (initialSavedConfig.activeAccount === 1 || initialSavedConfig.activeAccount === 2) {
-      return initialSavedConfig.activeAccount;
-    }
+    if (initialSavedConfig.activeAccount === '2') return 2;
+    if (initialSavedConfig.activeAccount === '1') return 1;
     return localStorage.getItem('elevenlabs_active_slot') === '2' ? 2 : 1;
   });
 
@@ -500,12 +575,12 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // Выбранный движок (ElevenLabs или Edge TTS)
   const [provider, setProvider] = useState<VoiceProvider>(
-    () => initialSavedConfig.provider || 'edgetts'
+    () => initialSavedConfig.activeEngine || 'edgetts'
   );
 
   // 2. Каскадный фильтр голосов: Язык и Пол
   const [selectedLanguage, setSelectedLanguage] = useState<VoiceLanguage>(
-    () => initialSavedConfig.selectedLanguage || 'English US'
+    () => initialSavedConfig.selectedLang || 'English US'
   );
   const [genderFilter, setGenderFilter] = useState<VoiceGenderFilter>(
     () => initialSavedConfig.selectedGender || 'all'
@@ -535,7 +610,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     () => initialSavedConfig.selectedVoiceId || 'en-US-ChristopherNeural'
   );
 
-  // Состояние отфильтрованных голосов, управляемое единой функцией renderFilteredVoices()
   const [renderedPrimaryVoices, setRenderedPrimaryVoices] = useState<StudioVoiceItem[]>([]);
   const [renderedUniversalVoices, setRenderedUniversalVoices] = useState<StudioVoiceItem[]>([]);
 
@@ -546,7 +620,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
-  // Синхронизация вспомогательных ключей в localStorage
   useEffect(() => {
     localStorage.setItem('elevenlabs_api_key_1', apiKey1);
   }, [apiKey1]);
@@ -566,25 +639,43 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   const activeElevenLabsKey = activeKeySlot === 1 ? apiKey1.trim() : apiKey2.trim();
 
   // ============================================================================
-  // КНОПКА «💾 СОХРАНИТЬ НАСТРОЙКИ» (единый объект config_voice_studio в localStorage)
+  // КНОПКА «💾 СОХРАНИТЬ НАСТРОЙКИ» (saveVoiceStudioSettings -> aether_voice_settings + config_voice_studio)
   // ============================================================================
-  const handleSaveVoiceStudioConfig = useCallback(() => {
-    const configToSave: SavedVoiceStudioConfig = {
-      activeAccount: activeKeySlot,
-      apiKey1,
-      apiKey2,
-      provider,
-      selectedLanguage,
+  const saveVoiceStudioSettings = useCallback(() => {
+    const checkedAccountRadio = document.querySelector(
+      'input[name="eleven_account"]:checked'
+    ) as HTMLInputElement | null;
+    const settings: AetherVoiceSettings = {
+      activeAccount: checkedAccountRadio?.value || String(activeKeySlot),
+      elevenKey1: apiKey1,
+      elevenKey2: apiKey2,
+      activeEngine: provider,
+      selectedLang: selectedLanguage,
       selectedGender: genderFilter,
       selectedVoiceId,
       favorites: favoriteVoiceIds
     };
-    localStorage.setItem('config_voice_studio', JSON.stringify(configToSave));
+
+    localStorage.setItem('aether_voice_settings', JSON.stringify(settings));
+    localStorage.setItem(
+      'config_voice_studio',
+      JSON.stringify({
+        activeAccount: activeKeySlot,
+        apiKey1,
+        apiKey2,
+        provider,
+        selectedLanguage,
+        selectedGender: genderFilter,
+        selectedVoiceId,
+        favorites: favoriteVoiceIds
+      })
+    );
     localStorage.setItem('elevenlabs_api_key_1', apiKey1);
     localStorage.setItem('elevenlabs_api_key_2', apiKey2);
     localStorage.setItem('elevenlabs_active_slot', String(activeKeySlot));
     localStorage.setItem('favorite_voices', JSON.stringify(favoriteVoiceIds));
-    onNotify('Настройки диктора успешно сохранены!', 'success');
+
+    onNotify('💾 Настройки дикторского цеха сохранены!', 'success');
   }, [
     activeKeySlot,
     apiKey1,
@@ -598,9 +689,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   ]);
 
   // ============================================================================
-  // ЕДИНАЯ ФУНКЦИЯ-ОБРАБОТЧИК renderFilteredVoices() (rebuildVoiceList)
-  // Вызывается при onchange языка, onclick табов пола [Все | Мужские | Женские]
-  // и при переключении движка (ElevenLabs / Edge TTS)
+  // ЕДИНАЯ ФУНКЦИЯ ФИЛЬТРАЦИИ renderFilteredVoices() + filterAndPopulateVoices()
   // ============================================================================
   const renderFilteredVoices = useCallback(
     (
@@ -609,12 +698,18 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       targetGender: VoiceGenderFilter,
       elevenCatalog: StudioVoiceItem[]
     ) => {
-      const langPrefix = LANGUAGE_TO_PREFIX_MAP[targetLang] || 'en-US';
-      const selectedLangLower = langPrefix.toLowerCase();
-      const validTokens = LANGUAGE_MATCH_TOKENS[targetLang] || [selectedLangLower];
-
       if (targetProvider === 'edgetts') {
-        // Для Edge TTS: мгновенная выборка из жестко зашитых ключей "язык_пол" без сетевых задержек
+        if (targetLang === 'all') {
+          const allEdge = filterAndPopulateVoices(EDGE_TTS_PRESET_VOICES, 'all', targetGender);
+          setRenderedPrimaryVoices(allEdge);
+          setRenderedUniversalVoices([]);
+          if (allEdge.length > 0 && !allEdge.some(v => v.id === selectedVoiceId)) {
+            setSelectedVoiceId(allEdge[0].id);
+          }
+          return;
+        }
+
+        const langPrefix = LANGUAGE_TO_PREFIX_MAP[targetLang] || 'en-US';
         let matchedEdge: StudioVoiceItem[] = [];
         if (targetGender === 'all') {
           matchedEdge = [
@@ -634,8 +729,21 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         return;
       }
 
-      // Для ElevenLabs: нормализованная проверка labels (language / accent / gender)
-      // Голоса без явных меток пола/языка попадают в категорию «Другие / Универсальные»
+      // Для ElevenLabs
+      if (targetLang === 'all') {
+        const filteredAll = filterAndPopulateVoices(elevenCatalog, 'all', targetGender);
+        setRenderedPrimaryVoices(filteredAll.filter(v => !v.isUniversal));
+        setRenderedUniversalVoices(filteredAll.filter(v => v.isUniversal));
+        if (filteredAll.length > 0 && !filteredAll.some(v => v.id === selectedVoiceId)) {
+          setSelectedVoiceId(filteredAll[0].id);
+        }
+        return;
+      }
+
+      const langPrefix = LANGUAGE_TO_PREFIX_MAP[targetLang] || 'en-US';
+      const selectedLangLower = langPrefix.toLowerCase();
+      const validTokens = LANGUAGE_MATCH_TOKENS[targetLang] || [selectedLangLower];
+
       const primaryList: StudioVoiceItem[] = [];
       const universalList: StudioVoiceItem[] = [];
 
@@ -672,7 +780,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         if (langMatches && genderMatches) {
           primaryList.push(voice);
         } else if (genderMatches) {
-          // Многоязычные голоса ElevenLabs Multilingual v2 показываем в «Другие / Универсальные», чтобы список никогда не зависал пустым
           universalList.push({
             ...voice,
             isUniversal: true
@@ -691,12 +798,10 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     [selectedVoiceId]
   );
 
-  // Автоматический вызов renderFilteredVoices при любом изменении языка, пола, провайдера или каталога
   useEffect(() => {
     renderFilteredVoices(provider, selectedLanguage, genderFilter, elevenLabsVoices);
   }, [provider, selectedLanguage, genderFilter, elevenLabsVoices, renderFilteredVoices]);
 
-  // Обработчики событий фильтрации, явно вызывающие renderFilteredVoices()
   const handleProviderChange = (nextProvider: VoiceProvider) => {
     setProvider(nextProvider);
     setVoicesFetchError(null);
@@ -799,7 +904,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
           const gender: 'male' | 'female' | 'universal' =
             genderLabel === 'female' ? 'female' : genderLabel === 'male' ? 'male' : 'universal';
 
-          let lang: VoiceLanguage = 'English US';
+          let lang: Exclude<VoiceLanguage, 'all'> = 'English US';
           if (accentLabel.includes('british') || langLabel.includes('en-gb')) lang = 'English UK';
           else if (accentLabel.includes('russian') || langLabel === 'ru') lang = 'Русский';
           else if (accentLabel.includes('ukrainian') || langLabel === 'uk') lang = 'Українська';
@@ -812,6 +917,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             name: `${v.name} (ElevenLabs)`,
             provider: 'elevenlabs',
             language: lang,
+            lang: langLabel || accentLabel || lang,
             gender,
             description: `${v.category || 'Premade'} • ${labelsObj.description || labelsObj.use_case || 'Multilingual v2'}`,
             previewUrl: v.preview_url,
@@ -840,14 +946,12 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     }
   }, [provider, activeElevenLabsKey, fetchElevenLabsVoicesCatalog]);
 
-  // Переключение избранного голоса (⭐ Favorites)
   const toggleFavoriteVoice = (voiceId: string) => {
     setFavoriteVoiceIds(prev =>
       prev.includes(voiceId) ? prev.filter(id => id !== voiceId) : [...prev, voiceId]
     );
   };
 
-  // Избранные голоса вверху списка
   const favoriteVoicesList = useMemo(() => {
     const allKnown = [...EDGE_TTS_PRESET_VOICES, ...elevenLabsVoices];
     const uniqueMap = new Map<string, StudioVoiceItem>();
@@ -857,7 +961,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     return Array.from(uniqueMap.values()).filter(v => favoriteVoiceIds.includes(v.id));
   }, [favoriteVoiceIds, elevenLabsVoices]);
 
-  // Объединенный список для быстрого выпадающего <select>
   const allSelectableVoices = useMemo(
     () => [...renderedPrimaryVoices, ...renderedUniversalVoices],
     [renderedPrimaryVoices, renderedUniversalVoices]
@@ -887,7 +990,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const demoSampleByLang: Record<VoiceLanguage, string> = {
+      const demoSampleByLang: Record<Exclude<VoiceLanguage, 'all'>, string> = {
         'English US':
           'At the fourteen-second mark of the master reel, an unexplained low-frequency signal emerges.',
         'English UK':
@@ -905,7 +1008,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       };
 
       const utter = new SpeechSynthesisUtterance(demoSampleByLang[voice.language]);
-      const langCodeMap: Record<VoiceLanguage, string> = {
+      const langCodeMap: Record<Exclude<VoiceLanguage, 'all'>, string> = {
         'English US': 'en-US',
         'English UK': 'en-GB',
         Русский: 'ru-RU',
@@ -1057,12 +1160,23 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             <span>🎙 Дикторский цех (Voice Studio • ElevenLabs Multi-Key &amp; Microsoft Edge TTS)</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Два API-ключа ElevenLabs с контролем лимита символов, безлимитный Microsoft Edge TTS, мгновенный фильтр голосов, ⭐ Избранное и сохранение <code className="text-amber-300">config_voice_studio</code>
+            Два API-ключа ElevenLabs с контролем лимита символов, безлимитный Microsoft Edge TTS, мгновенный фильтр голосов, ⭐ Избранное и сохранение <code className="text-amber-300">aether_voice_settings</code>
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Селектор провайдера озвучки */}
+          {/* Скрытый/синхронизированный селектор движка #voice_engine_select + кнопки */}
+          <select
+            id="voice_engine_select"
+            value={provider}
+            onChange={e => handleProviderChange(e.target.value as VoiceProvider)}
+            className="sr-only"
+            aria-label="Движок озвучки"
+          >
+            <option value="elevenlabs">elevenlabs</option>
+            <option value="edgetts">edgetts</option>
+          </select>
+
           <div className="flex flex-wrap items-center gap-2 bg-[#0b0f17] p-1.5 rounded-xl border border-slate-800">
             <button
               type="button"
@@ -1088,10 +1202,10 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </button>
           </div>
 
-          {/* Кнопка «💾 Сохранить настройки» (localStorage: config_voice_studio) */}
+          {/* Кнопка «💾 Сохранить настройки» (localStorage: aether_voice_settings) */}
           <button
             type="button"
-            onClick={handleSaveVoiceStudioConfig}
+            onClick={saveVoiceStudioSettings}
             className="bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition"
           >
             <Save className="w-4 h-4" />
@@ -1106,7 +1220,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              1. Мульти-аккаунт ElevenLabs (Сохранение в config_voice_studio + Баланс символов GET /v1/user/subscription)
+              1. Мульти-аккаунт ElevenLabs (Сохранение в aether_voice_settings + Баланс символов GET /v1/user/subscription)
             </h3>
           </div>
           <span className="text-[11px] font-mono text-amber-300">
@@ -1115,7 +1229,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* ElevenLabs API Key #1 */}
+          {/* ElevenLabs API Key #1 (#eleven_key_1) */}
           <div
             className={`rounded-xl border p-4 space-y-3 transition ${
               activeKeySlot === 1
@@ -1127,7 +1241,8 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               <label className="flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
                 <input
                   type="radio"
-                  name="elevenlabs-key-slot"
+                  name="eleven_account"
+                  value="1"
                   checked={activeKeySlot === 1}
                   onChange={() => setActiveKeySlot(1)}
                   className="accent-amber-500 w-4 h-4"
@@ -1145,6 +1260,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
 
             <input
+              id="eleven_key_1"
               type="password"
               value={apiKey1}
               onChange={e => setApiKey1(e.target.value)}
@@ -1171,7 +1287,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
           </div>
 
-          {/* ElevenLabs API Key #2 */}
+          {/* ElevenLabs API Key #2 (#eleven_key_2) */}
           <div
             className={`rounded-xl border p-4 space-y-3 transition ${
               activeKeySlot === 2
@@ -1183,7 +1299,8 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               <label className="flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
                 <input
                   type="radio"
-                  name="elevenlabs-key-slot"
+                  name="eleven_account"
+                  value="2"
                   checked={activeKeySlot === 2}
                   onChange={() => setActiveKeySlot(2)}
                   className="accent-amber-500 w-4 h-4"
@@ -1201,6 +1318,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
 
             <input
+              id="eleven_key_2"
               type="password"
               value={apiKey2}
               onChange={e => setApiKey2(e.target.value)}
@@ -1240,8 +1358,20 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               </h3>
             </div>
 
-            {/* Табы фильтрации по полу: [ Все ] | [ 👨 Мужские ] | [ 👩 Женские ] */}
+            {/* Табы фильтрации по полу + синхронизированный #voice_gender_select */}
             <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+              <select
+                id="voice_gender_select"
+                value={genderFilter}
+                onChange={e => handleGenderTabClick(e.target.value as VoiceGenderFilter)}
+                className="sr-only"
+                aria-label="Пол диктора"
+              >
+                <option value="all">all</option>
+                <option value="male">male</option>
+                <option value="female">female</option>
+              </select>
+
               <button
                 type="button"
                 onClick={() => handleGenderTabClick('all')}
@@ -1278,17 +1408,19 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
           </div>
 
-          {/* Селектор языка (onchange + кнопки быстрого выбора) и выпадающий список голосов <select> */}
+          {/* Селекторы #voice_lang_select и #voice_id_select */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-900/70 border border-slate-800/90 rounded-xl p-3">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase text-slate-400 block">
-                Язык озвучки (Language Filter):
+              <label htmlFor="voice_lang_select" className="text-[10px] font-bold uppercase text-slate-400 block">
+                Язык озвучки (#voice_lang_select):
               </label>
               <select
+                id="voice_lang_select"
                 value={selectedLanguage}
                 onChange={e => handleLanguageChange(e.target.value as VoiceLanguage)}
                 className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 outline-none"
               >
+                <option value="all">Все языки (All Languages)</option>
                 <option value="English US">English US (en-US)</option>
                 <option value="English UK">English UK (en-GB)</option>
                 <option value="Русский">Русский (ru)</option>
@@ -1300,20 +1432,24 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase text-slate-400 block">
-                Быстрый выбор диктора ({LANGUAGE_TO_PREFIX_MAP[selectedLanguage]}_{genderFilter}):
+              <label htmlFor="voice_id_select" className="text-[10px] font-bold uppercase text-slate-400 block">
+                Выбор диктора (#voice_id_select):
               </label>
               <select
+                id="voice_id_select"
                 value={selectedVoiceId}
                 onChange={e => setSelectedVoiceId(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-semibold text-amber-300 outline-none"
               >
-                {allSelectableVoices.map(v => (
-                  <option key={`opt-${v.id}`} value={v.id}>
-                    {v.gender === 'male' ? '👨 ' : v.gender === 'female' ? '👩 ' : '🌐 '}
-                    {v.name} — {v.language}
-                  </option>
-                ))}
+                {allSelectableVoices.length === 0 ? (
+                  <option value="">Голоса не найдены по фильтру</option>
+                ) : (
+                  allSelectableVoices.map(v => (
+                    <option key={`opt-${v.id}`} value={v.id}>
+                      {v.name} ({v.gender || 'neutral'}, {v.language || 'universal'})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -1322,6 +1458,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {(
               [
+                'all',
                 'English US',
                 'English UK',
                 'Русский',
@@ -1341,7 +1478,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {lang}
+                {lang === 'all' ? 'Все языки' : lang}
               </button>
             ))}
 
@@ -1358,7 +1495,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             )}
           </div>
 
-          {/* Индикатор загрузки голосов («Загрузка голосов...») */}
           {loadingVoices && (
             <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3.5 flex items-center gap-3 text-xs text-amber-300">
               <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
@@ -1368,7 +1504,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
           )}
 
-          {/* Понятное уведомление при ошибке сети или отсутствии ключа */}
           {voicesFetchError && !loadingVoices && provider === 'elevenlabs' && (
             <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-center gap-2.5 text-xs text-rose-300">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -1510,7 +1645,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               </div>
             )}
 
-            {/* Категория «Другие / Универсальные» для голосов без явных меток пола/языка */}
+            {/* Категория «Другие / Универсальные» */}
             {renderedUniversalVoices.length > 0 && (
               <div className="pt-2 space-y-2">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-indigo-300">
@@ -1642,11 +1777,11 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={handleSaveVoiceStudioConfig}
+              onClick={saveVoiceStudioSettings}
               className="w-full bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
             >
               <Save className="w-4 h-4" />
-              <span>💾 Сохранить настройки диктора (config_voice_studio)</span>
+              <span>💾 Сохранить настройки диктора (aether_voice_settings)</span>
             </button>
 
             {generatedAudioUrl && (

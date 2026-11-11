@@ -487,13 +487,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg rclone python3 jq curl
 
-      - name: Setup Rclone for Google Drive (Source Assets & Master Export)
-        env:
-          RCLONE_CONFIG_GDRIVE_TYPE: drive
-          RCLONE_CONFIG_GDRIVE_SCOPE: drive
-          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: \${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+      # 1. Развертывание персонального OAuth-конфига Rclone
+      - name: Setup Personal Rclone Config
         run: |
-          echo "Rclone configured for Google Drive stream"
+          mkdir -p ~/.config/rclone
+          echo "\${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          # Проверка доступности удаленного диска без вывода секретных токенов
+          rclone listremotes
 
       - name: Parse Universal Loop Manifest & Run FFmpeg Pipeline
         env:
@@ -812,22 +813,24 @@ jobs:
               print("Running FFmpeg command:", " ".join(cmd))
               subprocess.run(cmd, check=True)
 
-          if folder_id:
-              subprocess.run([
-                  "rclone", "copy", out_name, "gdrive:",
-                  "--drive-root-folder-id", folder_id, "-P"
-              ], check=True)
-              if os.path.exists("./output/subtitles.srt"):
-                  subprocess.run([
-                      "rclone", "copy", "./output/subtitles.srt", "gdrive:",
-                      "--drive-root-folder-id", folder_id, "-P"
-                  ], check=True)
-              if os.path.isdir("./output/shorts"):
-                  subprocess.run([
-                      "rclone", "copy", "./output/shorts", "gdrive:shorts",
-                      "--drive-root-folder-id", folder_id, "-P"
-                  ], check=True)
+          import shutil
+          if os.path.exists(out_name):
+              shutil.copyfile(out_name, "./output.mp4")
           EOF
+
+      # 2. Выгрузка готового видео на Google Диск
+      - name: Upload Output Video to Google Drive
+        run: |
+          echo "Начинаем выгрузку финального видео в Google Drive..."
+          # Выгрузка с расширенным логированием, чанками по 64МБ и защитой от обрывов
+          rclone copy ./output.mp4 gdrive:AetherFlow_Output/ \\
+            --drive-chunk-size 64M \\
+            --transfers 2 \\
+            --checkers 4 \\
+            --retries 5 \\
+            --low-level-retries 10 \\
+            --stats 15s \\
+            -v
 
       - name: Upload Emergency FFmpeg Logs
         if: always()
@@ -840,17 +843,20 @@ jobs:
             manifest.json
           if-no-files-found: ignore
 
+      # 3. Гарантированное Telegram-уведомление (срабатывает ВСЕГДА: и при успехе, и при сбое)
       - name: Send Telegram Notification
         if: always()
         run: |
           if [ "\${{ job.status }}" == "success" ]; then
-            TEXT="✅ Рендеринг и выгрузка успешно завершены!"
+            MSG="✅ *Рендеринг и выгрузка завершены успешно!*%0A%0A📁 *Файл:* output.mp4%0A☁️ *Локация:* Google Drive / AetherFlow_Output%0A⏱️ *Статус:* Готово к публикации"
           else
-            TEXT="❌ Ошибка сборки на этапе: \${{ job.status }}. Проверьте лог FFmpeg."
+            MSG="❌ *Ошибка в процессе пайплайна!*%0A%0A⚠️ *Статус:* \${{ job.status }}%0A🔍 Проверьте логи шага выгрузки или сборки FFmpeg."
           fi
-          curl -s -X POST https://api.telegram.org/bot\${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \\
-            -d chat_id="\${{ secrets.TELEGRAM_CHAT_ID }}" \\
-            -d text="\$TEXT"`;
+          
+          curl -s -X POST "https://api.telegram.org/bot\${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \\
+            -d "chat_id=\${{ secrets.TELEGRAM_CHAT_ID }}" \\
+            -d "parse_mode=Markdown" \\
+            -d "text=\$MSG"`;
 
 export default function App() {
   // Active tab state & animation pulse trigger key
@@ -3824,8 +3830,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Горизонтальный скролл навигации без переноса строк (.nav-container) */}
-        <div className="nav-container xl:w-auto">
+        {/* Горизонтальный скролл навигации без переноса строк (.main-navigation-container) */}
+        <div className="main-navigation-container nav-container xl:w-auto xl:mb-0">
           <nav
             role="tablist"
             aria-label="Цехи продакшна AetherCombine"

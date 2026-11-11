@@ -231,6 +231,9 @@ def main() -> None:
     print("Running FFmpeg final assembly:", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)
+        if os.path.exists(out_video):
+            import shutil
+            shutil.copyfile(out_video, "./output.mp4")
         slice_viral_shorts(cfg, scenes, fps, folder_id)
     except Exception as exc:
         send_telegram_alert(cfg, f"❌ Ошибка сборки FFmpeg: {exc}. Проверьте лог FFmpeg.")

@@ -175,14 +175,19 @@
 }
 
 /* Мобильный горизонтальный скролл навигации без фиксации (sticky/fixed) */
-.nav-container {
-  position: relative;
+.nav-container,
+.main-navigation-container {
+  position: relative !important;
+  top: auto !important;
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  margin-bottom: 1rem;
 }
 
-.nav-container::-webkit-scrollbar {
+.nav-container::-webkit-scrollbar,
+.main-navigation-container::-webkit-scrollbar {
   display: none;
 }
+

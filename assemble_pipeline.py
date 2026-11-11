@@ -126,12 +126,15 @@ def run_pipeline(cfg: dict) -> None:
 
             print("Fast concat of cached slots:", " ".join(fast_concat_cmd))
             subprocess.run(fast_concat_cmd, check=True)
+            if os.path.exists(output_video):
+                import shutil
+                shutil.copyfile(output_video, "./output.mp4")
             if folder_id:
                 subprocess.run(
-                    ["rclone", "copy", output_video, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
+                    ["rclone", "copy", "./output.mp4", "gdrive:AetherFlow_Output/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
                     check=True,
                 )
-            send_telegram_alert(cfg, "✅ Рендеринг и выгрузка успешно завершены!")
+            send_telegram_alert(cfg, "✅ Рендеринг и выгрузка завершены успешно!")
             return
 
     input_video = cfg.get("video_filename") or "input_master.mp4"
@@ -157,6 +160,9 @@ def run_pipeline(cfg: dict) -> None:
     print("Executing FFmpeg pipeline:", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)
+        if os.path.exists(output_video):
+            import shutil
+            shutil.copyfile(output_video, "./output.mp4")
     except Exception as exc:
         send_telegram_alert(cfg, f"❌ Ошибка сборки на этапе FFmpeg: {exc}. Проверьте лог FFmpeg.")
         raise
