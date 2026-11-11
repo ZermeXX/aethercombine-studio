@@ -1,0 +1,82 @@
+name: AetherCombine Universal Cloud Render & Slot Cache (H.264 / H.265)
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_payload:
+        description: 'Base64-encoded JSON Build Manifest (Universal N-Slots + Narrative Montage)'
+        required: true
+
+jobs:
+  render_and_upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Decode Manifest for Cache Key Hashing
+        env:
+          MANIFEST_B64: ${{ github.event.inputs.manifest_payload }}
+        run: |
+          python3 - << 'EOF'
+          import base64, os
+          b64 = os.environ.get("MANIFEST_B64", "").strip()
+          if b64:
+              raw = base64.b64decode(b64).decode("utf-8")
+              with open("manifest.json", "w", encoding="utf-8") as f:
+                  f.write(raw)
+              with open("config.json", "w", encoding="utf-8") as f:
+                  f.write(raw)
+          EOF
+
+      - name: Cache Rendered Video Slots
+        uses: actions/cache@v4
+        with:
+          path: ./temp_render/
+          key: render-slots-${{ hashFiles('input_clips/**', 'manifest.json') }}
+          restore-keys: |
+            render-slots-
+
+      - name: Install FFmpeg, Python3, jq & Rclone
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg rclone python3 jq curl
+
+      - name: Setup Rclone for Google Drive (Source Assets & Master Export)
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive
+          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          echo "Rclone configured for Google Drive stream"
+
+      - name: Run Assembly Pipeline with Slot Cache Support
+        env:
+          MANIFEST_B64: ${{ github.event.inputs.manifest_payload }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 assemble_scenes.py 2>&1 | tee ffmpeg_render.log
+
+      - name: Upload Emergency & Render Logs Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-emergency-logs
+          path: |
+            ffmpeg_render.log
+            filter_complex*.txt
+            manifest.json
+          if-no-files-found: ignore
+
+      - name: Send Telegram Notification
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            TEXT="✅ Рендеринг и выгрузка успешно завершены!"
+          else
+            TEXT="❌ Ошибка сборки на этапе: ${{ job.status }}. Проверьте лог FFmpeg."
+          fi
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$TEXT"

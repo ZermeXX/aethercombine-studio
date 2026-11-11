@@ -17,7 +17,11 @@ import {
   Film,
   Contrast,
   Layers,
-  Wand2
+  Wand2,
+  ZoomIn,
+  X,
+  Grid,
+  CheckCircle2
 } from 'lucide-react';
 
 interface ThumbnailStudioViewProps {
@@ -30,10 +34,11 @@ interface ThumbnailStudioViewProps {
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-// Генерация высокодетализированного процедурного 16:9 4K рендера при отсутствии биллинга Imagen 3
+// Генерация высокодетализированного процедурного 16:9 4K рендера (с вариацией композиции 0..3 для сетки 2x2)
 function renderProcedural16x9ArtworkDataUrl(
   stylePreset: string,
-  promptText: string
+  promptText: string,
+  variantIndex: number = 0
 ): string {
   const c = document.createElement('canvas');
   c.width = 1920;
@@ -41,13 +46,35 @@ function renderProcedural16x9ArtworkDataUrl(
   const ctx = c.getContext('2d');
   if (!ctx) return '';
 
-  const palettes: Record<string, [string, string, string]> = {
-    mystery_dark: ['#060b14', '#16243d', '#f59e0b'],
-    ambient_4k: ['#050c1a', '#0f294a', '#38bdf8'],
-    truecrime_contrast: ['#0a090d', '#291218', '#ef4444'],
-    scifi_neon: ['#04120e', '#0d3328', '#10b981']
-  };
-  const [bg1, bg2, accent] = palettes[stylePreset] || palettes.mystery_dark;
+  const palettesByVariant: Array<Record<string, [string, string, string]>> = [
+    {
+      mystery_dark: ['#060b14', '#16243d', '#f59e0b'],
+      ambient_4k: ['#050c1a', '#0f294a', '#38bdf8'],
+      truecrime_contrast: ['#0a090d', '#291218', '#ef4444'],
+      scifi_neon: ['#04120e', '#0d3328', '#10b981']
+    },
+    {
+      mystery_dark: ['#090814', '#22183b', '#fbbf24'],
+      ambient_4k: ['#04101e', '#13365c', '#60a5fa'],
+      truecrime_contrast: ['#0f070b', '#38121b', '#f43f5e'],
+      scifi_neon: ['#041417', '#0e3b43', '#2dd4bf']
+    },
+    {
+      mystery_dark: ['#050e14', '#132c3d', '#f97316'],
+      ambient_4k: ['#070b19', '#1b2854', '#818cf8'],
+      truecrime_contrast: ['#0d0a08', '#331d12', '#fb923c'],
+      scifi_neon: ['#06130b', '#143d23', '#34d399']
+    },
+    {
+      mystery_dark: ['#0a0712', '#26142e', '#eab308'],
+      ambient_4k: ['#040f1a', '#0c3142', '#22d3ee'],
+      truecrime_contrast: ['#090912', '#1f1638', '#e11d48'],
+      scifi_neon: ['#031214', '#0b343d', '#06b6d4']
+    }
+  ];
+
+  const paletteSet = palettesByVariant[variantIndex % 4] || palettesByVariant[0];
+  const [bg1, bg2, accent] = paletteSet[stylePreset] || paletteSet.mystery_dark;
 
   const grad = ctx.createLinearGradient(0, 0, c.width, c.height);
   grad.addColorStop(0, bg1);
@@ -56,24 +83,20 @@ function renderProcedural16x9ArtworkDataUrl(
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, c.width, c.height);
 
+  const focalX = c.width * (0.64 + (variantIndex % 2) * 0.06);
+  const focalY = c.height * (0.42 + Math.floor(variantIndex / 2) * 0.07);
+
   // Volumetric rays
-  const glow = ctx.createRadialGradient(
-    c.width * 0.68,
-    c.height * 0.42,
-    40,
-    c.width * 0.68,
-    c.height * 0.42,
-    780
-  );
+  const glow = ctx.createRadialGradient(focalX, focalY, 40, focalX, focalY, 780);
   glow.addColorStop(0, accent + '66');
   glow.addColorStop(0.5, accent + '1a');
   glow.addColorStop(1, 'transparent');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, c.width, c.height);
 
-  // Cinematic focal object silhouette (Reel-to-reel / Outpost structure)
+  // Cinematic focal object silhouette (Reel-to-reel / Outpost / Oscilloscope)
   ctx.save();
-  ctx.translate(c.width * 0.68, c.height * 0.48);
+  ctx.translate(focalX, focalY + 35);
   ctx.strokeStyle = accent;
   ctx.lineWidth = 5;
   ctx.fillStyle = '#090e1a';
@@ -82,18 +105,31 @@ function renderProcedural16x9ArtworkDataUrl(
   ctx.fill();
   ctx.stroke();
 
-  // Two magnetic reels
-  [-110, 110].forEach(rx => {
+  if (variantIndex % 2 === 0) {
+    // Two magnetic reels
+    [-110, 110].forEach(rx => {
+      ctx.beginPath();
+      ctx.arc(rx, -20, 82, 0, Math.PI * 2);
+      ctx.fillStyle = '#111a2e';
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(rx, -20, 24, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+    });
+  } else {
+    // Acoustic signal waveform on screen
     ctx.beginPath();
-    ctx.arc(rx, -20, 82, 0, Math.PI * 2);
-    ctx.fillStyle = '#111a2e';
-    ctx.fill();
+    ctx.moveTo(-200, 0);
+    for (let x = -200; x <= 200; x += 10) {
+      const amp = Math.sin((x + variantIndex * 45) * 0.06) * (75 - Math.abs(x) * 0.25);
+      ctx.lineTo(x, amp);
+    }
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 6;
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(rx, -20, 24, 0, Math.PI * 2);
-    ctx.fillStyle = accent;
-    ctx.fill();
-  });
+  }
 
   // Glowing REC indicator
   ctx.beginPath();
@@ -107,9 +143,9 @@ function renderProcedural16x9ArtworkDataUrl(
   // Atmospheric snow / dust particles
   ctx.fillStyle = 'rgba(255,255,255,0.22)';
   for (let i = 0; i < 140; i++) {
-    const px = ((i * 197) % c.width) + (promptText.length % 17);
-    const py = (i * 113) % c.height;
-    const r = (i % 3) + 1;
+    const px = ((i * 197 + variantIndex * 83) % c.width) + (promptText.length % 17);
+    const py = (i * 113 + variantIndex * 59) % c.height;
+    const r = ((i + variantIndex) % 3) + 1;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fill();
@@ -135,7 +171,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [imgA, setImgA] = useState<HTMLImageElement | null>(null);
   const [imgB, setImgB] = useState<HTMLImageElement | null>(null);
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
-  const [badgeB, setBadgeB] = useState<string>('ambience');
+  const [badgeB] = useState<string>('ambience');
+
+  // Сетка 2x2 (4 варианта обложки от Imagen 3 с sampleCount: 4)
+  const [batchVariants, setBatchVariants] = useState<string[]>(() => [
+    renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_0', 0),
+    renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_1', 1),
+    renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_2', 2),
+    renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_3', 3)
+  ]);
+  const [selectedMasterVariantIdx, setSelectedMasterVariantIdx] = useState<number>(0);
+  const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
@@ -144,7 +190,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   // Оверлей интерфейса YouTube (таймкод 3:00:00, аватарка, мобильный масштаб 160x90)
   const [showYoutubeOverlay, setShowYoutubeOverlay] = useState<boolean>(true);
   const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>('3:00:00');
-  const [youtubeChannelName, setYoutubeChannelName] = useState<string>('Aether Documentary 4K');
+  const [youtubeChannelName] = useState<string>('Aether Documentary 4K');
   const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(
     youtubeMockTitle ||
       'The Classified Alpine Tape: Why This Station Was Sealed in 24 Hours (4K Documentary)'
@@ -263,8 +309,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.textAlign = 'center';
         ctx.fillText(
           variantLabel
-            ? `${variantLabel} — нажмите «Сгенерировать в Imagen 3 (16:9)» или захватите 4K кадр`
-            : 'Нажмите «Сгенерировать в Imagen 3 (16:9)» или захватите 4K стоп-кадр',
+            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (2×2 Imagen 3)»`
+            : 'Нажмите «Сгенерировать 4 варианта (2×2 Imagen 3)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
@@ -333,8 +379,57 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     renderAllCanvases();
   }, [renderAllCanvases]);
 
+  // Загружаем первый мастер-кадр из 2x2 сетки при старте
+  useEffect(() => {
+    if (!imgA && batchVariants[0]) {
+      const initImg = new Image();
+      initImg.onload = () => setImgA(initImg);
+      initImg.src = batchVariants[0];
+    }
+  }, [imgA, batchVariants]);
+
+  // Выбор любого из 4-х вариантов сетки 2x2 как «Выбранный мастер-кадр»
+  const handleSelectBatchVariant = (idx: number, targetSlot: 'A' | 'B' = 'A') => {
+    const url = batchVariants[idx];
+    if (!url) return;
+    setSelectedMasterVariantIdx(idx);
+    const selectedImage = new Image();
+    selectedImage.onload = () => {
+      if (targetSlot === 'A') {
+        setImgA(selectedImage);
+      } else {
+        setAbModeEnabled(true);
+        setImgB(selectedImage);
+      }
+      onNotify(
+        `✨ Вариант #${idx + 1} установлен как «Выбранный мастер-кадр» (Обложка ${targetSlot})!`,
+        'success'
+      );
+    };
+    selectedImage.src = url;
+  };
+
+  // Скачивание конкретного варианта из сетки 2x2 в 4K с наложенным хуком или в чистом виде
+  const handleDownloadVariantFromGrid = (idx: number) => {
+    const url = batchVariants[idx];
+    if (!url) return;
+    const tempImg = new Image();
+    tempImg.onload = () => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = 3840;
+      offscreen.height = 2160;
+      drawCoverOnCanvas(offscreen, tempImg, thumbTitle, thumbBadge);
+      const link = document.createElement('a');
+      link.download = `imagen3_variant_${idx + 1}_4k_16x9.jpg`;
+      link.href = offscreen.toDataURL('image/jpeg', 0.96);
+      link.click();
+      onNotify(`📥 Вариант #${idx + 1} (4K 16:9) скачан на устройство!`, 'success');
+    };
+    tempImg.src = url;
+  };
+
   // ============================================================================
-  // ВЫЗОВ IMAGEN 3 (imagen-3.0-generate-002:predict) БЕЗ ВОДЯНЫХ ЗНАКОВ
+  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 3 (sampleCount: 4, aspectRatio: "16:9", image/jpeg)
   // ============================================================================
   const handleGenerateImagen3Cover = async (targetSlot: 'A' | 'B' = 'A') => {
     setIsGeneratingImagen(true);
@@ -343,7 +438,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          promptText: activePromptText
+          promptText: activePromptText,
+          sampleCount: 4
         })
       });
 
@@ -351,11 +447,29 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ok?: boolean;
         bytesBase64Encoded?: string;
         mimeType?: string;
+        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
         error?: string;
       };
 
-      if (response.ok && data.ok && data.bytesBase64Encoded) {
-        const dataUrl = `data:${data.mimeType || 'image/jpeg'};base64,${data.bytesBase64Encoded}`;
+      if (response.ok && data.ok && (data.predictions?.length || data.bytesBase64Encoded)) {
+        const rawPreds =
+          Array.isArray(data.predictions) && data.predictions.length > 0
+            ? data.predictions
+            : [{ bytesBase64Encoded: data.bytesBase64Encoded, mimeType: data.mimeType }];
+
+        const urls: string[] = [];
+        for (let i = 0; i < 4; i++) {
+          const item = rawPreds[i];
+          if (item?.bytesBase64Encoded) {
+            urls.push(`data:${item.mimeType || 'image/jpeg'};base64,${item.bytesBase64Encoded}`);
+          } else {
+            urls.push(renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, i));
+          }
+        }
+
+        setBatchVariants(urls);
+        setSelectedMasterVariantIdx(0);
+
         const generatedImg = new Image();
         generatedImg.onload = () => {
           if (targetSlot === 'A') setImgA(generatedImg);
@@ -364,17 +478,22 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             setImgB(generatedImg);
           }
           onNotify(
-            `🎨 Чистая 16:9 обложка без водяных знаков сгенерирована через Imagen 3 (imagen-3.0-generate-002) в слот ${targetSlot}!`,
+            `🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) сгенерирован через Imagen 3 (sampleCount: 4)!`,
             'success'
           );
         };
-        generatedImg.src = dataUrl;
+        generatedImg.src = urls[0];
         setIsGeneratingImagen(false);
         return;
       }
 
-      // Если API-ключ без платного биллинга Imagen 3, создаем чистый 16:9 4K рендер на холсте
-      const fallbackUrl = renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText);
+      // Если API-ключ без платного биллинга Imagen 3, генерируем 4 разных 16:9 4K кадра для сетки 2x2
+      const fallbackUrls = [0, 1, 2, 3].map(idx =>
+        renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
+      );
+      setBatchVariants(fallbackUrls);
+      setSelectedMasterVariantIdx(0);
+
       const fallbackImg = new Image();
       fallbackImg.onload = () => {
         if (targetSlot === 'A') setImgA(fallbackImg);
@@ -383,13 +502,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           setImgB(fallbackImg);
         }
         onNotify(
-          `🎨 Сгенерирована 16:9 обложка без водяных знаков в слот ${targetSlot}!`,
+          `🎨 Сгенерирована сетка 2×2 (4 варианта 16:9 без водяных знаков) — вариант #1 выбран как мастер-кадр!`,
           'success'
         );
       };
-      fallbackImg.src = fallbackUrl;
+      fallbackImg.src = fallbackUrls[0];
     } catch {
-      const fallbackUrl = renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText);
+      const fallbackUrls = [0, 1, 2, 3].map(idx =>
+        renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
+      );
+      setBatchVariants(fallbackUrls);
+      setSelectedMasterVariantIdx(0);
+
       const fallbackImg = new Image();
       fallbackImg.onload = () => {
         if (targetSlot === 'A') setImgA(fallbackImg);
@@ -398,11 +522,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           setImgB(fallbackImg);
         }
         onNotify(
-          `🎨 Сгенерирована 16:9 обложка без водяных знаков в слот ${targetSlot}!`,
+          `🎨 Сгенерирована сетка 2×2 (4 варианта 16:9 без водяных знаков)!`,
           'success'
         );
       };
-      fallbackImg.src = fallbackUrl;
+      fallbackImg.src = fallbackUrls[0];
     } finally {
       setIsGeneratingImagen(false);
     }
@@ -530,6 +654,70 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* МОДАЛЬНОЕ ОКНО УВЕЛИЧЕНИЯ ВАРИАНТА ОБЛОЖКИ («🔍 Увеличить») */}
+      {zoomedVariantIdx !== null && batchVariants[zoomedVariantIdx] && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setZoomedVariantIdx(null)}
+        >
+          <div
+            className="bg-[#111622] border border-emerald-500/50 rounded-2xl max-w-5xl w-full p-5 space-y-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <ZoomIn className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
+                  Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Imagen 3 • 16:9)
+                </h3>
+                {selectedMasterVariantIdx === zoomedVariantIdx && (
+                  <span className="text-[11px] font-bold bg-emerald-500/20 border border-emerald-400 text-emerald-300 px-2.5 py-0.5 rounded-lg">
+                    Выбранный мастер-кадр
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoomedVariantIdx(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg bg-slate-800/80 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-700 bg-black">
+              <img
+                src={batchVariants[zoomedVariantIdx]}
+                alt={`Imagen 3 Variant ${zoomedVariantIdx + 1}`}
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  handleSelectBatchVariant(zoomedVariantIdx, 'A');
+                  setZoomedVariantIdx(null);
+                }}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Выбрать как мастер-кадр (Слот A)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadVariantFromGrid(zoomedVariantIdx)}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>📥 Скачать этот вариант (4K)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Левая колонка: Настройки Обложки A / B, Imagen 3 и переключатели контроля */}
@@ -539,17 +727,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-Студия (Imagen 3)
             </h2>
             <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-              imagen-3.0-generate-002
+              sampleCount: 4 • 2×2
             </span>
           </div>
 
-          {/* Кнопка прямой генерации 16:9 без водяных знаков через официальный Imagen 3 API */}
+          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через официальный Imagen 3 API */}
           <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-bold text-emerald-300 uppercase">
-                Генерация 16:9 без водяных знаков:
+                Пакетная генерация 2×2 (Imagen 3):
               </span>
-              <span className="font-mono text-[10px] text-slate-400">image/jpeg • 16:9</span>
+              <span className="font-mono text-[10px] text-slate-400">
+                sampleCount: 4 • 16:9 • JPEG
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -564,7 +754,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 ) : (
                   <Wand2 className="w-3.5 h-3.5" />
                 )}
-                <span>Imagen 3 → Слот A</span>
+                <span>Imagen 3 (2×2) → A</span>
               </button>
 
               <button
@@ -574,7 +764,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
                 <Wand2 className="w-3.5 h-3.5" />
-                <span>Imagen 3 → Слот B</span>
+                <span>Imagen 3 (2×2) → B</span>
               </button>
             </div>
           </div>
@@ -743,7 +933,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div className="space-y-2.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-amber-400 uppercase">
-                  Обложка A {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
+                  Обложка A — Выбранный мастер-кадр #{selectedMasterVariantIdx + 1}{' '}
+                  {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
                 </span>
                 <span className="text-[11px] font-mono text-slate-400">
                   16:9 • Watermark-Free 4K
@@ -774,7 +965,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       <div />
                     </div>
 
-                    {/* Таймкод в правом нижнем углу «3:00:00» */}
                     <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-white font-mono font-bold text-xs px-2 py-0.5 rounded shadow-md border border-white/10">
                       {youtubeDurationBadge || '3:00:00'}
                     </div>
@@ -888,6 +1078,119 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* СЕТКА 2x2 IMAGEN 3 (4 ВАРИАНТА ОБЛОЖКИ 16:9 С ВЫБОРОМ МАСТЕР-КАДРА, УВЕЛИЧЕНИЕМ И СКАЧИВАНИЕМ) */}
+      <div className="bg-[#111622] border border-emerald-500/30 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <Grid className="w-5 h-5 text-emerald-400" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
+                Сетка 2×2 вариантов обложки (Imagen 3 • sampleCount: 4 • 16:9 JPEG)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Кликните по любому из 4-х вариантов, чтобы выделить его неоновой рамкой как «Выбранный мастер-кадр»
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleGenerateImagen3Cover('A')}
+            disabled={isGeneratingImagen}
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+          >
+            {isGeneratingImagen ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            <span>Сгенерировать 4 новых варианта (2×2 Imagen 3)</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {batchVariants.map((variantUrl, idx) => {
+            const isMaster = selectedMasterVariantIdx === idx;
+            return (
+              <div
+                key={`grid-variant-${idx}`}
+                onClick={() => handleSelectBatchVariant(idx, 'A')}
+                className={`rounded-2xl p-3.5 transition cursor-pointer flex flex-col justify-between gap-3 ${
+                  isMaster
+                    ? 'bg-emerald-950/25 border-2 border-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.35)]'
+                    : 'bg-[#0b0f17] border border-slate-800 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-200 flex items-center gap-2">
+                    <span className="font-mono text-amber-400">Вариант #{idx + 1}</span>
+                    <span className="text-[10px] font-mono text-slate-400">(16:9 • image/jpeg)</span>
+                  </span>
+                  {isMaster ? (
+                    <span className="text-[11px] font-bold bg-emerald-500 text-slate-950 px-2.5 py-0.5 rounded-lg flex items-center gap-1 shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Выбранный мастер-кадр
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">Кликните для выбора</span>
+                  )}
+                </div>
+
+                <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
+                  <img
+                    src={variantUrl}
+                    alt={`Imagen 3 16:9 Variant ${idx + 1}`}
+                    className={`w-full h-full object-cover ${
+                      bwContrastFilter ? 'grayscale contrast-125' : ''
+                    }`}
+                  />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-3 flex items-end justify-between">
+                    <span className="text-white font-black text-sm tracking-wide drop-shadow">
+                      {(thumbTitle || 'DO NOT PLAY!')
+                        .trim()
+                        .split(/\s+/)
+                        .slice(0, 3)
+                        .join(' ')
+                        .toUpperCase()}
+                    </span>
+                    <span className="bg-black/90 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 rounded">
+                      {youtubeDurationBadge || '3:00:00'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Две обязательные кнопки под каждым из 4-х вариантов */}
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      setZoomedVariantIdx(idx);
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5 text-amber-400" />
+                    <span>🔍 Увеличить</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleDownloadVariantFromGrid(idx);
+                    }}
+                    className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>📥 Скачать этот вариант</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1060,7 +1363,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                Промпт для Imagen 3 (`imagen-3.0-generate-002:predict`) и веб-генераторов:
+                Промпт для Imagen 3 (`imagen-3.0-generate-002:predict`, sampleCount: 4) и веб-генераторов:
               </label>
               <textarea
                 rows={5}
@@ -1079,7 +1382,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
             >
               <Wand2 className="w-4 h-4" />
-              <span>Сгенерировать в Imagen 3 (16:9)</span>
+              <span>Сгенерировать 2×2 в Imagen 3 (16:9)</span>
             </button>
 
             <button

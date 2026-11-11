@@ -180,7 +180,7 @@ Return JSON with:
       const payload = {
         instances: [{ prompt: promptText.trim() }],
         parameters: {
-          sampleCount: 1,
+          sampleCount: 4,
           aspectRatio: '16:9',
           outputMimeType: 'image/jpeg'
         }
@@ -207,11 +207,12 @@ Return JSON with:
         return;
       }
 
-      const base64Image = data?.predictions?.[0]?.bytesBase64Encoded;
+      const validPredictions = (data?.predictions || []).filter(p => Boolean(p?.bytesBase64Encoded));
+      const base64Image = validPredictions[0]?.bytesBase64Encoded;
       if (!base64Image) {
         res.status(500).json({
           ok: false,
-          error: 'No bytesBase64Encoded returned in predictions[0]'
+          error: 'No bytesBase64Encoded returned in predictions'
         });
         return;
       }
@@ -219,7 +220,11 @@ Return JSON with:
       res.json({
         ok: true,
         bytesBase64Encoded: base64Image,
-        mimeType: data?.predictions?.[0]?.mimeType || 'image/jpeg'
+        mimeType: validPredictions[0]?.mimeType || 'image/jpeg',
+        predictions: validPredictions.map(p => ({
+          bytesBase64Encoded: p.bytesBase64Encoded,
+          mimeType: p.mimeType || 'image/jpeg'
+        }))
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

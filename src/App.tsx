@@ -459,7 +459,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Decode Manifest for Slot Cache Key
+        env:
+          MANIFEST_B64: \${{ github.event.inputs.manifest_payload }}
+        run: |
+          python3 - << 'EOF'
+          import base64, os
+          raw_json = base64.b64decode(os.environ["MANIFEST_B64"]).decode("utf-8")
+          with open("manifest.json", "w", encoding="utf-8") as mf:
+              mf.write(raw_json)
+          with open("config.json", "w", encoding="utf-8") as cf:
+              cf.write(raw_json)
+          EOF
+
+      - name: Cache Rendered Video Slots
+        uses: actions/cache@v4
+        with:
+          path: ./temp_render/
+          key: render-slots-\${{ hashFiles('input_clips/**', 'manifest.json') }}
+          restore-keys: |
+            render-slots-
 
       - name: Install FFmpeg, Python3, jq & Rclone
         run: |
@@ -481,11 +502,16 @@ jobs:
           python3 - << 'EOF'
           import base64, json, subprocess, os, math
 
-          # 1. Декодируем manifest_payload в config.json
+          # 1. Декодируем manifest_payload в config.json и manifest.json
           raw_json = base64.b64decode(os.environ["MANIFEST_B64"]).decode("utf-8")
           with open("config.json", "w", encoding="utf-8") as f:
               f.write(raw_json)
+          with open("manifest.json", "w", encoding="utf-8") as mf:
+              mf.write(raw_json)
           cfg = json.loads(raw_json)
+
+          os.makedirs("./temp_render", exist_ok=True)
+          os.makedirs("./output", exist_ok=True)
 
           exp = cfg.get("export_settings") or {}
           res = str(exp.get("resolution") or cfg.get("resolution", "4k")).lower()
@@ -518,15 +544,21 @@ jobs:
               overlap = float(t_out.get("duration_sec", 90.0)) if (idx < len(slots) - 1 and t_out.get("type") != "none") else 0.0
               total_duration += (s_dur - overlap)
 
-          # 2. Предварительная сборка бесшовных петель внутри каждого слота
+          # 2. Проверка кэша скомпилированных слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 и т.д.)
+          # Если файлы слотов уже существуют в temp_render и валидны, пропускаем их тяжелый перерендер
+          # и сразу переходим к быстрой склейке (concat -c copy) с новой аудиодорожкой
           ffmpeg_inputs = []
           filter_parts = []
           input_idx = 0
           slot_video_labels = []
           slot_audio_labels = []
           insert_overlays = []
+          cached_slot_files = []
+          all_slots_cached = len(slots) > 0
 
           for s_i, slot in enumerate(slots):
+              slot_num = s_i + 1
+              cached_slot_path = f"./temp_render/slot_{slot_num}.mp4"
               base_content = slot.get("base_content") if isinstance(slot.get("base_content"), dict) else {}
               base_file = (
                   base_content.get("file_name")
@@ -542,25 +574,42 @@ jobs:
               eff_step = max(1.0, clip_dur - loop_xfade)
               loops_count = max(1, int(math.ceil(slot_dur / eff_step)) + 1)
 
-              # Генерируем бесшовное ядро исходника со швом (xfade + acrossfade)
-              seamless_unit = f"unit_slot_{s_i}.mp4"
-              unit_offset = max(0.5, clip_dur - loop_xfade)
-              unit_fc = (
-                  f"[0:v]scale={scale_wh},fps={fps}[v0];"
-                  f"[v0][v0]xfade=transition=fade:duration={loop_xfade}:offset={unit_offset}[v_u];"
-                  f"[0:a][0:a]acrossfade=d={loop_xfade}[a_u]"
-              )
-              subprocess.run([
-                  "ffmpeg", "-y", "-i", base_file,
-                  "-filter_complex", unit_fc,
-                  "-map", "[v_u]", "-map", "[a_u]",
-                  "-c:v", v_codec, "-preset", "ultrafast", "-crf", crf,
-                  "-c:a", "aac", "-b:a", a_bitrate, seamless_unit
-              ], check=True)
+              if os.path.exists(cached_slot_path) and os.path.getsize(cached_slot_path) > 1024:
+                  print(f"[CACHE HIT] Слот {cached_slot_path} уже существует в ./temp_render/ — пропускаем перерендер.")
+                  cached_slot_files.append(cached_slot_path)
+                  base_in = input_idx
+                  ffmpeg_inputs += ["-i", cached_slot_path]
+                  input_idx += 1
+              else:
+                  all_slots_cached = False
+                  seamless_unit = f"./temp_render/unit_slot_{slot_num}.mp4"
+                  unit_offset = max(0.5, clip_dur - loop_xfade)
+                  unit_fc = (
+                      f"[0:v]scale={scale_wh},fps={fps}[v0];"
+                      f"[v0][v0]xfade=transition=fade:duration={loop_xfade}:offset={unit_offset}[v_u];"
+                      f"[0:a][0:a]acrossfade=d={loop_xfade}[a_u]"
+                  )
+                  subprocess.run([
+                      "ffmpeg", "-y", "-i", base_file,
+                      "-filter_complex", unit_fc,
+                      "-map", "[v_u]", "-map", "[a_u]",
+                      "-c:v", v_codec, "-preset", "ultrafast", "-crf", crf,
+                      "-c:a", "aac", "-b:a", a_bitrate, seamless_unit
+                  ], check=True)
 
-              base_in = input_idx
-              ffmpeg_inputs += ["-stream_loop", str(loops_count), "-t", str(slot_dur), "-i", seamless_unit]
-              input_idx += 1
+                  # Сохраняем скомпилированный слот в ./temp_render/slot_N.mp4 для кэширования
+                  subprocess.run([
+                      "ffmpeg", "-y",
+                      "-stream_loop", str(loops_count), "-t", str(slot_dur), "-i", seamless_unit,
+                      "-c:v", v_codec, "-preset", preset, "-crf", crf,
+                      "-c:a", "aac", "-b:a", a_bitrate,
+                      cached_slot_path
+                  ], check=True)
+                  cached_slot_files.append(cached_slot_path)
+
+                  base_in = input_idx
+                  ffmpeg_inputs += ["-i", cached_slot_path]
+                  input_idx += 1
 
               cur_v = f"v_slot_{s_i}_base"
               filter_parts.append(
@@ -574,187 +623,203 @@ jobs:
               slot_audio_labels.append(f"[{cur_a}]")
               slot_video_labels.append((cur_v, slot_dur, slot.get("slot_transition_out") or {"type": "none", "duration_sec": 0}))
 
-              # Сохраняем вставки для наложения по таймкоду
               for ins in (slot.get("inserts") or []):
                   insert_overlays.append(ins)
 
-          # 3. Сшиваем акты через xfade и синхронный acrossfade
-          accum_offset = slot_video_labels[0][1]
-          prev_v = slot_video_labels[0][0]
-          prev_a = slot_audio_labels[0].strip("[]")
-
-          for idx in range(1, len(slot_video_labels)):
-              prev_trans = slot_video_labels[idx - 1][2]
-              t_type = prev_trans.get("type", "xfade")
-              t_dur = float(prev_trans.get("duration_sec", 90.0)) if t_type != "none" else 0.0
-              next_v_src, next_dur, _ = slot_video_labels[idx]
-              next_a_src = slot_audio_labels[idx].strip("[]")
-              out_v = f"v_act_chain_{idx}"
-              out_a = f"a_act_chain_{idx}"
-
-              if t_type == "none" or t_dur <= 0:
-                  filter_parts.append(f"[{prev_v}][{next_v_src}]concat=n=2:v=1:a=0[{out_v}]")
-                  filter_parts.append(f"[{prev_a}][{next_a_src}]acrossfade=d=1.0[{out_a}]")
-                  accum_offset += next_dur
-              else:
-                  xfade_mode = "dissolve" if t_type == "dissolve" else "fade"
-                  offset_sec = max(0.0, accum_offset - t_dur)
-                  filter_parts.append(
-                      f"[{prev_v}][{next_v_src}]xfade=transition={xfade_mode}:duration={t_dur}:offset={offset_sec}[{out_v}]"
-                  )
-                  filter_parts.append(
-                      f"[{prev_a}][{next_a_src}]acrossfade=d={t_dur}:c1=tri:c2=tri[{out_a}]"
-                  )
-                  accum_offset = offset_sec + next_dur
-              prev_v = out_v
-              prev_a = out_a
-
-          cur_timeline_v = prev_v
-          cur_timeline_a = prev_a
-          e3_audio_nodes = []
-
-          # 4. Точная асимметричная анимация вставок
-          for ins_i, ins in enumerate(insert_overlays):
-              ins_id = ins.get("insert_id") or f"E{ins_i+1}"
-              ins_file = ins.get("file_name") or ins.get("filename") or ins.get("asset_name") or ins.get("video_file") or ""
-              trig = float(ins.get("trigger_at_sec", 0))
-              ins_dur = float(ins.get("duration_sec", 10))
-              hold_end = bool(ins.get("hold_until_end", False))
-
-              tr_in = ins.get("transition_in") or {"type": "dissolve", "duration_sec": 1.5}
-              tr_out = ins.get("transition_out") or {"type": "dissolve", "duration_sec": 1.5}
-              fade_in_d = float(tr_in.get("duration_sec", 1.5))
-              fade_out_type = tr_out.get("type", "dissolve")
-              fade_out_d = 0.0 if (hold_end or fade_out_type == "none") else float(tr_out.get("duration_sec", 1.5))
-
-              ins_in = input_idx
-              ffmpeg_inputs += ["-i", ins_file]
-              input_idx += 1
-
-              ins_v = f"v_ins_{ins_id}"
-              next_v = f"v_ovr_{ins_id}"
-
-              fade_chain = f"fade=t=in:st=0:d={fade_in_d}:alpha=1"
-              if fade_out_d > 0:
-                  st_out = max(0.0, ins_dur - fade_out_d)
-                  fade_chain += f",fade=t=out:st={st_out}:d={fade_out_d}:alpha=1"
-
-              end_t = total_duration if hold_end else (trig + ins_dur)
-              eof_act = "repeat" if hold_end else "pass"
-
-              filter_parts.append(
-                  f"[{ins_in}:v]scale={scale_wh},setsar=1,fps={fps},format=yuva420p,"
-                  f"{fade_chain},setpts=PTS-STARTPTS+{trig}/TB[{ins_v}]"
-              )
-              filter_parts.append(
-                  f"[{cur_timeline_v}][{ins_v}]overlay=enable='between(t,{trig},{end_t})':eof_action={eof_act}[{next_v}]"
-              )
-              cur_timeline_v = next_v
-
-              # Для трещины E3: мягкая компрессия (soft attack) с пиком не выше +6 дБ над подложкой
-              if ins.get("audio_soft_compressor") or ins_id == "E3":
-                  ins_a = f"a_ins_{ins_id}"
-                  delay_ms = int(trig * 1000)
-                  max_peak_db = float(ins.get("max_peak_over_bed_db", 6.0))
-                  filter_parts.append(
-                      f"[{ins_in}:a]acompressor=attack=45:release=250:ratio=3:threshold=-18dB:makeup=2dB,"
-                      f"alimiter=limit={max_peak_db}dB,adelay={delay_ms}|{delay_ms}[{ins_a}]"
-                  )
-                  e3_audio_nodes.append(f"[{ins_a}]")
-
-          # 5. Опциональный 2-секундный черный экран в финале после затухания трещины
-          if final_black_enabled and final_black_sec > 0:
-               filter_parts.append(
-                  f"[{cur_timeline_v}]tpad=stop_mode=add:stop_duration={final_black_sec}:color=black[v_final]"
-              )
-              cur_timeline_v = "v_final"
-              total_duration += final_black_sec
-
-          # 5.5. Гибкая система субтитров (assemble_scenes.py / assemble_pipeline.py: Hardsub / Softsub / .SRT)
-          subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
-          subs_enabled = bool(subs_cfg.get("enabled", False))
-          burn_in = bool(subs_cfg.get("burn_in", False))
-          upload_srt = bool(subs_cfg.get("upload_srt", False))
-          srt_content = (subs_cfg.get("srt_content") or "").strip()
-          if not srt_content and subs_cfg.get("srt_content_base64"):
-              srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
-
-          os.makedirs("./output", exist_ok=True)
-          output_srt_path = "./output/subtitles.srt"
-          if (upload_srt or burn_in) and srt_content:
-              with open(output_srt_path, "w", encoding="utf-8") as sf:
-                  sf.write(srt_content)
-              with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
-                  sf_root.write(srt_content)
-
-          # Если subtitles.burn_in === true: FFmpeg применяет фильтр subtitles=subtitles.srt:...
-          # Если subtitles.burn_in === false: видео рендерится чистым без наложения титров
-          if subs_enabled and burn_in and srt_content:
-              filter_parts.append(
-                  f"[{cur_timeline_v}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled]"
-              )
-              cur_timeline_v = "v_subtitled"
-
-          # 6. Аудио-микс (Omni 1.2 Flash + continuous_bed + E3 crack) и финальный loudnorm=I=-16:TP=-3:LRA=11
-          mix_inputs = [f"[{cur_timeline_a}]"]
-          mix_weights = [str(bed.get("veo_audio_weight", 0.85))]
-
-          if bed.get("enabled", True) and bed.get("file_name"):
-              bed_in = input_idx
-              ffmpeg_inputs += ["-stream_loop", "-1", "-t", str(total_duration), "-i", bed["file_name"]]
-              input_idx += 1
-              filter_parts.append(
-                  f"[{bed_in}:a]afade=t=in:st=0:d=2.0,atrim=duration={total_duration},asetpts=PTS-STARTPTS[a_bed]"
-              )
-              mix_inputs.append("[a_bed]")
-              mix_weights.append(str(bed.get("bed_audio_weight", 0.55)))
-
-          for e3_a in e3_audio_nodes:
-              mix_inputs.append(e3_a)
-              mix_weights.append("1.0")
-
-          if len(mix_inputs) > 1:
-              w_str = " ".join(mix_weights)
-              filter_parts.append(
-                  f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:weights='{w_str}'[a_pre_norm]"
-              )
-              pre_norm_label = "a_pre_norm"
-          else:
-              pre_norm_label = cur_timeline_a
-
-          filter_parts.append(
-              f"[{pre_norm_label}]loudnorm=I={lufs_i}:TP={tp_limit}:LRA={lra_val}[a_master]"
-          )
-
-          filter_complex_str = ";".join(filter_parts)
-          with open("filter_complex.txt", "w", encoding="utf-8") as f:
-              f.write(filter_complex_str)
-
           out_name = cfg.get("output_filename") or f"./output/render_output_{res}_{v_codec}_{fps}fps.mp4"
-          cmd = [
-              "ffmpeg", "-y",
-              *ffmpeg_inputs,
-              "-filter_complex_script", "filter_complex.txt",
-              "-map", f"[{cur_timeline_v}]",
-              "-map", "[a_master]",
-              "-t", str(total_duration),
-              "-r", str(fps),
-              "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-              "-c:a", "aac", "-b:a", a_bitrate,
-              "-movflags", "+faststart", out_name
-          ]
-          print("Running FFmpeg command:", " ".join(cmd))
-          subprocess.run(cmd, check=True)
+          master_audio_cfg = cfg.get("master_audio") or {}
+          master_audio_file = str(master_audio_cfg.get("file_name") or cfg.get("audio_filename") or "").strip()
+
+          # Если все слоты уже лежат в ./temp_render/ и нет кастомных оверлеев — мгновенная склейка concat -c copy с новой аудиодорожкой
+          if all_slots_cached and len(insert_overlays) == 0 and len(cached_slot_files) > 0:
+              concat_list_file = "./temp_render/concat_slots.txt"
+              with open(concat_list_file, "w", encoding="utf-8") as cf:
+                  for sp in cached_slot_files:
+                      cf.write(f"file '{os.path.abspath(sp)}'\n")
+              fast_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_file]
+              if master_audio_file and os.path.exists(master_audio_file):
+                  fast_cmd += [
+                      "-i", master_audio_file,
+                      "-map", "0:v:0", "-map", "1:a:0",
+                      "-c:v", "copy", "-c:a", "aac", "-b:a", a_bitrate,
+                      "-shortest", "-movflags", "+faststart", out_name
+                  ]
+              else:
+                  fast_cmd += ["-c", "copy", "-movflags", "+faststart", out_name]
+              print("[FAST CONCAT -c copy] Склейка кэшированных слотов:", " ".join(fast_cmd))
+              subprocess.run(fast_cmd, check=True)
+          else:
+              # 3. Сшиваем акты через xfade и синхронный acrossfade
+              accum_offset = slot_video_labels[0][1]
+              prev_v = slot_video_labels[0][0]
+              prev_a = slot_audio_labels[0].strip("[]")
+
+              for idx in range(1, len(slot_video_labels)):
+                  prev_trans = slot_video_labels[idx - 1][2]
+                  t_type = prev_trans.get("type", "xfade")
+                  t_dur = float(prev_trans.get("duration_sec", 90.0)) if t_type != "none" else 0.0
+                  next_v_src, next_dur, _ = slot_video_labels[idx]
+                  next_a_src = slot_audio_labels[idx].strip("[]")
+                  out_v = f"v_act_chain_{idx}"
+                  out_a = f"a_act_chain_{idx}"
+
+                  if t_type == "none" or t_dur <= 0:
+                      filter_parts.append(f"[{prev_v}][{next_v_src}]concat=n=2:v=1:a=0[{out_v}]")
+                      filter_parts.append(f"[{prev_a}][{next_a_src}]acrossfade=d=1.0[{out_a}]")
+                      accum_offset += next_dur
+                  else:
+                      xfade_mode = "dissolve" if t_type == "dissolve" else "fade"
+                      offset_sec = max(0.0, accum_offset - t_dur)
+                      filter_parts.append(
+                          f"[{prev_v}][{next_v_src}]xfade=transition={xfade_mode}:duration={t_dur}:offset={offset_sec}[{out_v}]"
+                      )
+                      filter_parts.append(
+                          f"[{prev_a}][{next_a_src}]acrossfade=d={t_dur}:c1=tri:c2=tri[{out_a}]"
+                      )
+                      accum_offset = offset_sec + next_dur
+                  prev_v = out_v
+                  prev_a = out_a
+
+              cur_timeline_v = prev_v
+              cur_timeline_a = prev_a
+              e3_audio_nodes = []
+
+              # 4. Точная асимметричная анимация вставок
+              for ins_i, ins in enumerate(insert_overlays):
+                  ins_id = ins.get("insert_id") or f"E{ins_i+1}"
+                  ins_file = ins.get("file_name") or ins.get("filename") or ins.get("asset_name") or ins.get("video_file") or ""
+                  trig = float(ins.get("trigger_at_sec", 0))
+                  ins_dur = float(ins.get("duration_sec", 10))
+                  hold_end = bool(ins.get("hold_until_end", False))
+
+                  tr_in = ins.get("transition_in") or {"type": "dissolve", "duration_sec": 1.5}
+                  tr_out = ins.get("transition_out") or {"type": "dissolve", "duration_sec": 1.5}
+                  fade_in_d = float(tr_in.get("duration_sec", 1.5))
+                  fade_out_type = tr_out.get("type", "dissolve")
+                  fade_out_d = 0.0 if (hold_end or fade_out_type == "none") else float(tr_out.get("duration_sec", 1.5))
+
+                  ins_in = input_idx
+                  ffmpeg_inputs += ["-i", ins_file]
+                  input_idx += 1
+
+                  ins_v = f"v_ins_{ins_id}"
+                  next_v = f"v_ovr_{ins_id}"
+
+                  fade_chain = f"fade=t=in:st=0:d={fade_in_d}:alpha=1"
+                  if fade_out_d > 0:
+                      st_out = max(0.0, ins_dur - fade_out_d)
+                      fade_chain += f",fade=t=out:st={st_out}:d={fade_out_d}:alpha=1"
+
+                  end_t = total_duration if hold_end else (trig + ins_dur)
+                  eof_act = "repeat" if hold_end else "pass"
+
+                  filter_parts.append(
+                      f"[{ins_in}:v]scale={scale_wh},setsar=1,fps={fps},format=yuva420p,"
+                      f"{fade_chain},setpts=PTS-STARTPTS+{trig}/TB[{ins_v}]"
+                  )
+                  filter_parts.append(
+                      f"[{cur_timeline_v}][{ins_v}]overlay=enable='between(t,{trig},{end_t})':eof_action={eof_act}[{next_v}]"
+                  )
+                  cur_timeline_v = next_v
+
+                  if ins.get("audio_soft_compressor") or ins_id == "E3":
+                      ins_a = f"a_ins_{ins_id}"
+                      delay_ms = int(trig * 1000)
+                      max_peak_db = float(ins.get("max_peak_over_bed_db", 6.0))
+                      filter_parts.append(
+                          f"[{ins_in}:a]acompressor=attack=45:release=250:ratio=3:threshold=-18dB:makeup=2dB,"
+                          f"alimiter=limit={max_peak_db}dB,adelay={delay_ms}|{delay_ms}[{ins_a}]"
+                      )
+                      e3_audio_nodes.append(f"[{ins_a}]")
+
+              # 5. Опциональный 2-секундный черный экран в финале
+              if final_black_enabled and final_black_sec > 0:
+                  filter_parts.append(
+                      f"[{cur_timeline_v}]tpad=stop_mode=add:stop_duration={final_black_sec}:color=black[v_final]"
+                  )
+                  cur_timeline_v = "v_final"
+                  total_duration += final_black_sec
+
+              # 5.5. Гибкая система субтитров
+              subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
+              subs_enabled = bool(subs_cfg.get("enabled", False))
+              burn_in = bool(subs_cfg.get("burn_in", False))
+              upload_srt = bool(subs_cfg.get("upload_srt", False))
+              srt_content = (subs_cfg.get("srt_content") or "").strip()
+              if not srt_content and subs_cfg.get("srt_content_base64"):
+                  srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
+
+              output_srt_path = "./output/subtitles.srt"
+              if (upload_srt or burn_in) and srt_content:
+                  with open(output_srt_path, "w", encoding="utf-8") as sf:
+                      sf.write(srt_content)
+                  with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
+                      sf_root.write(srt_content)
+
+              if subs_enabled and burn_in and srt_content:
+                  filter_parts.append(
+                      f"[{cur_timeline_v}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled]"
+                  )
+                  cur_timeline_v = "v_subtitled"
+
+              # 6. Аудио-микс и финальный loudnorm=I=-16:TP=-3:LRA=11
+              mix_inputs = [f"[{cur_timeline_a}]"]
+              mix_weights = [str(bed.get("veo_audio_weight", 0.85))]
+
+              if bed.get("enabled", True) and bed.get("file_name"):
+                  bed_in = input_idx
+                  ffmpeg_inputs += ["-stream_loop", "-1", "-t", str(total_duration), "-i", bed["file_name"]]
+                  input_idx += 1
+                  filter_parts.append(
+                      f"[{bed_in}:a]afade=t=in:st=0:d=2.0,atrim=duration={total_duration},asetpts=PTS-STARTPTS[a_bed]"
+                  )
+                  mix_inputs.append("[a_bed]")
+                  mix_weights.append(str(bed.get("bed_audio_weight", 0.55)))
+
+              for e3_a in e3_audio_nodes:
+                  mix_inputs.append(e3_a)
+                  mix_weights.append("1.0")
+
+              if len(mix_inputs) > 1:
+                  w_str = " ".join(mix_weights)
+                  filter_parts.append(
+                      f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:weights='{w_str}'[a_pre_norm]"
+                  )
+                  pre_norm_label = "a_pre_norm"
+              else:
+                  pre_norm_label = cur_timeline_a
+
+              filter_parts.append(
+                  f"[{pre_norm_label}]loudnorm=I={lufs_i}:TP={tp_limit}:LRA={lra_val}[a_master]"
+              )
+
+              filter_complex_str = ";".join(filter_parts)
+              with open("filter_complex.txt", "w", encoding="utf-8") as f:
+                  f.write(filter_complex_str)
+
+              cmd = [
+                  "ffmpeg", "-y",
+                  *ffmpeg_inputs,
+                  "-filter_complex_script", "filter_complex.txt",
+                  "-map", f"[{cur_timeline_v}]",
+                  "-map", "[a_master]",
+                  "-t", str(total_duration),
+                  "-r", str(fps),
+                  "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
+                  "-c:a", "aac", "-b:a", a_bitrate,
+                  "-movflags", "+faststart", out_name
+              ]
+              print("Running FFmpeg command:", " ".join(cmd))
+              subprocess.run(cmd, check=True)
 
           if folder_id:
               subprocess.run([
                   "rclone", "copy", out_name, "gdrive:",
                   "--drive-root-folder-id", folder_id, "-P"
               ], check=True)
-              # Если subtitles.upload_srt === true: Rclone выгружает ./output/subtitles.srt на Google Диск вместе с готовым видео
-              if subs_enabled and upload_srt and os.path.exists(output_srt_path):
+              if os.path.exists("./output/subtitles.srt"):
                   subprocess.run([
-                      "rclone", "copy", output_srt_path, "gdrive:",
+                      "rclone", "copy", "./output/subtitles.srt", "gdrive:",
                       "--drive-root-folder-id", folder_id, "-P"
                   ], check=True)
               if os.path.isdir("./output/shorts"):
@@ -762,7 +827,30 @@ jobs:
                       "rclone", "copy", "./output/shorts", "gdrive:shorts",
                       "--drive-root-folder-id", folder_id, "-P"
                   ], check=True)
-          EOF`;
+          EOF
+
+      - name: Upload Emergency FFmpeg Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-emergency-logs
+          path: |
+            *.log
+            filter_complex*.txt
+            manifest.json
+          if-no-files-found: ignore
+
+      - name: Send Telegram Notification
+        if: always()
+        run: |
+          if [ "\${{ job.status }}" == "success" ]; then
+            TEXT="✅ Рендеринг и выгрузка успешно завершены!"
+          else
+            TEXT="❌ Ошибка сборки на этапе: \${{ job.status }}. Проверьте лог FFmpeg."
+          fi
+          curl -s -X POST https://api.telegram.org/bot\${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \\
+            -d chat_id="\${{ secrets.TELEGRAM_CHAT_ID }}" \\
+            -d text="\$TEXT"`;
 
 export default function App() {
   // Active tab state & animation pulse trigger key

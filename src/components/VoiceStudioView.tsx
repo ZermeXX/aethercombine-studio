@@ -16,7 +16,10 @@ import {
   Volume2,
   Wand2,
   Sparkles,
-  FileAudio
+  FileAudio,
+  Save,
+  AlertTriangle,
+  Globe
 } from 'lucide-react';
 
 export type VoiceProvider = 'elevenlabs' | 'edgetts';
@@ -35,9 +38,11 @@ export interface StudioVoiceItem {
   name: string;
   provider: VoiceProvider;
   language: VoiceLanguage;
-  gender: 'male' | 'female';
+  gender: 'male' | 'female' | 'universal';
   description: string;
   previewUrl?: string;
+  labels?: Record<string, string>;
+  isUniversal?: boolean;
 }
 
 interface ElevenLabsSubscriptionInfo {
@@ -48,6 +53,17 @@ interface ElevenLabsSubscriptionInfo {
   error?: string;
 }
 
+interface SavedVoiceStudioConfig {
+  activeAccount: 1 | 2;
+  apiKey1: string;
+  apiKey2: string;
+  provider: VoiceProvider;
+  selectedLanguage: VoiceLanguage;
+  selectedGender: VoiceGenderFilter;
+  selectedVoiceId: string;
+  favorites: string[];
+}
+
 interface VoiceStudioViewProps {
   scriptText: string;
   onScriptTextChange: (text: string) => void;
@@ -55,136 +71,194 @@ interface VoiceStudioViewProps {
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-// Студийные нейросетевые пресеты Microsoft Edge TTS (100% Бесплатно / Безлимитно)
-const EDGE_TTS_PRESET_VOICES: StudioVoiceItem[] = [
-  // English US: Guy, Christopher, Jenny
-  {
-    id: 'en-US-GuyNeural',
-    name: 'Guy (en-US-GuyNeural)',
-    provider: 'edgetts',
-    language: 'English US',
-    gender: 'male',
-    description: 'Deep Narrative Documentary Male • Studio Neural'
-  },
-  {
-    id: 'en-US-ChristopherNeural',
-    name: 'Christopher (en-US-ChristopherNeural)',
-    provider: 'edgetts',
-    language: 'English US',
-    gender: 'male',
-    description: 'Authoritative Investigative Storyteller • Studio Neural'
-  },
-  {
-    id: 'en-US-JennyNeural',
-    name: 'Jenny (en-US-JennyNeural)',
-    provider: 'edgetts',
-    language: 'English US',
-    gender: 'female',
-    description: 'Warm Clear Broadcast Female • Studio Neural'
-  },
-  // English UK
-  {
-    id: 'en-GB-RyanNeural',
-    name: 'Ryan (en-GB-RyanNeural)',
-    provider: 'edgetts',
-    language: 'English UK',
-    gender: 'male',
-    description: 'British BBC-Style Documentary Narrator • Studio Neural'
-  },
-  {
-    id: 'en-GB-SoniaNeural',
-    name: 'Sonia (en-GB-SoniaNeural)',
-    provider: 'edgetts',
-    language: 'English UK',
-    gender: 'female',
-    description: 'Crisp British Narrator • Studio Neural'
-  },
-  // Русский: Дмитрий, Светлана
-  {
-    id: 'ru-RU-DmitryNeural',
-    name: 'Дмитрий (ru-RU-DmitryNeural)',
-    provider: 'edgetts',
-    language: 'Русский',
-    gender: 'male',
-    description: 'Глубокий баритон для документального кино и тру-крайма'
-  },
-  {
-    id: 'ru-RU-SvetlanaNeural',
-    name: 'Светлана (ru-RU-SvetlanaNeural)',
-    provider: 'edgetts',
-    language: 'Русский',
-    gender: 'female',
-    description: 'Чистый студийный женский голос с мягкой подачей'
-  },
-  // Українська: Остап, Поліна
-  {
-    id: 'uk-UA-OstapNeural',
-    name: 'Остап (uk-UA-OstapNeural)',
-    provider: 'edgetts',
-    language: 'Українська',
-    gender: 'male',
-    description: 'Виразний чоловічий дикторський голос • Studio Neural'
-  },
-  {
-    id: 'uk-UA-PolinaNeural',
-    name: 'Поліна (uk-UA-PolinaNeural)',
-    provider: 'edgetts',
-    language: 'Українська',
-    gender: 'female',
-    description: 'Природний жіночий студійний голос • Studio Neural'
-  },
-  // Deutsch: Conrad, Katja
-  {
-    id: 'de-DE-ConradNeural',
-    name: 'Conrad (de-DE-ConradNeural)',
-    provider: 'edgetts',
-    language: 'Deutsch',
-    gender: 'male',
-    description: 'Klangvoller Dokumentarfilm-Sprecher • Studio Neural'
-  },
-  {
-    id: 'de-DE-KatjaNeural',
-    name: 'Katja (de-DE-KatjaNeural)',
-    provider: 'edgetts',
-    language: 'Deutsch',
-    gender: 'female',
-    description: 'Klare deutsche Erzählstimme • Studio Neural'
-  },
-  // Español: Alvaro, Elvira
-  {
-    id: 'es-ES-AlvaroNeural',
-    name: 'Alvaro (es-ES-AlvaroNeural)',
-    provider: 'edgetts',
-    language: 'Español',
-    gender: 'male',
-    description: 'Narrador cinematográfico profundo • Studio Neural'
-  },
-  {
-    id: 'es-ES-ElviraNeural',
-    name: 'Elvira (es-ES-ElviraNeural)',
-    provider: 'edgetts',
-    language: 'Español',
-    gender: 'female',
-    description: 'Voz femenina cálida y clara • Studio Neural'
-  },
-  // Français
-  {
-    id: 'fr-FR-HenriNeural',
-    name: 'Henri (fr-FR-HenriNeural)',
-    provider: 'edgetts',
-    language: 'Français',
-    gender: 'male',
-    description: 'Voix masculine documentaire • Studio Neural'
-  },
-  {
-    id: 'fr-FR-DeniseNeural',
-    name: 'Denise (fr-FR-DeniseNeural)',
-    provider: 'edgetts',
-    language: 'Français',
-    gender: 'female',
-    description: 'Voix féminine narrative • Studio Neural'
-  }
-];
+const LANGUAGE_TO_PREFIX_MAP: Record<VoiceLanguage, string> = {
+  'English US': 'en-US',
+  'English UK': 'en-GB',
+  Русский: 'ru',
+  Українська: 'uk',
+  Deutsch: 'de',
+  Español: 'es',
+  Français: 'fr'
+};
+
+const LANGUAGE_MATCH_TOKENS: Record<VoiceLanguage, string[]> = {
+  'English US': ['en-us', 'english us', 'american', 'us', 'en'],
+  'English UK': ['en-gb', 'english uk', 'british', 'uk'],
+  Русский: ['ru', 'ru-ru', 'russian', 'русский'],
+  Українська: ['uk', 'uk-ua', 'ukrainian', 'українська'],
+  Español: ['es', 'es-es', 'spanish', 'español', 'latino'],
+  Deutsch: ['de', 'de-de', 'german', 'deutsch'],
+  Français: ['fr', 'fr-fr', 'french', 'français']
+};
+
+// Жестко зашитая структура пресетов Edge TTS по ключам "язык_пол" (мгновенная подстановка без сетевых задержек)
+const EDGE_TTS_PRESETS_BY_KEY: Record<string, StudioVoiceItem[]> = {
+  'ru_male': [
+    {
+      id: 'ru-RU-DmitryNeural',
+      name: 'Дмитрий (ru-RU-DmitryNeural)',
+      provider: 'edgetts',
+      language: 'Русский',
+      gender: 'male',
+      description: 'Глубокий баритон для документального кино и тру-крайма',
+      labels: { language: 'ru', gender: 'male', accent: 'russian' }
+    }
+  ],
+  'ru_female': [
+    {
+      id: 'ru-RU-SvetlanaNeural',
+      name: 'Светлана (ru-RU-SvetlanaNeural)',
+      provider: 'edgetts',
+      language: 'Русский',
+      gender: 'female',
+      description: 'Чистый студийный женский голос с мягкой подачей',
+      labels: { language: 'ru', gender: 'female', accent: 'russian' }
+    }
+  ],
+  'en-US_male': [
+    {
+      id: 'en-US-GuyNeural',
+      name: 'Guy (en-US-GuyNeural)',
+      provider: 'edgetts',
+      language: 'English US',
+      gender: 'male',
+      description: 'Deep Narrative Documentary Male • Studio Neural',
+      labels: { language: 'en-US', gender: 'male', accent: 'american' }
+    },
+    {
+      id: 'en-US-ChristopherNeural',
+      name: 'Christopher (en-US-ChristopherNeural)',
+      provider: 'edgetts',
+      language: 'English US',
+      gender: 'male',
+      description: 'Authoritative Investigative Storyteller • Studio Neural',
+      labels: { language: 'en-US', gender: 'male', accent: 'american' }
+    }
+  ],
+  'en-US_female': [
+    {
+      id: 'en-US-JennyNeural',
+      name: 'Jenny (en-US-JennyNeural)',
+      provider: 'edgetts',
+      language: 'English US',
+      gender: 'female',
+      description: 'Warm Clear Broadcast Female • Studio Neural',
+      labels: { language: 'en-US', gender: 'female', accent: 'american' }
+    }
+  ],
+  'en-GB_male': [
+    {
+      id: 'en-GB-RyanNeural',
+      name: 'Ryan (en-GB-RyanNeural)',
+      provider: 'edgetts',
+      language: 'English UK',
+      gender: 'male',
+      description: 'British BBC-Style Documentary Narrator • Studio Neural',
+      labels: { language: 'en-GB', gender: 'male', accent: 'british' }
+    }
+  ],
+  'en-GB_female': [
+    {
+      id: 'en-GB-SoniaNeural',
+      name: 'Sonia (en-GB-SoniaNeural)',
+      provider: 'edgetts',
+      language: 'English UK',
+      gender: 'female',
+      description: 'Crisp British Narrator • Studio Neural',
+      labels: { language: 'en-GB', gender: 'female', accent: 'british' }
+    }
+  ],
+  'uk_male': [
+    {
+      id: 'uk-UA-OstapNeural',
+      name: 'Остап (uk-UA-OstapNeural)',
+      provider: 'edgetts',
+      language: 'Українська',
+      gender: 'male',
+      description: 'Виразний чоловічий дикторський голос • Studio Neural',
+      labels: { language: 'uk', gender: 'male', accent: 'ukrainian' }
+    }
+  ],
+  'uk_female': [
+    {
+      id: 'uk-UA-PolinaNeural',
+      name: 'Поліна (uk-UA-PolinaNeural)',
+      provider: 'edgetts',
+      language: 'Українська',
+      gender: 'female',
+      description: 'Природний жіночий студійний голос • Studio Neural',
+      labels: { language: 'uk', gender: 'female', accent: 'ukrainian' }
+    }
+  ],
+  'de_male': [
+    {
+      id: 'de-DE-ConradNeural',
+      name: 'Conrad (de-DE-ConradNeural)',
+      provider: 'edgetts',
+      language: 'Deutsch',
+      gender: 'male',
+      description: 'Klangvoller Dokumentarfilm-Sprecher • Studio Neural',
+      labels: { language: 'de', gender: 'male', accent: 'german' }
+    }
+  ],
+  'de_female': [
+    {
+      id: 'de-DE-KatjaNeural',
+      name: 'Katja (de-DE-KatjaNeural)',
+      provider: 'edgetts',
+      language: 'Deutsch',
+      gender: 'female',
+      description: 'Klare deutsche Erzählstimme • Studio Neural',
+      labels: { language: 'de', gender: 'female', accent: 'german' }
+    }
+  ],
+  'es_male': [
+    {
+      id: 'es-ES-AlvaroNeural',
+      name: 'Alvaro (es-ES-AlvaroNeural)',
+      provider: 'edgetts',
+      language: 'Español',
+      gender: 'male',
+      description: 'Narrador cinematográfico profundo • Studio Neural',
+      labels: { language: 'es', gender: 'male', accent: 'spanish' }
+    }
+  ],
+  'es_female': [
+    {
+      id: 'es-ES-ElviraNeural',
+      name: 'Elvira (es-ES-ElviraNeural)',
+      provider: 'edgetts',
+      language: 'Español',
+      gender: 'female',
+      description: 'Voz femenina cálida y clara • Studio Neural',
+      labels: { language: 'es', gender: 'female', accent: 'spanish' }
+    }
+  ],
+  'fr_male': [
+    {
+      id: 'fr-FR-HenriNeural',
+      name: 'Henri (fr-FR-HenriNeural)',
+      provider: 'edgetts',
+      language: 'Français',
+      gender: 'male',
+      description: 'Voix masculine documentaire • Studio Neural',
+      labels: { language: 'fr', gender: 'male', accent: 'french' }
+    }
+  ],
+  'fr_female': [
+    {
+      id: 'fr-FR-DeniseNeural',
+      name: 'Denise (fr-FR-DeniseNeural)',
+      provider: 'edgetts',
+      language: 'Français',
+      gender: 'female',
+      description: 'Voix féminine narrative • Studio Neural',
+      labels: { language: 'fr', gender: 'female', accent: 'french' }
+    }
+  ]
+};
+
+const EDGE_TTS_PRESET_VOICES: StudioVoiceItem[] = Object.values(EDGE_TTS_PRESETS_BY_KEY).flat();
 
 // Базовые кинематографичные голоса ElevenLabs (дополняются живым запросом GET /v1/voices)
 const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
@@ -194,7 +268,8 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     provider: 'elevenlabs',
     language: 'English US',
     gender: 'male',
-    description: 'ElevenLabs Multilingual v2 • Iconic Deep Mystery Narrator'
+    description: 'ElevenLabs Multilingual v2 • Iconic Deep Mystery Narrator',
+    labels: { language: 'en-US', accent: 'american', gender: 'male' }
   },
   {
     id: 'ErXwobaYiN019PkySvjV',
@@ -202,7 +277,8 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     provider: 'elevenlabs',
     language: 'English US',
     gender: 'male',
-    description: 'ElevenLabs Multilingual v2 • Paced Investigative Tone'
+    description: 'ElevenLabs Multilingual v2 • Paced Investigative Tone',
+    labels: { language: 'en-US', accent: 'american', gender: 'male' }
   },
   {
     id: '21m00Tcm4TlvDq8ikWAM',
@@ -210,7 +286,8 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     provider: 'elevenlabs',
     language: 'English US',
     gender: 'female',
-    description: 'ElevenLabs Multilingual v2 • Smooth Broadcast Voice'
+    description: 'ElevenLabs Multilingual v2 • Smooth Broadcast Voice',
+    labels: { language: 'en-US', accent: 'american', gender: 'female' }
   },
   {
     id: 'onwK4e9ZLuTAKqWW03F9',
@@ -218,7 +295,18 @@ const DEFAULT_ELEVENLABS_VOICES: StudioVoiceItem[] = [
     provider: 'elevenlabs',
     language: 'English UK',
     gender: 'male',
-    description: 'ElevenLabs Multilingual v2 • Authoritative UK Presenter'
+    description: 'ElevenLabs Multilingual v2 • Authoritative UK Presenter',
+    labels: { language: 'en-GB', accent: 'british', gender: 'male' }
+  },
+  {
+    id: 'N2lVS1w4EtoT3dr4eOWO',
+    name: 'Callum (Universal Multilingual)',
+    provider: 'elevenlabs',
+    language: 'English US',
+    gender: 'universal',
+    description: 'ElevenLabs Multilingual v2 • Другие / Универсальные (без явных меток языка/пола)',
+    labels: {},
+    isUniversal: true
   }
 ];
 
@@ -280,12 +368,12 @@ function numberToEnglishWords(n: number): string {
     'ninety'
   ];
 
-  // Year pronunciation (e.g., 1974 -> nineteen seventy-four)
   if (n >= 1901 && n <= 1999) {
     const last = n % 100;
     const t = Math.floor(last / 10);
     const o = last % 10;
-    const suffix = last < 10 ? `oh-${ones[last]}` : last < 20 ? ones[last] : `${tens[t]}${o ? '-' + ones[o] : ''}`;
+    const suffix =
+      last < 10 ? `oh-${ones[last]}` : last < 20 ? ones[last] : `${tens[t]}${o ? '-' + ones[o] : ''}`;
     return `nineteen ${suffix}`;
   }
   if (n < 20) return ones[n];
@@ -329,7 +417,10 @@ function numberToRussianWordsSimple(n: number): string {
 // Генератор валидного WAV/MP3 аудио-буфера для мгновенного скачивания и подстановки master_voiceover.mp3
 function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
   const sampleRate = 22050;
-  const numSamples = Math.max(sampleRate * 2, Math.min(sampleRate * 30, Math.floor(sampleRate * durationSec)));
+  const numSamples = Math.max(
+    sampleRate * 2,
+    Math.min(sampleRate * 30, Math.floor(sampleRate * durationSec))
+  );
   const buffer = new ArrayBuffer(44 + numSamples * 2);
   const view = new DataView(buffer);
 
@@ -353,7 +444,6 @@ function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
   writeStr(36, 'data');
   view.setUint32(40, numSamples * 2, true);
 
-  // Мягкая модуляция теплого студийного тона с паузами речи
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
     const cadence = Math.sin(t * 3.2) > -0.35 ? 1 : 0.05;
@@ -372,41 +462,67 @@ function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
   return new Blob([buffer], { type: 'audio/mpeg' });
 }
 
+function loadSavedVoiceStudioConfig(): Partial<SavedVoiceStudioConfig> {
+  try {
+    const raw = localStorage.getItem('config_voice_studio');
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<SavedVoiceStudioConfig>;
+  } catch {
+    return {};
+  }
+}
+
 export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   scriptText,
   onScriptTextChange,
   onMasterVoiceoverReady,
   onNotify
 }) => {
-  // 1. Мульти-аккаунт ElevenLabs (2 API-ключа в localStorage + радиокнопки + баланс символов)
+  // Чтение сохраненного объекта config_voice_studio при загрузке страницы
+  const initialSavedConfig = useMemo(() => loadSavedVoiceStudioConfig(), []);
+
+  // 1. Мульти-аккаунт ElevenLabs (2 API-ключа + активный аккаунт)
   const [apiKey1, setApiKey1] = useState<string>(
-    () => localStorage.getItem('elevenlabs_api_key_1') || ''
+    () => initialSavedConfig.apiKey1 ?? localStorage.getItem('elevenlabs_api_key_1') ?? ''
   );
   const [apiKey2, setApiKey2] = useState<string>(
-    () => localStorage.getItem('elevenlabs_api_key_2') || ''
+    () => initialSavedConfig.apiKey2 ?? localStorage.getItem('elevenlabs_api_key_2') ?? ''
   );
-  const [activeKeySlot, setActiveKeySlot] = useState<1 | 2>(() =>
-    localStorage.getItem('elevenlabs_active_slot') === '2' ? 2 : 1
-  );
+  const [activeKeySlot, setActiveKeySlot] = useState<1 | 2>(() => {
+    if (initialSavedConfig.activeAccount === 1 || initialSavedConfig.activeAccount === 2) {
+      return initialSavedConfig.activeAccount;
+    }
+    return localStorage.getItem('elevenlabs_active_slot') === '2' ? 2 : 1;
+  });
 
   const [subInfo1, setSubInfo1] = useState<ElevenLabsSubscriptionInfo | null>(null);
   const [subInfo2, setSubInfo2] = useState<ElevenLabsSubscriptionInfo | null>(null);
 
-  // Селектор провайдера
-  const [provider, setProvider] = useState<VoiceProvider>('edgetts');
+  // Выбранный движок (ElevenLabs или Edge TTS)
+  const [provider, setProvider] = useState<VoiceProvider>(
+    () => initialSavedConfig.provider || 'edgetts'
+  );
 
   // 2. Каскадный фильтр голосов: Язык и Пол
-  const [selectedLanguage, setSelectedLanguage] = useState<VoiceLanguage>('English US');
-  const [genderFilter, setGenderFilter] = useState<VoiceGenderFilter>('all');
+  const [selectedLanguage, setSelectedLanguage] = useState<VoiceLanguage>(
+    () => initialSavedConfig.selectedLanguage || 'English US'
+  );
+  const [genderFilter, setGenderFilter] = useState<VoiceGenderFilter>(
+    () => initialSavedConfig.selectedGender || 'all'
+  );
 
-  // Каталог голосов ElevenLabs
+  // Каталог голосов ElevenLabs + состояние загрузки и ошибок сети
   const [elevenLabsVoices, setElevenLabsVoices] = useState<StudioVoiceItem[]>(
     DEFAULT_ELEVENLABS_VOICES
   );
   const [loadingVoices, setLoadingVoices] = useState<boolean>(false);
+  const [voicesFetchError, setVoicesFetchError] = useState<string | null>(null);
 
-  // 3. Избранное (⭐ Favorites) в localStorage ("favorite_voices")
+  // 3. Избранное (⭐ Favorites)
   const [favoriteVoiceIds, setFavoriteVoiceIds] = useState<string[]>(() => {
+    if (Array.isArray(initialSavedConfig.favorites) && initialSavedConfig.favorites.length > 0) {
+      return initialSavedConfig.favorites;
+    }
     try {
       const raw = localStorage.getItem('favorite_voices');
       return raw ? JSON.parse(raw) : ['en-US-ChristopherNeural', 'en-US-GuyNeural'];
@@ -415,7 +531,14 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     }
   });
 
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('en-US-ChristopherNeural');
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(
+    () => initialSavedConfig.selectedVoiceId || 'en-US-ChristopherNeural'
+  );
+
+  // Состояние отфильтрованных голосов, управляемое единой функцией renderFilteredVoices()
+  const [renderedPrimaryVoices, setRenderedPrimaryVoices] = useState<StudioVoiceItem[]>([]);
+  const [renderedUniversalVoices, setRenderedUniversalVoices] = useState<StudioVoiceItem[]>([]);
+
   const [playingDemoId, setPlayingDemoId] = useState<string | null>(null);
   const [isGeneratingMaster, setIsGeneratingMaster] = useState<boolean>(false);
   const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string>('');
@@ -423,7 +546,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
-  // Сохранение API-ключей в localStorage
+  // Синхронизация вспомогательных ключей в localStorage
   useEffect(() => {
     localStorage.setItem('elevenlabs_api_key_1', apiKey1);
   }, [apiKey1]);
@@ -441,6 +564,154 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   }, [favoriteVoiceIds]);
 
   const activeElevenLabsKey = activeKeySlot === 1 ? apiKey1.trim() : apiKey2.trim();
+
+  // ============================================================================
+  // КНОПКА «💾 СОХРАНИТЬ НАСТРОЙКИ» (единый объект config_voice_studio в localStorage)
+  // ============================================================================
+  const handleSaveVoiceStudioConfig = useCallback(() => {
+    const configToSave: SavedVoiceStudioConfig = {
+      activeAccount: activeKeySlot,
+      apiKey1,
+      apiKey2,
+      provider,
+      selectedLanguage,
+      selectedGender: genderFilter,
+      selectedVoiceId,
+      favorites: favoriteVoiceIds
+    };
+    localStorage.setItem('config_voice_studio', JSON.stringify(configToSave));
+    localStorage.setItem('elevenlabs_api_key_1', apiKey1);
+    localStorage.setItem('elevenlabs_api_key_2', apiKey2);
+    localStorage.setItem('elevenlabs_active_slot', String(activeKeySlot));
+    localStorage.setItem('favorite_voices', JSON.stringify(favoriteVoiceIds));
+    onNotify('Настройки диктора успешно сохранены!', 'success');
+  }, [
+    activeKeySlot,
+    apiKey1,
+    apiKey2,
+    provider,
+    selectedLanguage,
+    genderFilter,
+    selectedVoiceId,
+    favoriteVoiceIds,
+    onNotify
+  ]);
+
+  // ============================================================================
+  // ЕДИНАЯ ФУНКЦИЯ-ОБРАБОТЧИК renderFilteredVoices() (rebuildVoiceList)
+  // Вызывается при onchange языка, onclick табов пола [Все | Мужские | Женские]
+  // и при переключении движка (ElevenLabs / Edge TTS)
+  // ============================================================================
+  const renderFilteredVoices = useCallback(
+    (
+      targetProvider: VoiceProvider,
+      targetLang: VoiceLanguage,
+      targetGender: VoiceGenderFilter,
+      elevenCatalog: StudioVoiceItem[]
+    ) => {
+      const langPrefix = LANGUAGE_TO_PREFIX_MAP[targetLang] || 'en-US';
+      const selectedLangLower = langPrefix.toLowerCase();
+      const validTokens = LANGUAGE_MATCH_TOKENS[targetLang] || [selectedLangLower];
+
+      if (targetProvider === 'edgetts') {
+        // Для Edge TTS: мгновенная выборка из жестко зашитых ключей "язык_пол" без сетевых задержек
+        let matchedEdge: StudioVoiceItem[] = [];
+        if (targetGender === 'all') {
+          matchedEdge = [
+            ...(EDGE_TTS_PRESETS_BY_KEY[`${langPrefix}_male`] || []),
+            ...(EDGE_TTS_PRESETS_BY_KEY[`${langPrefix}_female`] || [])
+          ];
+        } else {
+          matchedEdge = EDGE_TTS_PRESETS_BY_KEY[`${langPrefix}_${targetGender}`] || [];
+        }
+
+        setRenderedPrimaryVoices(matchedEdge);
+        setRenderedUniversalVoices([]);
+
+        if (matchedEdge.length > 0 && !matchedEdge.some(v => v.id === selectedVoiceId)) {
+          setSelectedVoiceId(matchedEdge[0].id);
+        }
+        return;
+      }
+
+      // Для ElevenLabs: нормализованная проверка labels (language / accent / gender)
+      // Голоса без явных меток пола/языка попадают в категорию «Другие / Универсальные»
+      const primaryList: StudioVoiceItem[] = [];
+      const universalList: StudioVoiceItem[] = [];
+
+      elevenCatalog.forEach(voice => {
+        const rawLang = (voice.labels?.language || '').trim().toLowerCase();
+        const rawAccent = (voice.labels?.['accent'] || '').trim().toLowerCase();
+        const rawGender = (voice.labels?.gender || '').trim().toLowerCase();
+
+        const hasExplicitLabels = Boolean((rawLang || rawAccent) && rawGender);
+        if (!hasExplicitLabels || voice.isUniversal || voice.gender === 'universal') {
+          if (
+            targetGender === 'all' ||
+            !rawGender ||
+            rawGender === targetGender.toLowerCase()
+          ) {
+            universalList.push({
+              ...voice,
+              isUniversal: true
+            });
+          }
+          return;
+        }
+
+        const langMatches =
+          voice.labels?.language === langPrefix ||
+          rawLang === selectedLangLower ||
+          Boolean(voice.labels?.['accent']?.toLowerCase().includes(selectedLangLower)) ||
+          validTokens.some(tok => rawLang === tok || rawAccent.includes(tok));
+
+        const genderMatches =
+          targetGender === 'all' ||
+          voice.labels?.gender?.toLowerCase() === targetGender.toLowerCase();
+
+        if (langMatches && genderMatches) {
+          primaryList.push(voice);
+        } else if (genderMatches) {
+          // Многоязычные голоса ElevenLabs Multilingual v2 показываем в «Другие / Универсальные», чтобы список никогда не зависал пустым
+          universalList.push({
+            ...voice,
+            isUniversal: true
+          });
+        }
+      });
+
+      setRenderedPrimaryVoices(primaryList);
+      setRenderedUniversalVoices(universalList);
+
+      const combined = [...primaryList, ...universalList];
+      if (combined.length > 0 && !combined.some(v => v.id === selectedVoiceId)) {
+        setSelectedVoiceId(combined[0].id);
+      }
+    },
+    [selectedVoiceId]
+  );
+
+  // Автоматический вызов renderFilteredVoices при любом изменении языка, пола, провайдера или каталога
+  useEffect(() => {
+    renderFilteredVoices(provider, selectedLanguage, genderFilter, elevenLabsVoices);
+  }, [provider, selectedLanguage, genderFilter, elevenLabsVoices, renderFilteredVoices]);
+
+  // Обработчики событий фильтрации, явно вызывающие renderFilteredVoices()
+  const handleProviderChange = (nextProvider: VoiceProvider) => {
+    setProvider(nextProvider);
+    setVoicesFetchError(null);
+    renderFilteredVoices(nextProvider, selectedLanguage, genderFilter, elevenLabsVoices);
+  };
+
+  const handleLanguageChange = (nextLang: VoiceLanguage) => {
+    setSelectedLanguage(nextLang);
+    renderFilteredVoices(provider, nextLang, genderFilter, elevenLabsVoices);
+  };
+
+  const handleGenderTabClick = (nextGender: VoiceGenderFilter) => {
+    setGenderFilter(nextGender);
+    renderFilteredVoices(provider, selectedLanguage, nextGender, elevenLabsVoices);
+  };
 
   // Проверка баланса символов через GET https://api.elevenlabs.io/v1/user/subscription
   const fetchSubscriptionBalance = useCallback(
@@ -491,8 +762,15 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // Подгрузка каталога голосов ElevenLabs через GET https://api.elevenlabs.io/v1/voices
   const fetchElevenLabsVoicesCatalog = useCallback(async () => {
-    if (!activeElevenLabsKey) return;
+    if (!activeElevenLabsKey) {
+      setVoicesFetchError(
+        'API-ключ ElevenLabs не указан в активном слоте. Отображены встроенные студийные пресеты ElevenLabs.'
+      );
+      return;
+    }
+
     setLoadingVoices(true);
+    setVoicesFetchError(null);
     try {
       const res = await fetch('https://api.elevenlabs.io/v1/voices', {
         headers: {
@@ -512,12 +790,22 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
       if (Array.isArray(data.voices) && data.voices.length > 0) {
         const mapped: StudioVoiceItem[] = data.voices.map(v => {
-          const genderLabel = (v.labels?.gender || '').toLowerCase();
-          const accentLabel = (v.labels?.accent || '').toLowerCase();
-          const gender: 'male' | 'female' = genderLabel === 'female' ? 'female' : 'male';
-          let lang: VoiceLanguage = selectedLanguage;
-          if (accentLabel.includes('british')) lang = 'English UK';
-          else if (accentLabel.includes('american')) lang = 'English US';
+          const labelsObj = v.labels || {};
+          const genderLabel = (labelsObj.gender || '').toLowerCase();
+          const accentLabel = (labelsObj.accent || '').toLowerCase();
+          const langLabel = (labelsObj.language || '').toLowerCase();
+
+          const hasExplicitLabels = Boolean((langLabel || accentLabel) && genderLabel);
+          const gender: 'male' | 'female' | 'universal' =
+            genderLabel === 'female' ? 'female' : genderLabel === 'male' ? 'male' : 'universal';
+
+          let lang: VoiceLanguage = 'English US';
+          if (accentLabel.includes('british') || langLabel.includes('en-gb')) lang = 'English UK';
+          else if (accentLabel.includes('russian') || langLabel === 'ru') lang = 'Русский';
+          else if (accentLabel.includes('ukrainian') || langLabel === 'uk') lang = 'Українська';
+          else if (accentLabel.includes('german') || langLabel === 'de') lang = 'Deutsch';
+          else if (accentLabel.includes('spanish') || langLabel === 'es') lang = 'Español';
+          else if (accentLabel.includes('french') || langLabel === 'fr') lang = 'Français';
 
           return {
             id: v.voice_id,
@@ -525,20 +813,26 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             provider: 'elevenlabs',
             language: lang,
             gender,
-            description: `${v.category || 'Premade'} • ${v.labels?.description || v.labels?.use_case || 'Multilingual v2'}`,
-            previewUrl: v.preview_url
+            description: `${v.category || 'Premade'} • ${labelsObj.description || labelsObj.use_case || 'Multilingual v2'}`,
+            previewUrl: v.preview_url,
+            labels: labelsObj,
+            isUniversal: !hasExplicitLabels
           };
         });
         setElevenLabsVoices(mapped);
+        renderFilteredVoices('elevenlabs', selectedLanguage, genderFilter, mapped);
         onNotify(`Загружено ${mapped.length} голосов из каталога ElevenLabs API!`, 'success');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      onNotify(`Используются пресеты ElevenLabs (API ответ: ${msg})`, 'info');
+      setVoicesFetchError(
+        `Не удалось загрузить каталог из сети ElevenLabs (${msg}). Показаны резервные студийные пресеты.`
+      );
+      onNotify(`Ошибка сети ElevenLabs (${msg}) — показаны резервные голоса`, 'info');
     } finally {
       setLoadingVoices(false);
     }
-  }, [activeElevenLabsKey, selectedLanguage, onNotify]);
+  }, [activeElevenLabsKey, selectedLanguage, genderFilter, renderFilteredVoices, onNotify]);
 
   useEffect(() => {
     if (provider === 'elevenlabs' && activeElevenLabsKey) {
@@ -553,29 +847,21 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     );
   };
 
-  // Все доступные голоса для текущего провайдера
-  const allVoicesPool = useMemo(() => {
-    return provider === 'edgetts' ? EDGE_TTS_PRESET_VOICES : elevenLabsVoices;
-  }, [provider, elevenLabsVoices]);
-
-  // Каскадный фильтр по языку и полу
-  const filteredVoices = useMemo(() => {
-    return allVoicesPool.filter(v => {
-      const langMatch =
-        provider === 'elevenlabs'
-          ? v.language === selectedLanguage || v.language === 'English US'
-          : v.language === selectedLanguage;
-      const genderMatch = genderFilter === 'all' || v.gender === genderFilter;
-      return langMatch && genderMatch;
-    });
-  }, [allVoicesPool, provider, selectedLanguage, genderFilter]);
-
   // Избранные голоса вверху списка
   const favoriteVoicesList = useMemo(() => {
-    return [...EDGE_TTS_PRESET_VOICES, ...elevenLabsVoices].filter(v =>
-      favoriteVoiceIds.includes(v.id)
-    );
+    const allKnown = [...EDGE_TTS_PRESET_VOICES, ...elevenLabsVoices];
+    const uniqueMap = new Map<string, StudioVoiceItem>();
+    allKnown.forEach(item => {
+      if (!uniqueMap.has(item.id)) uniqueMap.set(item.id, item);
+    });
+    return Array.from(uniqueMap.values()).filter(v => favoriteVoiceIds.includes(v.id));
   }, [favoriteVoiceIds, elevenLabsVoices]);
+
+  // Объединенный список для быстрого выпадающего <select>
+  const allSelectableVoices = useMemo(
+    () => [...renderedPrimaryVoices, ...renderedUniversalVoices],
+    [renderedPrimaryVoices, renderedUniversalVoices]
+  );
 
   // Прослушивание демо-фразы голоса («▶ Прослушать демо»)
   const handlePlayVoiceDemo = (voice: StudioVoiceItem) => {
@@ -629,7 +915,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         Français: 'fr-FR'
       };
       utter.lang = langCodeMap[voice.language];
-      utter.pitch = voice.gender === 'male' ? 0.88 : 1.08;
+      utter.pitch = voice.gender === 'male' ? 0.88 : voice.gender === 'female' ? 1.08 : 0.98;
       utter.rate = 0.96;
       utter.onend = () => setPlayingDemoId(null);
       utter.onerror = () => setPlayingDemoId(null);
@@ -648,17 +934,14 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
     let text = scriptText;
 
-    // Защищаем существующие теги [pause ...]
     const pauseTokens: string[] = [];
     text = text.replace(/\[(?:pause|пауза)\s+[\d.,]+s?с?\]/gi, m => {
       pauseTokens.push(m);
       return `__PAUSE_TOK_${pauseTokens.length - 1}__`;
     });
 
-    // Удаляем служебные заголовки блоков
     text = text.replace(/\[(?:HOOK|THE BRIDGE|BODY SCRIPT|Shot|Visual)[^\]]*\]\s*/gi, '');
 
-    // Конвертируем числа в слова прописью (в зависимости от кириллицы или английского текста)
     const isCyrillic = /[а-яёА-ЯЁ]/.test(text);
     text = text.replace(/\b\d+\b/g, match => {
       const n = parseInt(match, 10);
@@ -666,15 +949,12 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       return isCyrillic ? numberToRussianWordsSimple(n) : numberToEnglishWords(n);
     });
 
-    // Расстановка буквы «ё»
     YO_DICTIONARY.forEach(([regex, rep]) => {
       text = text.replace(regex, rep);
     });
 
-    // Возвращаем маркеры пауз
     text = text.replace(/__PAUSE_TOK_(\d+)__/g, (_m, idx) => pauseTokens[Number(idx)] || '[pause 1.0s]');
 
-    // Если нет маркеров пауз между абзацами, расставляем их
     if (!/\[(?:pause|пауза)/i.test(text)) {
       text = text.replace(/\n\n+/g, '\n\n[pause 1.2s]\n\n');
     }
@@ -699,7 +979,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       const wordCount = cleanScript.split(/\s+/).filter(Boolean).length;
       const estimatedDurationSec = Math.max(12, Math.round((wordCount / 2.4) * 10) / 10);
 
-      // Если выбран ElevenLabs и указан активный API-ключ, вызываем реальный ElevenLabs TTS API
       if (provider === 'elevenlabs' && activeElevenLabsKey) {
         const cleanForTts = cleanScript.replace(/\[[^\]]*\]/g, ' ... ').slice(0, 4000);
         const res = await fetch(
@@ -739,7 +1018,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         }
       }
 
-      // Edge TTS / Studio Neural синтез дорожки master_voiceover.mp3
       const wavBlob = createSynthesizedVoiceoverBlob(estimatedDurationSec);
       const file = new File([wavBlob], 'master_voiceover.mp3', { type: 'audio/mpeg' });
       if (generatedAudioUrl) URL.revokeObjectURL(generatedAudioUrl);
@@ -771,7 +1049,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   return (
     <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
-      {/* ШАПКА ДИКТОРСКОГО ЦЕХА (VOICE STUDIO) */}
+      {/* ШАПКА ДИКТОРСКОГО ЦЕХА (VOICE STUDIO) + КНОПКА «💾 СОХРАНИТЬ НАСТРОЙКИ» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div className="space-y-1">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2.5">
@@ -779,33 +1057,45 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             <span>🎙 Дикторский цех (Voice Studio • ElevenLabs Multi-Key &amp; Microsoft Edge TTS)</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Два API-ключа ElevenLabs с контролем лимита символов, безлимитный Microsoft Edge TTS, каскадный фильтр голосов, ⭐ Избранное и автогенерация <code className="text-amber-300">master_voiceover.mp3</code>
+            Два API-ключа ElevenLabs с контролем лимита символов, безлимитный Microsoft Edge TTS, мгновенный фильтр голосов, ⭐ Избранное и сохранение <code className="text-amber-300">config_voice_studio</code>
           </p>
         </div>
 
-        {/* Селектор провайдера озвучки */}
-        <div className="flex flex-wrap items-center gap-2 bg-[#0b0f17] p-1.5 rounded-xl border border-slate-800">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Селектор провайдера озвучки */}
+          <div className="flex flex-wrap items-center gap-2 bg-[#0b0f17] p-1.5 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => handleProviderChange('elevenlabs')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                provider === 'elevenlabs'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              🎬 ElevenLabs API (Кинематографичный / AI)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProviderChange('edgetts')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                provider === 'edgetts'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              ⚡ Microsoft Edge TTS (100% Бесплатно / Безлимитно)
+            </button>
+          </div>
+
+          {/* Кнопка «💾 Сохранить настройки» (localStorage: config_voice_studio) */}
           <button
             type="button"
-            onClick={() => setProvider('elevenlabs')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-              provider === 'elevenlabs'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-300 hover:text-white'
-            }`}
+            onClick={handleSaveVoiceStudioConfig}
+            className="bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition"
           >
-            🎬 ElevenLabs API (Кинематографичный / AI)
-          </button>
-          <button
-            type="button"
-            onClick={() => setProvider('edgetts')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-              provider === 'edgetts'
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            ⚡ Microsoft Edge TTS (100% Бесплатно / Безлимитно, без API-ключей)
+            <Save className="w-4 h-4" />
+            <span>💾 Сохранить настройки</span>
           </button>
         </div>
       </div>
@@ -816,11 +1106,11 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              1. Мульти-аккаунт ElevenLabs (Сохранение в localStorage + Баланс символов GET /v1/user/subscription)
+              1. Мульти-аккаунт ElevenLabs (Сохранение в config_voice_studio + Баланс символов GET /v1/user/subscription)
             </h3>
           </div>
           <span className="text-[11px] font-mono text-amber-300">
-            Активный слот: Key #{activeKeySlot}
+            Активный аккаунт: Account #{activeKeySlot}
           </span>
         </div>
 
@@ -842,7 +1132,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                   onChange={() => setActiveKeySlot(1)}
                   className="accent-amber-500 w-4 h-4"
                 />
-                <span>ElevenLabs API Key #1 (Основной аккаунт)</span>
+                <span>ElevenLabs Account 1 (Основной API-ключ)</span>
               </label>
               <button
                 type="button"
@@ -898,7 +1188,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                   onChange={() => setActiveKeySlot(2)}
                   className="accent-amber-500 w-4 h-4"
                 />
-                <span>ElevenLabs API Key #2 (Резервный аккаунт)</span>
+                <span>ElevenLabs Account 2 (Резервный API-ключ)</span>
               </label>
               <button
                 type="button"
@@ -931,7 +1221,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                 )
               ) : (
                 <span className="text-slate-500">
-                  Быстрое переключение на 2-й ключ при исчерпании квоты
+                  Быстрое переключение на Account 2 при исчерпании квоты
                 </span>
               )}
             </div>
@@ -950,11 +1240,11 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               </h3>
             </div>
 
-            {/* Фильтр по полу: [ Все ] | [ 👨 Мужские ] | [ 👩 Женские ] */}
+            {/* Табы фильтрации по полу: [ Все ] | [ 👨 Мужские ] | [ 👩 Женские ] */}
             <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
               <button
                 type="button"
-                onClick={() => setGenderFilter('all')}
+                onClick={() => handleGenderTabClick('all')}
                 className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
                   genderFilter === 'all'
                     ? 'bg-amber-500 text-slate-950'
@@ -965,7 +1255,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setGenderFilter('male')}
+                onClick={() => handleGenderTabClick('male')}
                 className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
                   genderFilter === 'male'
                     ? 'bg-sky-500 text-slate-950'
@@ -976,7 +1266,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setGenderFilter('female')}
+                onClick={() => handleGenderTabClick('female')}
                 className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
                   genderFilter === 'female'
                     ? 'bg-pink-500 text-slate-950'
@@ -988,7 +1278,47 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
           </div>
 
-          {/* Селектор языка: English US, English UK, Русский, Українська, Español, Deutsch, Français */}
+          {/* Селектор языка (onchange + кнопки быстрого выбора) и выпадающий список голосов <select> */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-900/70 border border-slate-800/90 rounded-xl p-3">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-slate-400 block">
+                Язык озвучки (Language Filter):
+              </label>
+              <select
+                value={selectedLanguage}
+                onChange={e => handleLanguageChange(e.target.value as VoiceLanguage)}
+                className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 outline-none"
+              >
+                <option value="English US">English US (en-US)</option>
+                <option value="English UK">English UK (en-GB)</option>
+                <option value="Русский">Русский (ru)</option>
+                <option value="Українська">Українська (uk)</option>
+                <option value="Español">Español (es)</option>
+                <option value="Deutsch">Deutsch (de)</option>
+                <option value="Français">Français (fr)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-slate-400 block">
+                Быстрый выбор диктора ({LANGUAGE_TO_PREFIX_MAP[selectedLanguage]}_{genderFilter}):
+              </label>
+              <select
+                value={selectedVoiceId}
+                onChange={e => setSelectedVoiceId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-semibold text-amber-300 outline-none"
+              >
+                {allSelectableVoices.map(v => (
+                  <option key={`opt-${v.id}`} value={v.id}>
+                    {v.gender === 'male' ? '👨 ' : v.gender === 'female' ? '👩 ' : '🌐 '}
+                    {v.name} — {v.language}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Кнопки быстрого переключения языка + обновление каталога ElevenLabs */}
           <div className="flex flex-wrap items-center gap-2">
             {(
               [
@@ -1004,7 +1334,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               <button
                 key={lang}
                 type="button"
-                onClick={() => setSelectedLanguage(lang)}
+                onClick={() => handleLanguageChange(lang)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                   selectedLanguage === lang
                     ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200'
@@ -1023,16 +1353,34 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                 className="ml-auto bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingVoices ? 'animate-spin' : ''}`} />
-                Обновить GET /v1/voices
+                {loadingVoices ? 'Загрузка голосов...' : 'Обновить GET /v1/voices'}
               </button>
             )}
           </div>
+
+          {/* Индикатор загрузки голосов («Загрузка голосов...») */}
+          {loadingVoices && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3.5 flex items-center gap-3 text-xs text-amber-300">
+              <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+              <span className="font-semibold">
+                Загрузка голосов из ElevenLabs API (/v1/voices)...
+              </span>
+            </div>
+          )}
+
+          {/* Понятное уведомление при ошибке сети или отсутствии ключа */}
+          {voicesFetchError && !loadingVoices && provider === 'elevenlabs' && (
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-center gap-2.5 text-xs text-rose-300">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{voicesFetchError}</span>
+            </div>
+          )}
 
           {/* Блок «⭐ Избранные голоса» вверху списка */}
           {favoriteVoicesList.length > 0 && (
             <div className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
               <span className="text-[11px] font-bold uppercase text-amber-400 flex items-center gap-1.5">
-                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> ⭐ Избранные голоса (localStorage: &quot;favorite_voices&quot;)
+                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> ⭐ Избранные голоса (favorites)
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {favoriteVoicesList.map(v => {
@@ -1050,7 +1398,9 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                     >
                       <div className="min-w-0 flex-1">
                         <div className="font-bold truncate flex items-center gap-1.5">
-                          <span>{v.gender === 'male' ? '👨' : '👩'}</span>
+                          <span>
+                            {v.gender === 'male' ? '👨' : v.gender === 'female' ? '👩' : '🌐'}
+                          </span>
                           <span>{v.name}</span>
                         </div>
                         <span className="text-[10px] text-slate-400">{v.language}</span>
@@ -1086,75 +1436,163 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
             </div>
           )}
 
-          {/* Основной список отфильтрованных голосов */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto custom-scroll pr-1">
-            {filteredVoices.map(voice => {
-              const isFav = favoriteVoiceIds.includes(voice.id);
-              const isSelected = selectedVoiceId === voice.id;
-              const isPlaying = playingDemoId === voice.id;
+          {/* Основной список отфильтрованных голосов по языку и полу */}
+          <div className="space-y-3 max-h-80 overflow-y-auto custom-scroll pr-1">
+            {renderedPrimaryVoices.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {renderedPrimaryVoices.map(voice => {
+                  const isFav = favoriteVoiceIds.includes(voice.id);
+                  const isSelected = selectedVoiceId === voice.id;
+                  const isPlaying = playingDemoId === voice.id;
 
-              return (
-                <div
-                  key={voice.id}
-                  onClick={() => setSelectedVoiceId(voice.id)}
-                  className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 cursor-pointer transition ${
-                    isSelected
-                      ? 'bg-emerald-500/15 border-emerald-400/70 shadow-[0_0_15px_rgba(52,211,153,0.15)]'
-                      : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                        <span>{voice.gender === 'male' ? '👨' : '👩'}</span>
-                        <span>{voice.name}</span>
+                  return (
+                    <div
+                      key={voice.id}
+                      onClick={() => setSelectedVoiceId(voice.id)}
+                      className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 cursor-pointer transition ${
+                        isSelected
+                          ? 'bg-emerald-500/15 border-emerald-400/70 shadow-[0_0_15px_rgba(52,211,153,0.15)]'
+                          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                            <span>{voice.gender === 'male' ? '👨' : '👩'}</span>
+                            <span>{voice.name}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">{voice.description}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            toggleFavoriteVoice(voice.id);
+                          }}
+                          className="text-slate-400 hover:text-amber-400 p-1 cursor-pointer"
+                          title="Добавить / убрать из Избранного"
+                        >
+                          <Star
+                            className={`w-4 h-4 ${
+                              isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-500'
+                            }`}
+                          />
+                        </button>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{voice.description}</p>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                        <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded">
+                          {voice.language}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            handlePlayVoiceDemo(voice);
+                          }}
+                          className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                        >
+                          {isPlaying ? (
+                            <>
+                              <Square className="w-3 h-3 fill-current" /> Стоп
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3 h-3 fill-current" /> ▶ Прослушать демо
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        toggleFavoriteVoice(voice.id);
-                      }}
-                      className="text-slate-400 hover:text-amber-400 p-1 cursor-pointer"
-                      title="Добавить / убрать из Избранного"
-                    >
-                      <Star
-                        className={`w-4 h-4 ${
-                          isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-500'
-                        }`}
-                      />
-                    </button>
-                  </div>
+                  );
+                })}
+              </div>
+            )}
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded">
-                      {voice.language}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        handlePlayVoiceDemo(voice);
-                      }}
-                      className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
-                    >
-                      {isPlaying ? (
-                        <>
-                          <Square className="w-3 h-3 fill-current" /> Стоп
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-3 h-3 fill-current" /> ▶ Прослушать демо
-                        </>
-                      )}
-                    </button>
-                  </div>
+            {/* Категория «Другие / Универсальные» для голосов без явных меток пола/языка */}
+            {renderedUniversalVoices.length > 0 && (
+              <div className="pt-2 space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-indigo-300">
+                  <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Другие / Универсальные (Multilingual v2 • Без строгих меток языка/пола)</span>
                 </div>
-              );
-            })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {renderedUniversalVoices.map(voice => {
+                    const isFav = favoriteVoiceIds.includes(voice.id);
+                    const isSelected = selectedVoiceId === voice.id;
+                    const isPlaying = playingDemoId === voice.id;
+
+                    return (
+                      <div
+                        key={`univ-${voice.id}`}
+                        onClick={() => setSelectedVoiceId(voice.id)}
+                        className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 cursor-pointer transition ${
+                          isSelected
+                            ? 'bg-indigo-500/20 border-indigo-400/70'
+                            : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                              <span>
+                                {voice.gender === 'male'
+                                  ? '👨'
+                                  : voice.gender === 'female'
+                                  ? '👩'
+                                  : '🌐'}
+                              </span>
+                              <span>{voice.name}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{voice.description}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleFavoriteVoice(voice.id);
+                            }}
+                            className="text-slate-400 hover:text-amber-400 p-1 cursor-pointer"
+                          >
+                            <Star
+                              className={`w-4 h-4 ${
+                                isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-500'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                          <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded">
+                            Другие / Универсальные
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handlePlayVoiceDemo(voice);
+                            }}
+                            className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                          >
+                            {isPlaying ? (
+                              <>
+                                <Square className="w-3 h-3 fill-current" /> Стоп
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3 h-3 fill-current" /> ▶ Прослушать демо
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1200,6 +1638,15 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
                   ? 'Синтез master_voiceover.mp3...'
                   : '🎙 Сгенерировать master_voiceover.mp3 (Автоподстановка в монтаж)'}
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSaveVoiceStudioConfig}
+              className="w-full bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+            >
+              <Save className="w-4 h-4" />
+              <span>💾 Сохранить настройки диктора (config_voice_studio)</span>
             </button>
 
             {generatedAudioUrl && (

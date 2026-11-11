@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 assemble_scenes.py
-Сборка повествовательного видео из N сцен (80, 120, 200+ сцен) по JSON-манифесту
-с гибкими режимами субтитров (Hardsub / Softsub / выгрузка .SRT в Google Drive),
-авто-нарезкой вирусных Shorts (9:16, 1080x1920) в ./output/shorts/ и уведомлениями в Telegram.
+Сборка повествовательного видео и слотов по JSON-манифесту
+с кэшированием скомпилированных видео-слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 ... + быстрая склейка concat -c copy),
+гибкими режимами субтитров (Hardsub / Softsub / .SRT), авто-нарезкой Shorts 9:16 и уведомлениями в Telegram.
 """
 
 import base64
@@ -19,11 +19,16 @@ def load_manifest() -> dict:
         raw_json = base64.b64decode(b64_payload).decode("utf-8")
         with open("config.json", "w", encoding="utf-8") as f:
             f.write(raw_json)
+        with open("manifest.json", "w", encoding="utf-8") as mf:
+            mf.write(raw_json)
         return json.loads(raw_json)
+    if os.path.exists("manifest.json"):
+        with open("manifest.json", "r", encoding="utf-8") as f:
+            return json.load(f)
     if os.path.exists("config.json"):
         with open("config.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    raise RuntimeError("Не найден MANIFEST_B64 или config.json")
+    raise RuntimeError("Не найден MANIFEST_B64, manifest.json или config.json")
 
 
 def send_telegram_alert(cfg: dict, text: str) -> None:
@@ -39,6 +44,11 @@ def send_telegram_alert(cfg: dict, text: str) -> None:
         urllib.request.urlopen(req, timeout=10)
     except Exception as exc:
         print(f"Telegram alert warning: {exc}")
+
+
+def is_valid_cached_slot(slot_path: str) -> bool:
+    """Проверяет, существует ли скомпилированный слот в ./temp_render/ и валиден ли он."""
+    return os.path.exists(slot_path) and os.path.getsize(slot_path) > 1024
 
 
 def slice_viral_shorts(cfg: dict, scenes: list, fps: int, folder_id: str) -> None:
@@ -116,8 +126,9 @@ def main() -> None:
     folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
     os.makedirs("./output", exist_ok=True)
+    os.makedirs("./temp_render", exist_ok=True)
 
-    # Чтение гибких настроек субтитров из currentManifest.export_settings.subtitles или currentManifest.subtitles
+    # Чтение гибких настроек субтитров
     subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
     subs_enabled = bool(subs_cfg.get("enabled", False))
     burn_in = bool(subs_cfg.get("burn_in", False))
@@ -136,63 +147,93 @@ def main() -> None:
         print(f"Saved subtitles to {output_srt_path} ({len(srt_content)} chars)")
 
     scenes = cfg.get("scenes") or []
-    ffmpeg_inputs = []
-    filter_parts = []
-
-    for idx, sc in enumerate(scenes):
-        file_name = str(sc.get("file_name") or sc.get("filename") or "").strip()
-        dur = max(0.5, float(sc.get("duration") or 6.0))
-        if not file_name:
-            continue
-        in_i = len(ffmpeg_inputs) // 2
-        ffmpeg_inputs += ["-i", file_name]
-        filter_parts.append(
-            f"[{in_i}:v]scale={scale_wh},setsar=1,fps={fps},trim=duration={dur},setpts=PTS-STARTPTS[v{in_i}]"
-        )
-
-    valid_count = len(ffmpeg_inputs) // 2
-    if valid_count == 0:
+    valid_scenes = [sc for sc in scenes if str(sc.get("file_name") or sc.get("filename") or "").strip()]
+    if not valid_scenes:
         send_telegram_alert(cfg, "❌ Сбой рендера AetherCombine: в манифесте нет заполненных видеофайлов сцен.")
         raise RuntimeError("В манифесте нет заполненных видеофайлов сцен (scenes[].file_name)")
 
-    if valid_count == 1:
-        cur_v = "v0"
-    else:
-        concat_inputs = "".join(f"[v{i}]" for i in range(valid_count))
-        filter_parts.append(f"{concat_inputs}concat=n={valid_count}:v=1:a=0[v_concat]")
-        cur_v = "v_concat"
+    # 1. Кэширование слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 и т.д.)
+    # Если файлы слотов уже существуют в temp_render и валидны, пропускаем их тяжелый перерендер
+    slot_files = []
+    for idx, sc in enumerate(valid_scenes):
+        slot_num = idx + 1
+        slot_path = f"./temp_render/slot_{slot_num}.mp4"
+        file_name = str(sc.get("file_name") or sc.get("filename")).strip()
+        dur = max(0.5, float(sc.get("duration") or 6.0))
 
-    # Если subtitles.burn_in === true: FFmpeg применяет фильтр -vf "subtitles=subtitles.srt:..."
-    # Если subtitles.burn_in === false: видео рендерится чистым без наложения титров
+        if is_valid_cached_slot(slot_path):
+            print(f"[CACHE HIT] Слот {slot_path} найден в ./temp_render/ — пропускаем тяжелый перерендер.")
+        else:
+            print(f"[CACHE MISS] Рендеринг слота #{slot_num} -> {slot_path} ...")
+            slot_cmd = [
+                "ffmpeg", "-y",
+                "-i", file_name,
+                "-vf", f"scale={scale_wh},setsar=1,fps={fps},trim=duration={dur},setpts=PTS-STARTPTS",
+                "-r", str(fps),
+                "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
+                "-an",
+                slot_path,
+            ]
+            subprocess.run(slot_cmd, check=True)
+        slot_files.append(slot_path)
+
+    # 2. Быстрая склейка кэшированных слотов (concat -c copy) + наложение новой аудиодорожки
+    concat_list_path = "./temp_render/slots_concat.txt"
+    with open(concat_list_path, "w", encoding="utf-8") as cf:
+        for sp in slot_files:
+            abs_sp = os.path.abspath(sp)
+            cf.write(f"file '{abs_sp}'\n")
+
+    concat_video_path = "./temp_render/concatenated_video.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path, "-c", "copy", concat_video_path],
+        check=True,
+    )
+
+    master_audio_cfg = cfg.get("master_audio") or {}
+    master_audio_file = str(
+        master_audio_cfg.get("file_name") or cfg.get("audio_filename") or ""
+    ).strip()
+
+    out_video = "./output/final_narrative_master.mp4"
+
+    # Если требуется вшивание субтитров (burn_in), применяем поверх склеенного потока; иначе быстрое копирование видеопотока (-c:v copy)
     if subs_enabled and burn_in and srt_content:
         sub_style = (
             "FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45"
         )
-        filter_parts.append(f"[{cur_v}]subtitles=subtitles.srt:force_style='{sub_style}'[v_out]")
-        cur_v = "v_out"
+        cmd = ["ffmpeg", "-y", "-i", concat_video_path]
+        if master_audio_file and os.path.exists(master_audio_file):
+            cmd += ["-i", master_audio_file, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += [
+            "-vf", f"subtitles=subtitles.srt:force_style='{sub_style}'",
+            "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", a_bitrate,
+            "-movflags", "+faststart",
+            out_video,
+        ]
+    else:
+        cmd = ["ffmpeg", "-y", "-i", concat_video_path]
+        if master_audio_file and os.path.exists(master_audio_file):
+            cmd += [
+                "-i", master_audio_file,
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", a_bitrate,
+                "-shortest",
+                "-movflags", "+faststart",
+                out_video,
+            ]
+        else:
+            cmd += ["-c", "copy", "-movflags", "+faststart", out_video]
 
-    out_video = "./output/final_narrative_master.mp4"
-    with open("filter_complex_scenes.txt", "w", encoding="utf-8") as f:
-        f.write(";".join(filter_parts))
-
-    cmd = [
-        "ffmpeg", "-y",
-        *ffmpeg_inputs,
-        "-filter_complex_script", "filter_complex_scenes.txt",
-        "-map", f"[{cur_v}]",
-        "-r", str(fps),
-        "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", a_bitrate,
-        "-movflags", "+faststart",
-        out_video,
-    ]
-    print("Running FFmpeg scenes assembly:", " ".join(cmd))
+    print("Running FFmpeg final assembly:", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)
         slice_viral_shorts(cfg, scenes, fps, folder_id)
     except Exception as exc:
-        send_telegram_alert(cfg, f"❌ Сбой рендера FFmpeg в AetherCombine: {exc}")
+        send_telegram_alert(cfg, f"❌ Ошибка сборки FFmpeg: {exc}. Проверьте лог FFmpeg.")
         raise
 
     if folder_id:
@@ -200,7 +241,6 @@ def main() -> None:
             ["rclone", "copy", out_video, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
             check=True,
         )
-        # Если subtitles.upload_srt === true: Rclone выгружает ./output/subtitles.srt на Google Диск вместе с готовым видео
         if subs_enabled and upload_srt and os.path.exists(output_srt_path):
             subprocess.run(
                 ["rclone", "copy", output_srt_path, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
@@ -209,10 +249,9 @@ def main() -> None:
 
     send_telegram_alert(
         cfg,
-        f"✅ Готово! Мастер-файл ({res.upper()}, {v_codec}, preset {preset}) выгружен в Google Drive.",
+        "✅ Рендеринг и выгрузка успешно завершены!",
     )
 
 
 if __name__ == "__main__":
     main()
-
