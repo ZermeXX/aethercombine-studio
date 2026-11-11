@@ -3803,181 +3803,185 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#0b0f17] text-[#e2e8f0]">
-      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar с цветными акцентными иконками) */}
-      <header className="bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg shadow-black/40">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20">
-            <Layers className="w-6 h-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-wider text-slate-100 flex items-center gap-2">
-              AETHER<span className="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]">COMBINE</span>
-              <span className="text-[10px] bg-amber-500/15 border border-amber-400/40 text-amber-300 font-semibold px-2 py-0.5 rounded shadow-sm shadow-amber-500/10">
-                PRO 4K • ARGON
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">
-              Автономный облачный видеокомбайн &amp; универсальный парсер N-слотов (GitHub Actions → Google Drive)
-            </p>
+      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar: свободный скролл со страницей без sticky/fixed) */}
+      <header className="relative w-full bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 shadow-lg shadow-black/40">
+        <div className="flex flex-wrap items-center justify-between gap-3 w-full xl:w-auto">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20 shrink-0">
+              <Layers className="w-6 h-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-wider text-slate-100 flex items-center gap-2">
+                AETHER<span className="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]">COMBINE</span>
+                <span className="text-[10px] bg-amber-500/15 border border-amber-400/40 text-amber-300 font-semibold px-2 py-0.5 rounded shadow-sm shadow-amber-500/10">
+                  PRO 4K • ARGON
+                </span>
+              </h1>
+              <p className="text-xs text-slate-400">
+                Автономный облачный видеокомбайн &amp; универсальный парсер N-слотов (GitHub Actions → Google Drive)
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Верхнее навигационное меню с сочными цветными 3D-градиентными значками (32x32px) */}
-        <nav
-          role="tablist"
-          aria-label="Цехи продакшна AetherCombine"
-          className="flex flex-wrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner"
-        >
-          {/* 1. 🎬 Повествовательный монтаж */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'combine'}
-            onClick={() => handleSelectTab('combine')}
-            id="tab-combine"
-            className={`group tab-btn nav-tab nav-tab-combine flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'combine'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-purple-500/30'
-            }`}
+        {/* Горизонтальный скролл навигации без переноса строк (.nav-container) */}
+        <div className="nav-container xl:w-auto">
+          <nav
+            role="tablist"
+            aria-label="Цехи продакшна AetherCombine"
+            className="inline-flex flex-nowrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner whitespace-nowrap min-w-max"
           >
-            <span
-              key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
-              className="icon-container nav-icon-box nav-icon-combine"
-              aria-hidden="true"
+            {/* 1. 🎬 Повествовательный монтаж */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'combine'}
+              onClick={() => handleSelectTab('combine')}
+              id="tab-combine"
+              className={`group tab-btn nav-tab nav-tab-combine shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'combine'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-purple-500/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
-                🎬
+              <span
+                key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
+                className="icon-container nav-icon-box nav-icon-combine"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
+                  🎬
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">Повествовательный монтаж</span>
-          </button>
+              <span className="text-white tracking-wide">Повествовательный монтаж</span>
+            </button>
 
-          {/* 2. 🔄 Многочасовой Луп (N-Слотов) */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'loop'}
-            onClick={() => handleSelectTab('loop')}
-            id="tab-loop"
-            className={`group tab-btn nav-tab nav-tab-loop flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'loop'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-amber-500/30'
-            }`}
-          >
-            <span
-              key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
-              className="icon-container nav-icon-box nav-icon-loop"
-              aria-hidden="true"
+            {/* 2. 🔄 Многочасовой Луп (N-Слотов) */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'loop'}
+              onClick={() => handleSelectTab('loop')}
+              id="tab-loop"
+              className={`group tab-btn nav-tab nav-tab-loop shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'loop'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-amber-500/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
-                🔁
+              <span
+                key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
+                className="icon-container nav-icon-box nav-icon-loop"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
+                  🔁
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">Многочасовой Луп (N-Слотов)</span>
-          </button>
+              <span className="text-white tracking-wide">Многочасовой Луп (N-Слотов)</span>
+            </button>
 
-          {/* 3. ⚡ Сценарий и Хуки */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'hooks'}
-            onClick={() => handleSelectTab('hooks')}
-            id="tab-hooks"
-            className={`group tab-btn nav-tab nav-tab-hooks flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'hooks'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-yellow-400/30'
-            }`}
-          >
-            <span
-              key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
-              className="icon-container nav-icon-box nav-icon-hooks"
-              aria-hidden="true"
+            {/* 3. ⚡ Сценарий и Хуки */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'hooks'}
+              onClick={() => handleSelectTab('hooks')}
+              id="tab-hooks"
+              className={`group tab-btn nav-tab nav-tab-hooks shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'hooks'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-yellow-400/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
-                ⚡
+              <span
+                key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
+                className="icon-container nav-icon-box nav-icon-hooks"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
+                  ⚡
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">Сценарий и Хуки</span>
-          </button>
+              <span className="text-white tracking-wide">Сценарий и Хуки</span>
+            </button>
 
-          {/* 4. 🎙️ Дикторский цех */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'voice'}
-            onClick={() => handleSelectTab('voice')}
-            id="tab-voice"
-            className={`group tab-btn nav-tab nav-tab-voice flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'voice'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-pink-500/30'
-            }`}
-          >
-            <span
-              key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
-              className="icon-container nav-icon-box nav-icon-voice"
-              aria-hidden="true"
+            {/* 4. 🎙️ Дикторский цех */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'voice'}
+              onClick={() => handleSelectTab('voice')}
+              id="tab-voice"
+              className={`group tab-btn nav-tab nav-tab-voice shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'voice'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-pink-500/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
-                🎙️
+              <span
+                key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
+                className="icon-container nav-icon-box nav-icon-voice"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
+                  🎙️
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">Дикторский цех</span>
-          </button>
+              <span className="text-white tracking-wide">Дикторский цех</span>
+            </button>
 
-          {/* 5. 📦 YouTube SEO */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'seo'}
-            onClick={() => handleSelectTab('seo')}
-            id="tab-seo"
-            className={`group tab-btn nav-tab nav-tab-seo flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'seo'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-sky-400/30'
-            }`}
-          >
-            <span
-              key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
-              className="icon-container nav-icon-box nav-icon-seo"
-              aria-hidden="true"
+            {/* 5. 📦 YouTube SEO */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'seo'}
+              onClick={() => handleSelectTab('seo')}
+              id="tab-seo"
+              className={`group tab-btn nav-tab nav-tab-seo shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'seo'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-sky-400/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
-                📦
+              <span
+                key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
+                className="icon-container nav-icon-box nav-icon-seo"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
+                  📦
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">YouTube SEO</span>
-          </button>
+              <span className="text-white tracking-wide">YouTube SEO</span>
+            </button>
 
-          {/* 6. 🎨 4K Превью и Арт-цех */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'thumb'}
-            onClick={() => handleSelectTab('thumb')}
-            id="tab-thumb"
-            className={`group tab-btn nav-tab nav-tab-thumb flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-              activeTab === 'thumb'
-                ? 'active tab-btn-active'
-                : 'border border-transparent hover:bg-slate-800/75 hover:border-emerald-400/30'
-            }`}
-          >
-            <span
-              key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
-              className="icon-container nav-icon-box nav-icon-thumb"
-              aria-hidden="true"
+            {/* 6. 🎨 4K Превью и Арт-цех */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'thumb'}
+              onClick={() => handleSelectTab('thumb')}
+              id="tab-thumb"
+              className={`group tab-btn nav-tab nav-tab-thumb shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+                activeTab === 'thumb'
+                  ? 'active tab-btn-active'
+                  : 'border border-transparent hover:bg-slate-800/75 hover:border-emerald-400/30'
+              }`}
             >
-              <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
-                🎨
+              <span
+                key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
+                className="icon-container nav-icon-box nav-icon-thumb"
+                aria-hidden="true"
+              >
+                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
+                  🎨
+                </span>
               </span>
-            </span>
-            <span className="text-white tracking-wide">4K Превью и Арт-цех</span>
-          </button>
-        </nav>
+              <span className="text-white tracking-wide">4K Превью и Арт-цех</span>
+            </button>
+          </nav>
+        </div>
 
         {/* Информационная строка статуса GitHub («ZermeXX/aetherflow-render») и «GDrive Ready» */}
         <div className="flex flex-wrap items-center gap-2.5">

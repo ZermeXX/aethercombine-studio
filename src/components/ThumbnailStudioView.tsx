@@ -21,7 +21,9 @@ import {
   ZoomIn,
   X,
   Grid,
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle,
+  Link2
 } from 'lucide-react';
 
 interface ThumbnailStudioViewProps {
@@ -34,7 +36,102 @@ interface ThumbnailStudioViewProps {
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-// Генерация высокодетализированного процедурного 16:9 4K рендера (с вариацией композиции 0..3 для сетки 2x2)
+/**
+ * Точный вызов пакетной генерации Imagen 3 (:predict, sampleCount = 4, 16:9, image/jpeg).
+ * Выполняется через серверный прокси /api/imagen/generate (который обращается к
+ * https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey})
+ * или напрямую при переданном ключе.
+ */
+export async function generateImagenBatch(
+  promptText: string,
+  apiKey?: string,
+  sampleCount: number = 4
+): Promise<string[]> {
+  if (apiKey && apiKey.trim()) {
+    // Эндпоинт Imagen 3 требует метода :predict, а не :generateContent
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey.trim()}`;
+
+    const payload = {
+      instances: [{ prompt: promptText }],
+      parameters: {
+        sampleCount: Number(sampleCount),
+        aspectRatio: '16:9',
+        outputMimeType: 'image/jpeg'
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorDetails = await response.text();
+      throw new Error(`Ошибка Imagen 3 API (${response.status}): ${errorDetails}`);
+    }
+
+    const result = (await response.json()) as {
+      predictions?: Array<{ bytesBase64Encoded?: string }>;
+    };
+
+    if (!result.predictions || !result.predictions.length) {
+      throw new Error(
+        'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+      );
+    }
+
+    // Извлекаем чистый base64 и преобразуем в data-url
+    return result.predictions.map(pred => {
+      const base64 = pred.bytesBase64Encoded || '';
+      return `data:image/jpeg;base64,${base64}`;
+    });
+  }
+
+  // Вызов через серверный маршрут /api/imagen/generate (использующий серверный GEMINI_API_KEY)
+  const response = await fetch('/api/imagen/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      promptText,
+      sampleCount: Number(sampleCount)
+    })
+  });
+
+  const result = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    images?: string[];
+    predictions?: Array<{ bytesBase64Encoded?: string }>;
+    error?: string;
+  };
+
+  if (!response.ok || !result.ok) {
+    throw new Error(
+      result.error || `Ошибка Imagen 3 API (${response.status}): Не удалось выполнить :predict`
+    );
+  }
+
+  if (Array.isArray(result.images) && result.images.length > 0) {
+    return result.images;
+  }
+
+  if (!result.predictions || !result.predictions.length) {
+    throw new Error(
+      'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+    );
+  }
+
+  return result.predictions.map(pred => {
+    const base64 = pred.bytesBase64Encoded || '';
+    return `data:image/jpeg;base64,${base64}`;
+  });
+}
+
+// Генерация высокодетализированного процедурного 16:9 4K рендера (для стартовой сетки 2x2 и резервной генерации)
 function renderProcedural16x9ArtworkDataUrl(
   stylePreset: string,
   promptText: string,
@@ -48,13 +145,13 @@ function renderProcedural16x9ArtworkDataUrl(
 
   const palettesByVariant: Array<Record<string, [string, string, string]>> = [
     {
-      mystery_dark: ['#060b14', '#16243d', '#f59e0b'],
+      mystery_dark: ['#060b14', '#16243d', '#00f2fe'],
       ambient_4k: ['#050c1a', '#0f294a', '#38bdf8'],
       truecrime_contrast: ['#0a090d', '#291218', '#ef4444'],
       scifi_neon: ['#04120e', '#0d3328', '#10b981']
     },
     {
-      mystery_dark: ['#090814', '#22183b', '#fbbf24'],
+      mystery_dark: ['#090814', '#22183b', '#f59e0b'],
       ambient_4k: ['#04101e', '#13365c', '#60a5fa'],
       truecrime_contrast: ['#0f070b', '#38121b', '#f43f5e'],
       scifi_neon: ['#041417', '#0e3b43', '#2dd4bf']
@@ -94,7 +191,7 @@ function renderProcedural16x9ArtworkDataUrl(
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, c.width, c.height);
 
-  // Cinematic focal object silhouette (Reel-to-reel / Outpost / Oscilloscope)
+  // Cinematic focal object silhouette
   ctx.save();
   ctx.translate(focalX, focalY + 35);
   ctx.strokeStyle = accent;
@@ -106,7 +203,6 @@ function renderProcedural16x9ArtworkDataUrl(
   ctx.stroke();
 
   if (variantIndex % 2 === 0) {
-    // Two magnetic reels
     [-110, 110].forEach(rx => {
       ctx.beginPath();
       ctx.arc(rx, -20, 82, 0, Math.PI * 2);
@@ -119,7 +215,6 @@ function renderProcedural16x9ArtworkDataUrl(
       ctx.fill();
     });
   } else {
-    // Acoustic signal waveform on screen
     ctx.beginPath();
     ctx.moveTo(-200, 0);
     for (let x = -200; x <= 200; x += 10) {
@@ -131,7 +226,6 @@ function renderProcedural16x9ArtworkDataUrl(
     ctx.stroke();
   }
 
-  // Glowing REC indicator
   ctx.beginPath();
   ctx.arc(175, 105, 14, 0, Math.PI * 2);
   ctx.fillStyle = '#ef4444';
@@ -140,7 +234,6 @@ function renderProcedural16x9ArtworkDataUrl(
   ctx.fill();
   ctx.restore();
 
-  // Atmospheric snow / dust particles
   ctx.fillStyle = 'rgba(255,255,255,0.22)';
   for (let i = 0; i < 140; i++) {
     const px = ((i * 197 + variantIndex * 83) % c.width) + (promptText.length % 17);
@@ -181,7 +274,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_3', 3)
   ]);
   const [selectedMasterVariantIdx, setSelectedMasterVariantIdx] = useState<number>(0);
+  const [attachedToYoutubeIdx, setAttachedToYoutubeIdx] = useState<number | null>(0);
   const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
+  const [imagenError, setImagenError] = useState<string | null>(null);
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
@@ -209,7 +304,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
 
-  // 2. Генерация 16:9 без водяных знаков через официальный Imagen 3 API (imagen-3.0-generate-002)
+  // 2. Генерация 16:9 без водяных знаков через официальный Imagen 3 API (imagen-3.0-generate-002:predict)
   const [promptStylePreset, setPromptStylePreset] = useState<
     'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
   >('mystery_dark');
@@ -402,14 +497,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setImgB(selectedImage);
       }
       onNotify(
-        `✨ Вариант #${idx + 1} установлен как «Выбранный мастер-кадр» (Обложка ${targetSlot})!`,
+        `✨ Вариант #${idx + 1} выделен как «Выбранный мастер-кадр» (Обложка ${targetSlot})!`,
         'success'
       );
     };
     selectedImage.src = url;
   };
 
-  // Скачивание конкретного варианта из сетки 2x2 в 4K с наложенным хуком или в чистом виде
+  // Кнопка «📥 Скачать мастер-кадр»
   const handleDownloadVariantFromGrid = (idx: number) => {
     const url = batchVariants[idx];
     if (!url) return;
@@ -420,113 +515,105 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       offscreen.height = 2160;
       drawCoverOnCanvas(offscreen, tempImg, thumbTitle, thumbBadge);
       const link = document.createElement('a');
-      link.download = `imagen3_variant_${idx + 1}_4k_16x9.jpg`;
+      link.download = `master_frame_variant_${idx + 1}_4k_16x9.jpg`;
       link.href = offscreen.toDataURL('image/jpeg', 0.96);
       link.click();
-      onNotify(`📥 Вариант #${idx + 1} (4K 16:9) скачан на устройство!`, 'success');
+      onNotify(`📥 Мастер-кадр #${idx + 1} (4K 16:9) скачан на устройство!`, 'success');
     };
     tempImg.src = url;
   };
 
+  // Кнопка «Привязать к YouTube релизу»
+  const handleAttachToYoutubeRelease = (idx: number) => {
+    const url = batchVariants[idx];
+    if (!url) return;
+    setSelectedMasterVariantIdx(idx);
+    setAttachedToYoutubeIdx(idx);
+    try {
+      localStorage.setItem(
+        'youtube_release_thumbnail',
+        JSON.stringify({
+          variantIndex: idx + 1,
+          titleHook: thumbTitle,
+          badge: thumbBadge,
+          attachedAt: new Date().toISOString()
+        })
+      );
+    } catch {
+      // ignore storage quota errors for large data-urls
+    }
+    handleSelectBatchVariant(idx, 'A');
+    onNotify(
+      `🚀 Мастер-кадр #${idx + 1} успешно привязан к YouTube релизу и установлен на 4K обложку!`,
+      'success'
+    );
+  };
+
+  // Автономная генерация 4-х 4K кадров на Canvas (при отсутствии квоты/биллинга Imagen 3)
+  const handleGenerateProceduralBatchFallback = (targetSlot: 'A' | 'B' = 'A') => {
+    const fallbackUrls = [0, 1, 2, 3].map(idx =>
+      renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
+    );
+    setBatchVariants(fallbackUrls);
+    setSelectedMasterVariantIdx(0);
+    setImagenError(null);
+
+    const fallbackImg = new Image();
+    fallbackImg.onload = () => {
+      if (targetSlot === 'A') setImgA(fallbackImg);
+      else {
+        setAbModeEnabled(true);
+        setImgB(fallbackImg);
+      }
+      onNotify(
+        '🎨 Сгенерированы 4 автономных 4K варианта обложки (16:9) в сетку 2×2!',
+        'success'
+      );
+    };
+    fallbackImg.src = fallbackUrls[0];
+  };
+
   // ============================================================================
-  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 3 (sampleCount: 4, aspectRatio: "16:9", image/jpeg)
+  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 3 (:predict, sampleCount: 4, aspectRatio: "16:9", image/jpeg)
   // ============================================================================
   const handleGenerateImagen3Cover = async (targetSlot: 'A' | 'B' = 'A') => {
     setIsGeneratingImagen(true);
+    setImagenError(null);
     try {
-      const response = await fetch('/api/imagen/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          promptText: activePromptText,
-          sampleCount: 4
-        })
-      });
+      const dataUrls = await generateImagenBatch(activePromptText, undefined, 4);
 
-      const data = (await response.json().catch(() => ({}))) as {
-        ok?: boolean;
-        bytesBase64Encoded?: string;
-        mimeType?: string;
-        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
-        error?: string;
-      };
-
-      if (response.ok && data.ok && (data.predictions?.length || data.bytesBase64Encoded)) {
-        const rawPreds =
-          Array.isArray(data.predictions) && data.predictions.length > 0
-            ? data.predictions
-            : [{ bytesBase64Encoded: data.bytesBase64Encoded, mimeType: data.mimeType }];
-
-        const urls: string[] = [];
-        for (let i = 0; i < 4; i++) {
-          const item = rawPreds[i];
-          if (item?.bytesBase64Encoded) {
-            urls.push(`data:${item.mimeType || 'image/jpeg'};base64,${item.bytesBase64Encoded}`);
-          } else {
-            urls.push(renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, i));
-          }
-        }
-
-        setBatchVariants(urls);
-        setSelectedMasterVariantIdx(0);
-
-        const generatedImg = new Image();
-        generatedImg.onload = () => {
-          if (targetSlot === 'A') setImgA(generatedImg);
-          else {
-            setAbModeEnabled(true);
-            setImgB(generatedImg);
-          }
-          onNotify(
-            `🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) сгенерирован через Imagen 3 (sampleCount: 4)!`,
-            'success'
-          );
-        };
-        generatedImg.src = urls[0];
-        setIsGeneratingImagen(false);
-        return;
+      const paddedUrls: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        paddedUrls.push(
+          dataUrls[i] ||
+            dataUrls[0] ||
+            renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, i)
+        );
       }
 
-      // Если API-ключ без платного биллинга Imagen 3, генерируем 4 разных 16:9 4K кадра для сетки 2x2
-      const fallbackUrls = [0, 1, 2, 3].map(idx =>
-        renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
-      );
-      setBatchVariants(fallbackUrls);
+      setBatchVariants(paddedUrls);
       setSelectedMasterVariantIdx(0);
 
-      const fallbackImg = new Image();
-      fallbackImg.onload = () => {
-        if (targetSlot === 'A') setImgA(fallbackImg);
+      const generatedImg = new Image();
+      generatedImg.onload = () => {
+        if (targetSlot === 'A') setImgA(generatedImg);
         else {
           setAbModeEnabled(true);
-          setImgB(fallbackImg);
+          setImgB(generatedImg);
         }
         onNotify(
-          `🎨 Сгенерирована сетка 2×2 (4 варианта 16:9 без водяных знаков) — вариант #1 выбран как мастер-кадр!`,
+          '🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) успешно сгенерирован через Imagen 3 (:predict)!',
           'success'
         );
       };
-      fallbackImg.src = fallbackUrls[0];
-    } catch {
-      const fallbackUrls = [0, 1, 2, 3].map(idx =>
-        renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
-      );
-      setBatchVariants(fallbackUrls);
-      setSelectedMasterVariantIdx(0);
-
-      const fallbackImg = new Image();
-      fallbackImg.onload = () => {
-        if (targetSlot === 'A') setImgA(fallbackImg);
-        else {
-          setAbModeEnabled(true);
-          setImgB(fallbackImg);
-        }
-        onNotify(
-          `🎨 Сгенерирована сетка 2×2 (4 варианта 16:9 без водяных знаков)!`,
-          'success'
-        );
-      };
-      fallbackImg.src = fallbackUrls[0];
+      generatedImg.src = paddedUrls[0];
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Ошибка Imagen 3 API: Проверьте валидность API-ключа и квоту Imagen 3.';
+      setImagenError(msg);
+      onNotify(msg, 'error');
     } finally {
       setIsGeneratingImagen(false);
     }
@@ -661,17 +748,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           onClick={() => setZoomedVariantIdx(null)}
         >
           <div
-            className="bg-[#111622] border border-emerald-500/50 rounded-2xl max-w-5xl w-full p-5 space-y-4 shadow-2xl"
+            className="bg-[#111622] border-2 border-[#00f2fe] rounded-2xl max-w-5xl w-full p-5 space-y-4 shadow-[0_0_25px_rgba(0,242,254,0.35)]"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <ZoomIn className="w-5 h-5 text-emerald-400" />
+                <ZoomIn className="w-5 h-5 text-[#00f2fe]" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
                   Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Imagen 3 • 16:9)
                 </h3>
                 {selectedMasterVariantIdx === zoomedVariantIdx && (
-                  <span className="text-[11px] font-bold bg-emerald-500/20 border border-emerald-400 text-emerald-300 px-2.5 py-0.5 rounded-lg">
+                  <span className="text-[11px] font-bold bg-[#00f2fe]/20 border border-[#00f2fe] text-[#00f2fe] px-2.5 py-0.5 rounded-lg">
                     Выбранный мастер-кадр
                   </span>
                 )}
@@ -697,13 +784,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  handleSelectBatchVariant(zoomedVariantIdx, 'A');
+                  handleAttachToYoutubeRelease(zoomedVariantIdx);
                   setZoomedVariantIdx(null);
                 }}
-                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                className="bg-[#00f2fe] hover:bg-[#00f2fe]/90 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Выбрать как мастер-кадр (Слот A)</span>
+                <Link2 className="w-4 h-4" />
+                <span>Привязать к YouTube релизу</span>
               </button>
               <button
                 type="button"
@@ -711,7 +798,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>📥 Скачать этот вариант (4K)</span>
+                <span>📥 Скачать мастер-кадр</span>
               </button>
             </div>
           </div>
@@ -727,11 +814,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-Студия (Imagen 3)
             </h2>
             <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-              sampleCount: 4 • 2×2
+              :predict • 2×2
             </span>
           </div>
 
-          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через официальный Imagen 3 API */}
+          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через официальный Imagen 3 API (:predict) */}
           <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-bold text-emerald-300 uppercase">
@@ -767,6 +854,40 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <span>Imagen 3 (2×2) → B</span>
               </button>
             </div>
+
+            {/* КРАСНЫЙ АЛЕРТ ПОД КНОПКОЙ ЗАПУСКА ПРИ ОШИБКЕ IMAGEN 3 API (НЕ БЛОКИРУЕТ ОСТАЛЬНОЙ ИНТЕРФЕЙС) */}
+            {imagenError && (
+              <div
+                role="alert"
+                className="bg-rose-950/80 border border-rose-500/70 rounded-xl p-3 text-xs text-rose-200 space-y-2"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <p className="font-bold text-rose-300">Ошибка запроса Imagen 3 (:predict)</p>
+                    <p className="text-[11px] text-rose-200/90 break-words font-mono leading-relaxed">
+                      {imagenError}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateProceduralBatchFallback('A')}
+                    className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2.5 py-1 rounded-lg text-[11px] cursor-pointer transition"
+                  >
+                    🎨 Сгенерировать 4 автономных 4K кадра (Canvas 2×2)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImagenError(null)}
+                    className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 cursor-pointer"
+                  >
+                    Скрыть
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Переключатели: YouTube UI Grid, A/B-тестер и Ч/Б фильтр контрастности */}
@@ -932,9 +1053,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             {/* ХОЛСТ ОБЛОЖКИ A */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-amber-400 uppercase">
-                  Обложка A — Выбранный мастер-кадр #{selectedMasterVariantIdx + 1}{' '}
-                  {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
+                <span className="font-bold text-amber-400 uppercase flex items-center gap-2">
+                  <span>
+                    Обложка A — Мастер-кадр #{selectedMasterVariantIdx + 1}{' '}
+                    {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
+                  </span>
+                  {attachedToYoutubeIdx === selectedMasterVariantIdx && (
+                    <span className="text-[10px] bg-[#00f2fe]/15 border border-[#00f2fe]/60 text-[#00f2fe] px-2 py-0.5 rounded font-mono">
+                      ✓ Привязан к YouTube релизу
+                    </span>
+                  )}
                 </span>
                 <span className="text-[11px] font-mono text-slate-400">
                   16:9 • Watermark-Free 4K
@@ -1081,17 +1209,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         </div>
       </div>
 
-      {/* СЕТКА 2x2 IMAGEN 3 (4 ВАРИАНТА ОБЛОЖКИ 16:9 С ВЫБОРОМ МАСТЕР-КАДРА, УВЕЛИЧЕНИЕМ И СКАЧИВАНИЕМ) */}
-      <div className="bg-[#111622] border border-emerald-500/30 rounded-2xl p-6 space-y-4">
+      {/* СЕТКА 2x2 IMAGEN 3 (grid grid-cols-2 gap-3 w-full my-3) */}
+      <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2.5">
-            <Grid className="w-5 h-5 text-emerald-400" />
+            <Grid className="w-5 h-5 text-[#00f2fe]" />
             <div>
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Сетка 2×2 вариантов обложки (Imagen 3 • sampleCount: 4 • 16:9 JPEG)
+                Сетка 2×2 вариантов обложки (Imagen 3 • :predict • sampleCount: 4 • 16:9 JPEG)
               </h3>
               <p className="text-xs text-slate-400">
-                Кликните по любому из 4-х вариантов, чтобы выделить его неоновой рамкой как «Выбранный мастер-кадр»
+                Кликните по любой из 4-х карточек для выбора активного мастер-кадра с неоновой подсветкой
               </p>
             </div>
           </div>
@@ -1107,91 +1235,164 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             ) : (
               <Wand2 className="w-4 h-4" />
             )}
-            <span>Сгенерировать 4 новых варианта (2×2 Imagen 3)</span>
+            <span>Сгенерировать 4 варианта (Imagen 3 :predict)</span>
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {batchVariants.map((variantUrl, idx) => {
-            const isMaster = selectedMasterVariantIdx === idx;
-            return (
-              <div
-                key={`grid-variant-${idx}`}
-                onClick={() => handleSelectBatchVariant(idx, 'A')}
-                className={`rounded-2xl p-3.5 transition cursor-pointer flex flex-col justify-between gap-3 ${
-                  isMaster
-                    ? 'bg-emerald-950/25 border-2 border-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.35)]'
-                    : 'bg-[#0b0f17] border border-slate-800 hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-200 flex items-center gap-2">
-                    <span className="font-mono text-amber-400">Вариант #{idx + 1}</span>
-                    <span className="text-[10px] font-mono text-slate-400">(16:9 • image/jpeg)</span>
+        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 3 */}
+        {isGeneratingImagen ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-2.5 py-2 text-xs font-bold text-[#00f2fe]">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Генерация 4 вариантов кадра через Imagen 3...</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 w-full my-3">
+              {[0, 1, 2, 3].map(skeletonIdx => (
+                <div
+                  key={`skeleton-${skeletonIdx}`}
+                  className="aspect-video w-full rounded-xl bg-slate-900/90 border border-slate-800 animate-pulse flex flex-col items-center justify-center gap-2 p-4"
+                >
+                  <Wand2 className="w-6 h-6 text-[#00f2fe]/60 animate-bounce" />
+                  <span className="text-[11px] font-mono text-slate-400 text-center">
+                    Генерация 4 вариантов кадра через Imagen 3... (Кадр #{skeletonIdx + 1})
                   </span>
-                  {isMaster ? (
-                    <span className="text-[11px] font-bold bg-emerald-500 text-slate-950 px-2.5 py-0.5 rounded-lg flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Выбранный мастер-кадр
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* Контейнер превью: 2 колонки на 2 строки (grid grid-cols-2 gap-3 w-full my-3) */
+          <div className="grid grid-cols-2 gap-3 w-full my-3">
+            {batchVariants.map((variantUrl, idx) => {
+              const isMaster = selectedMasterVariantIdx === idx;
+              const isAttached = attachedToYoutubeIdx === idx;
+
+              return (
+                <div
+                  key={`grid-variant-${idx}`}
+                  onClick={() => handleSelectBatchVariant(idx, 'A')}
+                  className={`rounded-2xl p-3 transition-all duration-200 cursor-pointer flex flex-col justify-between gap-2.5 ${
+                    isMaster
+                      ? 'bg-[#071521] border-2 border-[#00f2fe] shadow-[0_0_15px_rgba(0,242,254,0.4)]'
+                      : 'bg-[#0b0f17] border border-slate-800 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-1 text-xs">
+                    <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                      <span className="font-mono text-[#00f2fe]">Кадр #{idx + 1}</span>
+                      <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">
+                        (16:9 • JPEG)
+                      </span>
                     </span>
+                    {isMaster ? (
+                      <span className="text-[10px] sm:text-[11px] font-bold bg-[#00f2fe] text-slate-950 px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-sm">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Выбранный мастер-кадр
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">Клик для выбора</span>
+                    )}
+                  </div>
+
+                  <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
+                    <img
+                      src={variantUrl}
+                      alt={`Imagen 3 16:9 Variant ${idx + 1}`}
+                      className={`w-full h-full object-cover ${
+                        bwContrastFilter ? 'grayscale contrast-125' : ''
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setZoomedVariantIdx(idx);
+                      }}
+                      title="🔍 Увеличить"
+                      className="absolute top-2 right-2 bg-black/75 hover:bg-black text-slate-200 border border-white/15 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <ZoomIn className="w-3 h-3 text-[#00f2fe]" />
+                      <span className="hidden sm:inline">🔍 Увеличить</span>
+                    </button>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-2.5 flex items-end justify-between">
+                      <span className="text-white font-black text-xs sm:text-sm tracking-wide drop-shadow">
+                        {(thumbTitle || 'DO NOT PLAY!')
+                          .trim()
+                          .split(/\s+/)
+                          .slice(0, 3)
+                          .join(' ')
+                          .toUpperCase()}
+                      </span>
+                      <span className="bg-black/90 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        {youtubeDurationBadge || '3:00:00'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Под выбранной карточкой отображаются кнопки: «📥 Скачать мастер-кадр» и «Привязать к YouTube релизу» */}
+                  {isMaster ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDownloadVariantFromGrid(idx);
+                        }}
+                        className="bg-[#00f2fe] hover:bg-[#00f2fe]/90 text-slate-950 font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0" />
+                        <span>📥 Скачать мастер-кадр</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleAttachToYoutubeRelease(idx);
+                        }}
+                        className={`font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition border ${
+                          isAttached
+                            ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                            : 'bg-slate-800 hover:bg-slate-700 border-[#00f2fe]/50 text-[#00f2fe]'
+                        }`}
+                      >
+                        <Link2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {isAttached ? '✓ Привязано к релизу' : 'Привязать к YouTube релизу'}
+                        </span>
+                      </button>
+                    </div>
                   ) : (
-                    <span className="text-[11px] text-slate-400">Кликните для выбора</span>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setZoomedVariantIdx(idx);
+                        }}
+                        className="bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-semibold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
+                      >
+                        <ZoomIn className="w-3 h-3 text-amber-400" />
+                        <span>🔍 Увеличить</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDownloadVariantFromGrid(idx);
+                        }}
+                        className="bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-semibold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
+                      >
+                        <Download className="w-3 h-3 text-emerald-400" />
+                        <span>📥 Скачать</span>
+                      </button>
+                    </div>
                   )}
                 </div>
-
-                <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
-                  <img
-                    src={variantUrl}
-                    alt={`Imagen 3 16:9 Variant ${idx + 1}`}
-                    className={`w-full h-full object-cover ${
-                      bwContrastFilter ? 'grayscale contrast-125' : ''
-                    }`}
-                  />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-3 flex items-end justify-between">
-                    <span className="text-white font-black text-sm tracking-wide drop-shadow">
-                      {(thumbTitle || 'DO NOT PLAY!')
-                        .trim()
-                        .split(/\s+/)
-                        .slice(0, 3)
-                        .join(' ')
-                        .toUpperCase()}
-                    </span>
-                    <span className="bg-black/90 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 rounded">
-                      {youtubeDurationBadge || '3:00:00'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Две обязательные кнопки под каждым из 4-х вариантов */}
-                <div className="grid grid-cols-2 gap-2.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setZoomedVariantIdx(idx);
-                    }}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                  >
-                    <ZoomIn className="w-3.5 h-3.5 text-amber-400" />
-                    <span>🔍 Увеличить</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      handleDownloadVariantFromGrid(idx);
-                    }}
-                    className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>📥 Скачать этот вариант</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА IMAGEN 3 / MIDJOURNEY / LEONARDO */}

@@ -157,11 +157,76 @@ Return JSON with:
   });
 
   // ==========================================================================
-  // 3. POST /api/imagen/generate — Официальный вызов Imagen 3 (imagen-3.0-generate-002:predict)
+  // 3. POST /api/imagen/generate — Точный вызов generateImagenBatch (imagen-3.0-generate-002:predict)
   // ==========================================================================
+  async function generateImagenBatch(
+    promptText: string,
+    apiKey: string,
+    sampleCount: number = 4
+  ): Promise<{ dataUrls: string[]; predictions: Array<{ bytesBase64Encoded: string; mimeType: string }> }> {
+    // Эндпоинт Imagen 3 требует метода :predict, а не :generateContent
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+    const payload = {
+      instances: [{ prompt: promptText }],
+      parameters: {
+        sampleCount: Number(sampleCount),
+        aspectRatio: '16:9',
+        outputMimeType: 'image/jpeg'
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorDetails = await response.text();
+      throw new Error(`Ошибка Imagen 3 API (${response.status}): ${errorDetails}`);
+    }
+
+    const result = (await response.json()) as {
+      predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
+    };
+
+    if (!result.predictions || !result.predictions.length) {
+      throw new Error(
+        'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+      );
+    }
+
+    const validPredictions = result.predictions
+      .filter(pred => Boolean(pred?.bytesBase64Encoded))
+      .map(pred => ({
+        bytesBase64Encoded: pred.bytesBase64Encoded || '',
+        mimeType: pred.mimeType || 'image/jpeg'
+      }));
+
+    if (!validPredictions.length) {
+      throw new Error(
+        'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+      );
+    }
+
+    // Извлекаем чистый base64 и преобразуем в data-url
+    const dataUrls = validPredictions.map(pred => {
+      const base64 = pred.bytesBase64Encoded;
+      return `data:image/jpeg;base64,${base64}`;
+    });
+
+    return { dataUrls, predictions: validPredictions };
+  }
+
   app.post('/api/imagen/generate', async (req, res) => {
     try {
-      const { promptText } = req.body as { promptText?: string };
+      const { promptText, sampleCount } = req.body as {
+        promptText?: string;
+        sampleCount?: number;
+      };
       if (!promptText || !promptText.trim()) {
         res.status(400).json({ ok: false, error: 'Prompt text is required' });
         return;
@@ -171,60 +236,23 @@ Return JSON with:
       if (!apiKey) {
         res.status(500).json({
           ok: false,
-          error: 'GEMINI_API_KEY is not configured in environment.'
+          error: 'GEMINI_API_KEY не настроен на сервере.'
         });
         return;
       }
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-      const payload = {
-        instances: [{ prompt: promptText.trim() }],
-        parameters: {
-          sampleCount: 4,
-          aspectRatio: '16:9',
-          outputMimeType: 'image/jpeg'
-        }
-      };
-
-      const imagenRes = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'aistudio-build'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const data = (await imagenRes.json().catch(() => ({}))) as {
-        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
-        error?: { message?: string };
-      };
-
-      if (!imagenRes.ok) {
-        const errMsg =
-          data?.error?.message || `Imagen 3 API HTTP ${imagenRes.status}`;
-        res.status(imagenRes.status).json({ ok: false, error: errMsg });
-        return;
-      }
-
-      const validPredictions = (data?.predictions || []).filter(p => Boolean(p?.bytesBase64Encoded));
-      const base64Image = validPredictions[0]?.bytesBase64Encoded;
-      if (!base64Image) {
-        res.status(500).json({
-          ok: false,
-          error: 'No bytesBase64Encoded returned in predictions'
-        });
-        return;
-      }
+      const { dataUrls, predictions } = await generateImagenBatch(
+        promptText.trim(),
+        apiKey,
+        sampleCount || 4
+      );
 
       res.json({
         ok: true,
-        bytesBase64Encoded: base64Image,
-        mimeType: validPredictions[0]?.mimeType || 'image/jpeg',
-        predictions: validPredictions.map(p => ({
-          bytesBase64Encoded: p.bytesBase64Encoded,
-          mimeType: p.mimeType || 'image/jpeg'
-        }))
+        images: dataUrls,
+        bytesBase64Encoded: predictions[0].bytesBase64Encoded,
+        mimeType: predictions[0].mimeType,
+        predictions
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
