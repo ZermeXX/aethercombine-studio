@@ -765,8 +765,14 @@ jobs:
           EOF`;
 
 export default function App() {
-  // Active tab state
+  // Active tab state & animation pulse trigger key
   const [activeTab, setActiveTab] = useState<TabId>('combine');
+  const [tabPulseKey, setTabPulseKey] = useState<number>(0);
+
+  const handleSelectTab = (nextTab: TabId) => {
+    setActiveTab(nextTab);
+    setTabPulseKey(prev => prev + 1);
+  };
 
   // Combine studio state
   const [scenes, setScenes] = useState<SceneItem[]>([]);
@@ -3729,18 +3735,29 @@ export default function App() {
         </div>
 
         {/* Верхнее навигационное меню с сочными цветными 3D-градиентными значками (32x32px) */}
-        <nav className="flex flex-wrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner">
+        <nav
+          role="tablist"
+          aria-label="Цехи продакшна AetherCombine"
+          className="flex flex-wrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner"
+        >
           {/* 1. 🎬 Повествовательный монтаж */}
           <button
-            onClick={() => setActiveTab('combine')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'combine'}
+            onClick={() => handleSelectTab('combine')}
             id="tab-combine"
-            className={`group tab-btn nav-tab-combine flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-combine flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'combine'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-purple-500/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-combine" aria-hidden="true">
+            <span
+              key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
+              className="icon-container nav-icon-box nav-icon-combine"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
                 🎬
               </span>
@@ -3750,15 +3767,22 @@ export default function App() {
 
           {/* 2. 🔄 Многочасовой Луп (N-Слотов) */}
           <button
-            onClick={() => setActiveTab('loop')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'loop'}
+            onClick={() => handleSelectTab('loop')}
             id="tab-loop"
-            className={`group tab-btn nav-tab-loop flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-loop flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'loop'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-amber-500/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-loop" aria-hidden="true">
+            <span
+              key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
+              className="icon-container nav-icon-box nav-icon-loop"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
                 🔁
               </span>
@@ -3768,15 +3792,22 @@ export default function App() {
 
           {/* 3. ⚡ Сценарий и Хуки */}
           <button
-            onClick={() => setActiveTab('hooks')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'hooks'}
+            onClick={() => handleSelectTab('hooks')}
             id="tab-hooks"
-            className={`group tab-btn nav-tab-hooks flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-hooks flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'hooks'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-yellow-400/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-hooks" aria-hidden="true">
+            <span
+              key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
+              className="icon-container nav-icon-box nav-icon-hooks"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
                 ⚡
               </span>
@@ -3786,15 +3817,22 @@ export default function App() {
 
           {/* 4. 🎙️ Дикторский цех */}
           <button
-            onClick={() => setActiveTab('voice')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'voice'}
+            onClick={() => handleSelectTab('voice')}
             id="tab-voice"
-            className={`group tab-btn nav-tab-voice flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-voice flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'voice'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-pink-500/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-voice" aria-hidden="true">
+            <span
+              key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
+              className="icon-container nav-icon-box nav-icon-voice"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
                 🎙️
               </span>
@@ -3804,15 +3842,22 @@ export default function App() {
 
           {/* 5. 📦 YouTube SEO */}
           <button
-            onClick={() => setActiveTab('seo')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'seo'}
+            onClick={() => handleSelectTab('seo')}
             id="tab-seo"
-            className={`group tab-btn nav-tab-seo flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-seo flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'seo'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-sky-400/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-seo" aria-hidden="true">
+            <span
+              key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
+              className="icon-container nav-icon-box nav-icon-seo"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
                 📦
               </span>
@@ -3822,15 +3867,22 @@ export default function App() {
 
           {/* 6. 🎨 4K Превью и Арт-цех */}
           <button
-            onClick={() => setActiveTab('thumb')}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'thumb'}
+            onClick={() => handleSelectTab('thumb')}
             id="tab-thumb"
-            className={`group tab-btn nav-tab-thumb flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
+            className={`group tab-btn nav-tab nav-tab-thumb flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
               activeTab === 'thumb'
-                ? 'tab-btn-active'
+                ? 'active tab-btn-active'
                 : 'border border-transparent hover:bg-slate-800/75 hover:border-emerald-400/30'
             }`}
           >
-            <span className="nav-icon-box nav-icon-thumb" aria-hidden="true">
+            <span
+              key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
+              className="icon-container nav-icon-box nav-icon-thumb"
+              aria-hidden="true"
+            >
               <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
                 🎨
               </span>
