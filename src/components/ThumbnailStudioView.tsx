@@ -23,7 +23,8 @@ import {
   Grid,
   CheckCircle2,
   AlertTriangle,
-  Link2
+  Link2,
+  Upload
 } from 'lucide-react';
 
 declare global {
@@ -40,6 +41,18 @@ interface ThumbnailStudioViewProps {
   youtubeMockTitle?: string;
   scriptContext?: string;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
+}
+
+export class ImagenApiError extends Error {
+  status: number;
+  quotaExhausted: boolean;
+
+  constructor(message: string, status: number = 500, quotaExhausted: boolean = false) {
+    super(message);
+    this.name = 'ImagenApiError';
+    this.status = status;
+    this.quotaExhausted = quotaExhausted;
+  }
 }
 
 /**
@@ -62,6 +75,8 @@ export async function generateImagenThumbnails(
 
   const result = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
+    statusCode?: number;
+    quotaExhausted?: boolean;
     modelUsed?: string;
     images?: string[];
     predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
@@ -69,9 +84,15 @@ export async function generateImagenThumbnails(
   };
 
   if (!response.ok || !result.ok) {
-    throw new Error(
-      result.error || `Ошибка генерации Imagen 4 (${response.status}): Проверьте баланс квоты ключа.`
-    );
+    const status = result.statusCode || response.status;
+    const rawMsg =
+      result.error || `Ошибка генерации Imagen 4 (${status}): Проверьте баланс квоты ключа.`;
+    const isQuota =
+      Boolean(result.quotaExhausted) ||
+      status === 429 ||
+      status === 403 ||
+      /429|403|RESOURCE_EXHAUSTED|limit:\s*0|PERMISSION_DENIED|quota/i.test(rawMsg);
+    throw new ImagenApiError(rawMsg, status, isQuota);
   }
 
   if (Array.isArray(result.images) && result.images.length > 0) {
@@ -79,7 +100,11 @@ export async function generateImagenThumbnails(
   }
 
   if (!result.predictions || !result.predictions.length) {
-    throw new Error('API не вернуло варианты изображений. Проверьте баланс квоты ключа.');
+    throw new ImagenApiError(
+      'API не вернуло варианты изображений. Проверьте баланс квоты ключа.',
+      response.status,
+      false
+    );
   }
 
   return {
@@ -147,7 +172,35 @@ export function renderThumbnailsGrid(
   containerElement.appendChild(grid);
 }
 
-// Генерация высокодетализированного процедурного 16:9 4K рендера (для стартовой сетки 2x2 и резервной генерации)
+const LOCAL_SCENE_LABELS = [
+  'Глубокая ночная метель с частицами',
+  'Тёплое янтарное свечение очага',
+  'Ледяное северное сияние',
+  'Холодный рассветный туман'
+] as const;
+
+function drawCoverImageToCanvas(
+  ctx: CanvasRenderingContext2D,
+  source: HTMLImageElement | HTMLVideoElement,
+  srcW: number,
+  srcH: number,
+  destW: number,
+  destH: number,
+  zoom: number = 1,
+  offsetXRatio: number = 0,
+  offsetYRatio: number = 0
+): void {
+  const safeSrcW = Math.max(1, srcW);
+  const safeSrcH = Math.max(1, srcH);
+  const baseScale = Math.max(destW / safeSrcW, destH / safeSrcH) * zoom;
+  const drawW = safeSrcW * baseScale;
+  const drawH = safeSrcH * baseScale;
+  const x = (destW - drawW) / 2 + offsetXRatio * destW;
+  const y = (destH - drawH) / 2 + offsetYRatio * destH;
+  ctx.drawImage(source, x, y, drawW, drawH);
+}
+
+// Генерация 4 кинематографических 16:9 фонов (1920x1080) средствами HTML5 Canvas
 function renderProcedural16x9ArtworkDataUrl(
   stylePreset: string,
   promptText: string,
@@ -159,106 +212,220 @@ function renderProcedural16x9ArtworkDataUrl(
   const ctx = c.getContext('2d');
   if (!ctx) return '';
 
-  const palettesByVariant: Array<Record<string, [string, string, string]>> = [
-    {
-      mystery_dark: ['#060b14', '#16243d', '#00f2fe'],
-      ambient_4k: ['#050c1a', '#0f294a', '#38bdf8'],
-      truecrime_contrast: ['#0a090d', '#291218', '#ef4444'],
-      scifi_neon: ['#04120e', '#0d3328', '#10b981']
-    },
-    {
-      mystery_dark: ['#090814', '#22183b', '#f59e0b'],
-      ambient_4k: ['#04101e', '#13365c', '#60a5fa'],
-      truecrime_contrast: ['#0f070b', '#38121b', '#f43f5e'],
-      scifi_neon: ['#041417', '#0e3b43', '#2dd4bf']
-    },
-    {
-      mystery_dark: ['#050e14', '#132c3d', '#f97316'],
-      ambient_4k: ['#070b19', '#1b2854', '#818cf8'],
-      truecrime_contrast: ['#0d0a08', '#331d12', '#fb923c'],
-      scifi_neon: ['#06130b', '#143d23', '#34d399']
-    },
-    {
-      mystery_dark: ['#0a0712', '#26142e', '#eab308'],
-      ambient_4k: ['#040f1a', '#0c3142', '#22d3ee'],
-      truecrime_contrast: ['#090912', '#1f1638', '#e11d48'],
-      scifi_neon: ['#031214', '#0b343d', '#06b6d4']
+  const seed = Array.from(promptText || 'aether').reduce(
+    (acc, ch, i) => acc + ch.charCodeAt(0) * (i + 3),
+    17
+  );
+  const themeIdx = variantIndex % 4;
+
+  // Хелпер горного хребта на горизонте
+  const drawMountainLayer = (
+    baseY: number,
+    amplitude: number,
+    freq: number,
+    phase: number,
+    fillStyle: string | CanvasGradient
+  ) => {
+    ctx.beginPath();
+    ctx.moveTo(0, c.height);
+    for (let x = 0; x <= c.width; x += 24) {
+      const ridge =
+        Math.sin(x * freq + phase) * amplitude +
+        Math.cos(x * freq * 2.3 + phase * 1.7) * (amplitude * 0.42) +
+        Math.sin(x * freq * 5.1 + seed * 0.01) * (amplitude * 0.15);
+      ctx.lineTo(x, baseY - Math.abs(ridge));
     }
-  ];
+    ctx.lineTo(c.width, c.height);
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  };
 
-  const paletteSet = palettesByVariant[variantIndex % 4] || palettesByVariant[0];
-  const [bg1, bg2, accent] = paletteSet[stylePreset] || paletteSet.mystery_dark;
+  if (themeIdx === 0) {
+    // 1. Глубокая ночная метель с частицами
+    const sky = ctx.createLinearGradient(0, 0, c.width * 0.3, c.height);
+    sky.addColorStop(0, '#020612');
+    sky.addColorStop(0.5, '#0b1830');
+    sky.addColorStop(1, '#040a16');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, c.width, c.height);
 
-  const grad = ctx.createLinearGradient(0, 0, c.width, c.height);
-  grad.addColorStop(0, bg1);
-  grad.addColorStop(0.55, bg2);
-  grad.addColorStop(1, '#04060b');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, c.width, c.height);
+    const moonGlow = ctx.createRadialGradient(1320, 310, 20, 1320, 310, 720);
+    moonGlow.addColorStop(0, 'rgba(56, 189, 248, 0.36)');
+    moonGlow.addColorStop(0.45, 'rgba(14, 165, 233, 0.14)');
+    moonGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = moonGlow;
+    ctx.fillRect(0, 0, c.width, c.height);
 
-  const focalX = c.width * (0.64 + (variantIndex % 2) * 0.06);
-  const focalY = c.height * (0.42 + Math.floor(variantIndex / 2) * 0.07);
+    drawMountainLayer(890, 210, 0.0032, 0.8, '#081326');
+    drawMountainLayer(970, 150, 0.0046, 2.4, '#050c1a');
 
-  const glow = ctx.createRadialGradient(focalX, focalY, 40, focalX, focalY, 780);
-  glow.addColorStop(0, accent + '66');
-  glow.addColorStop(0.5, accent + '1a');
-  glow.addColorStop(1, 'transparent');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, c.width, c.height);
-
-  ctx.save();
-  ctx.translate(focalX, focalY + 35);
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 5;
-  ctx.fillStyle = '#090e1a';
-  ctx.beginPath();
-  ctx.roundRect(-240, -160, 480, 320, 24);
-  ctx.fill();
-  ctx.stroke();
-
-  if (variantIndex % 2 === 0) {
-    [-110, 110].forEach(rx => {
+    // Полосы ветра и метели
+    ctx.save();
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.16)';
+    for (let i = 0; i < 160; i++) {
+      const sx = ((i * 211 + seed) % (c.width + 400)) - 200;
+      const sy = (i * 97 + seed * 3) % c.height;
+      const len = 35 + ((i * 19) % 90);
+      ctx.lineWidth = 1 + (i % 2);
       ctx.beginPath();
-      ctx.arc(rx, -20, 82, 0, Math.PI * 2);
-      ctx.fillStyle = '#111a2e';
-      ctx.fill();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + len * 1.4, sy + len * 0.45);
       ctx.stroke();
+    }
+    // Боке-снежинки
+    for (let i = 0; i < 110; i++) {
+      const px = (i * 173 + seed * 7) % c.width;
+      const py = (i * 131 + seed * 5) % c.height;
+      const r = 1.5 + ((i * 7) % 8);
+      ctx.fillStyle = `rgba(224, 242, 254, ${0.12 + (i % 5) * 0.08})`;
       ctx.beginPath();
-      ctx.arc(rx, -20, 24, 0, Math.PI * 2);
-      ctx.fillStyle = accent;
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  } else if (themeIdx === 1) {
+    // 2. Тёплое янтарное свечение очага
+    const bg = ctx.createLinearGradient(0, 0, c.width, c.height);
+    bg.addColorStop(0, '#0a0504');
+    bg.addColorStop(0.5, '#1c0d07');
+    bg.addColorStop(1, '#080403');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    const hearthX = c.width * 0.65;
+    const hearthY = c.height * 0.62;
+    const core = ctx.createRadialGradient(hearthX, hearthY, 30, hearthX, hearthY, 820);
+    core.addColorStop(0, 'rgba(251, 191, 36, 0.72)');
+    core.addColorStop(0.28, 'rgba(245, 158, 11, 0.42)');
+    core.addColorStop(0.6, 'rgba(194, 65, 12, 0.16)');
+    core.addColorStop(1, 'transparent');
+    ctx.fillStyle = core;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    // Холодный контрастный отблеск слева (окно/метель снаружи)
+    const rim = ctx.createRadialGradient(180, 260, 10, 180, 260, 560);
+    rim.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
+    rim.addColorStop(1, 'transparent');
+    ctx.fillStyle = rim;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    // Силуэт уступа/оконной рамы
+    ctx.fillStyle = 'rgba(8, 4, 3, 0.78)';
+    ctx.fillRect(0, 880, c.width, 200);
+
+    // Восходящие искры очага
+    for (let i = 0; i < 140; i++) {
+      const px = hearthX + Math.sin(i * 1.9 + seed) * (120 + (i % 7) * 85);
+      const py = c.height - ((i * 89 + seed * 3) % 920);
+      const r = 1.5 + (i % 5);
+      ctx.fillStyle =
+        i % 3 === 0 ? 'rgba(253, 224, 71, 0.75)' : 'rgba(251, 146, 60, 0.52)';
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (themeIdx === 2) {
+    // 3. Ледяное северное сияние
+    const polar = ctx.createLinearGradient(0, 0, 0, c.height);
+    polar.addColorStop(0, '#020813');
+    polar.addColorStop(0.55, '#071d2c');
+    polar.addColorStop(1, '#030b14');
+    ctx.fillStyle = polar;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    // Звёздное небо
+    for (let i = 0; i < 160; i++) {
+      const sx = (i * 229 + seed * 11) % c.width;
+      const sy = (i * 71 + seed * 7) % (c.height * 0.65);
+      ctx.fillStyle = `rgba(226, 232, 240, ${0.25 + (i % 4) * 0.18})`;
+      ctx.fillRect(sx, sy, (i % 3) + 1, (i % 3) + 1);
+    }
+
+    // Волны северного сияния
+    const auroraBands = [
+      { y: 270, c1: 'rgba(16, 185, 129, 0.48)', c2: 'rgba(6, 182, 212, 0.08)', amp: 95 },
+      { y: 360, c1: 'rgba(34, 211, 238, 0.42)', c2: 'rgba(139, 92, 246, 0.08)', amp: 120 },
+      { y: 210, c1: 'rgba(52, 211, 153, 0.30)', c2: 'rgba(56, 189, 248, 0.04)', amp: 70 }
+    ];
+    auroraBands.forEach((band, bIdx) => {
+      const grad = ctx.createLinearGradient(0, band.y - 160, 0, band.y + 240);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(0.45, band.c1);
+      grad.addColorStop(1, band.c2);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(0, band.y + 220);
+      for (let x = 0; x <= c.width; x += 32) {
+        const y =
+          band.y +
+          Math.sin(x * 0.0032 + bIdx * 1.4) * band.amp +
+          Math.cos(x * 0.007 - bIdx) * 35;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(c.width, band.y + 260);
+      ctx.closePath();
       ctx.fill();
     });
+
+    drawMountainLayer(930, 175, 0.0038, 1.2, '#05101c');
+    drawMountainLayer(1015, 95, 0.0052, 3.1, '#030811');
   } else {
-    ctx.beginPath();
-    ctx.moveTo(-200, 0);
-    for (let x = -200; x <= 200; x += 10) {
-      const amp = Math.sin((x + variantIndex * 45) * 0.06) * (75 - Math.abs(x) * 0.25);
-      ctx.lineTo(x, amp);
+    // 4. Холодный рассветный туман
+    const dawn = ctx.createLinearGradient(0, 0, c.width * 0.4, c.height);
+    dawn.addColorStop(0, '#070d19');
+    dawn.addColorStop(0.45, '#16283f');
+    dawn.addColorStop(0.8, '#263e59');
+    dawn.addColorStop(1, '#09111d');
+    ctx.fillStyle = dawn;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    // Рассветный холодный луч света
+    const sunGlow = ctx.createRadialGradient(1380, 420, 30, 1380, 420, 920);
+    sunGlow.addColorStop(0, 'rgba(186, 230, 253, 0.42)');
+    sunGlow.addColorStop(0.35, 'rgba(148, 163, 184, 0.18)');
+    sunGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = sunGlow;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    drawMountainLayer(810, 190, 0.0029, 0.4, '#132238');
+    // Слои стелющегося утреннего тумана
+    for (let m = 0; m < 4; m++) {
+      const fogY = 660 + m * 95;
+      const fog = ctx.createLinearGradient(0, fogY - 90, 0, fogY + 120);
+      fog.addColorStop(0, 'transparent');
+      fog.addColorStop(0.5, `rgba(203, 213, 225, ${0.14 + m * 0.03})`);
+      fog.addColorStop(1, 'transparent');
+      ctx.fillStyle = fog;
+      ctx.fillRect(0, fogY - 90, c.width, 210);
     }
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 6;
-    ctx.stroke();
+    drawMountainLayer(970, 135, 0.0044, 2.2, '#08101c');
   }
 
-  ctx.beginPath();
-  ctx.arc(175, 105, 14, 0, Math.PI * 2);
-  ctx.fillStyle = '#ef4444';
-  ctx.shadowColor = '#ef4444';
-  ctx.shadowBlur = 28;
-  ctx.fill();
-  ctx.restore();
-
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  for (let i = 0; i < 140; i++) {
-    const px = ((i * 197 + variantIndex * 83) % c.width) + (promptText.length % 17);
-    const py = (i * 113 + variantIndex * 59) % c.height;
-    const r = ((i + variantIndex) % 3) + 1;
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fill();
+  // Стилевой оттенок под пресет проекта
+  if (stylePreset === 'truecrime_contrast') {
+    const crimeGlow = ctx.createRadialGradient(c.width * 0.72, c.height * 0.35, 40, c.width * 0.72, c.height * 0.35, 760);
+    crimeGlow.addColorStop(0, 'rgba(239, 68, 68, 0.18)');
+    crimeGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = crimeGlow;
+    ctx.fillRect(0, 0, c.width, c.height);
+  } else if (stylePreset === 'scifi_neon') {
+    const neonGlow = ctx.createRadialGradient(c.width * 0.65, c.height * 0.5, 40, c.width * 0.65, c.height * 0.5, 700);
+    neonGlow.addColorStop(0, 'rgba(16, 185, 129, 0.18)');
+    neonGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = neonGlow;
+    ctx.fillRect(0, 0, c.width, c.height);
   }
 
-  return c.toDataURL('image/jpeg', 0.95);
+  // Кинематографическая виньетка (улучшает читаемость белого текста слева внизу)
+  const vignette = ctx.createLinearGradient(0, 0, c.width * 0.65, c.height);
+  vignette.addColorStop(0, 'rgba(2, 6, 14, 0.42)');
+  vignette.addColorStop(0.6, 'rgba(2, 6, 14, 0.1)');
+  vignette.addColorStop(1, 'rgba(2, 6, 14, 0.75)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  return c.toDataURL('image/jpeg', 0.94);
 }
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
@@ -290,7 +457,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [attachedToYoutubeIdx, setAttachedToYoutubeIdx] = useState<number | null>(0);
   const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
   const [imagenError, setImagenError] = useState<string | null>(null);
+  const [isQuotaFallbackNotice, setIsQuotaFallbackNotice] = useState<boolean>(false);
   const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
+  const [variantLabels, setVariantLabels] = useState<string[]>([...LOCAL_SCENE_LABELS]);
+  const [isSlicingLocalMedia, setIsSlicingLocalMedia] = useState<boolean>(false);
+  const localMediaInputRef = useRef<HTMLInputElement | null>(null);
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
@@ -565,14 +736,28 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   // Автономная генерация 4-х 4K кадров на Canvas (при отсутствии квоты/биллинга Imagen 4)
-  const handleGenerateProceduralBatchFallback = (targetSlot: 'A' | 'B' = 'A') => {
+  const handleGenerateProceduralBatchFallback = (
+    targetSlot: 'A' | 'B' = 'A',
+    fromQuotaLimit: boolean = false
+  ) => {
     const fallbackUrls = [0, 1, 2, 3].map(idx =>
       renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
     );
     setBatchVariants(fallbackUrls);
+    setVariantLabels([...LOCAL_SCENE_LABELS]);
     setSelectedMasterVariantIdx(0);
+    setLastModelUsed('HTML5 Canvas 4K (локальный fallback)');
     window.selectedMasterThumbnail = fallbackUrls[0];
-    setImagenError(null);
+
+    if (fromQuotaLimit) {
+      setIsQuotaFallbackNotice(true);
+      setImagenError(
+        'Бесплатный ключ Gemini API не поддерживает генерацию картинок (limit: 0) — сгенерированы локальные 4K-фоны'
+      );
+    } else {
+      setIsQuotaFallbackNotice(false);
+      setImagenError(null);
+    }
 
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
@@ -582,19 +767,196 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setImgB(fallbackImg);
       }
       onNotify(
-        '🎨 Сгенерированы 4 автономных 4K варианта обложки (16:9) в сетку 2×2!',
-        'success'
+        fromQuotaLimit
+          ? 'Бесплатный ключ Gemini API не поддерживает генерацию картинок (limit: 0) — сгенерированы локальные 4K-фоны'
+          : '🎨 Сгенерированы 4 локальных 4K фона (16:9) в сетку 2×2!',
+        fromQuotaLimit ? 'info' : 'success'
       );
     };
     fallbackImg.src = fallbackUrls[0];
   };
 
+  // Нарезка 4 вариантов 16:9 превью из загруженного пользователем видео (.mp4/.mov/.webm) или арта (.png/.jpg)
+  const handleSliceLocalMediaToGrid = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const isVideo =
+      file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name);
+    const isImage =
+      file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
+
+    if (!isVideo && !isImage) {
+      onNotify('Поддерживаются видео (.mp4, .mov, .webm) и изображения (.png, .jpg, .webp).', 'error');
+      return;
+    }
+
+    setIsSlicingLocalMedia(true);
+    setImagenError(null);
+    setIsQuotaFallbackNotice(false);
+
+    try {
+      if (isVideo) {
+        const objectUrl = URL.createObjectURL(file);
+        if (videoUrl) URL.revokeObjectURL(videoUrl);
+        setVideoUrl(objectUrl);
+        setVideoFileName(file.name);
+
+        const tempVideo = document.createElement('video');
+        tempVideo.muted = true;
+        tempVideo.playsInline = true;
+        tempVideo.preload = 'auto';
+        tempVideo.src = objectUrl;
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(() => reject(new Error('Таймаут загрузки видео')), 15000);
+          tempVideo.onloadedmetadata = () => {
+            window.clearTimeout(timer);
+            resolve();
+          };
+          tempVideo.onerror = () => {
+            window.clearTimeout(timer);
+            reject(new Error('Не удалось декодировать видеофайл в браузере'));
+          };
+        });
+
+        const dur = Number.isFinite(tempVideo.duration) && tempVideo.duration > 0 ? tempVideo.duration : 8;
+        const fractions = [0.12, 0.36, 0.62, 0.85];
+        const slicedUrls: string[] = [];
+        const slicedLabels: string[] = [];
+
+        for (let i = 0; i < 4; i++) {
+          const targetSec = Math.min(Math.max(0.1, dur * fractions[i]), Math.max(0.2, dur - 0.1));
+          await new Promise<void>(resolve => {
+            const seekTimer = window.setTimeout(() => resolve(), 3500);
+            tempVideo.onseeked = () => {
+              window.clearTimeout(seekTimer);
+              resolve();
+            };
+            tempVideo.currentTime = targetSec;
+          });
+
+          const offscreen = document.createElement('canvas');
+          offscreen.width = 1920;
+          offscreen.height = 1080;
+          const ctx = offscreen.getContext('2d');
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            drawCoverImageToCanvas(
+              ctx,
+              tempVideo,
+              tempVideo.videoWidth || 1920,
+              tempVideo.videoHeight || 1080,
+              1920,
+              1080,
+              1
+            );
+            slicedUrls.push(offscreen.toDataURL('image/jpeg', 0.94));
+            slicedLabels.push(`Кадр @ ${targetSec.toFixed(1)}с`);
+          }
+        }
+
+        if (!slicedUrls.length) {
+          throw new Error('Не удалось извлечь кадры из видео');
+        }
+
+        while (slicedUrls.length < 4) {
+          slicedUrls.push(slicedUrls[0]);
+          slicedLabels.push(`Кадр #${slicedUrls.length}`);
+        }
+
+        setBatchVariants(slicedUrls);
+        setVariantLabels(slicedLabels);
+        setSelectedMasterVariantIdx(0);
+        setLastModelUsed(`Видео-нарезка (${file.name})`);
+        window.selectedMasterThumbnail = slicedUrls[0];
+
+        const firstImg = new Image();
+        firstImg.onload = () => setImgA(firstImg);
+        firstImg.src = slicedUrls[0];
+
+        onNotify(`🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+      } else {
+        const objectUrl = URL.createObjectURL(file);
+        const srcImg = new Image();
+        await new Promise<void>((resolve, reject) => {
+          srcImg.onload = () => resolve();
+          srcImg.onerror = () => reject(new Error('Не удалось прочитать изображение'));
+          srcImg.src = objectUrl;
+        });
+
+        const crops = [
+          { label: 'Оригинальный кадр 16:9', zoom: 1.0, ox: 0, oy: 0, filter: 'none', tint: '' },
+          { label: 'Крупный фокус (1.24×)', zoom: 1.24, ox: -0.04, oy: -0.02, filter: 'contrast(1.12) saturate(1.1)', tint: '' },
+          { label: 'Холодный Mystery-грейд', zoom: 1.14, ox: 0.05, oy: 0.02, filter: 'contrast(1.18) brightness(0.92)', tint: 'rgba(14, 165, 233, 0.16)' },
+          { label: 'Янтарный драматик HDR', zoom: 1.18, ox: 0, oy: 0.03, filter: 'contrast(1.22) saturate(1.2)', tint: 'rgba(245, 158, 11, 0.16)' }
+        ];
+
+        const slicedUrls = crops.map(cfg => {
+          const offscreen = document.createElement('canvas');
+          offscreen.width = 1920;
+          offscreen.height = 1080;
+          const ctx = offscreen.getContext('2d');
+          if (!ctx) return '';
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.filter = cfg.filter;
+          drawCoverImageToCanvas(
+            ctx,
+            srcImg,
+            srcImg.naturalWidth || 1920,
+            srcImg.naturalHeight || 1080,
+            1920,
+            1080,
+            cfg.zoom,
+            cfg.ox,
+            cfg.oy
+          );
+          ctx.filter = 'none';
+          if (cfg.tint) {
+            ctx.fillStyle = cfg.tint;
+            ctx.fillRect(0, 0, 1920, 1080);
+          }
+          const vig = ctx.createLinearGradient(0, 0, 1920 * 0.55, 1080);
+          vig.addColorStop(0, 'rgba(2, 6, 14, 0.25)');
+          vig.addColorStop(1, 'rgba(2, 6, 14, 0.55)');
+          ctx.fillStyle = vig;
+          ctx.fillRect(0, 0, 1920, 1080);
+          return offscreen.toDataURL('image/jpeg', 0.94);
+        });
+
+        URL.revokeObjectURL(objectUrl);
+
+        setBatchVariants(slicedUrls);
+        setVariantLabels(crops.map(c => c.label));
+        setSelectedMasterVariantIdx(0);
+        setLastModelUsed(`Арт-нарезка (${file.name})`);
+        window.selectedMasterThumbnail = slicedUrls[0];
+
+        const firstImg = new Image();
+        firstImg.onload = () => setImgA(firstImg);
+        firstImg.src = slicedUrls[0];
+
+        onNotify(`🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка обработки локального файла';
+      onNotify(msg, 'error');
+    } finally {
+      setIsSlicingLocalMedia(false);
+    }
+  };
+
   // ============================================================================
   // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 4 (ai.models.generateImages + fallback gemini-2.5-flash-image)
+  // При ошибке 429 / 403 автоматически запускается локальный HTML5 Canvas 4K генератор
   // ============================================================================
   const handleGenerateImagen4Cover = async (targetSlot: 'A' | 'B' = 'A') => {
     setIsGeneratingImagen(true);
     setImagenError(null);
+    setIsQuotaFallbackNotice(false);
     try {
       const { images: dataUrls, modelUsed } = await generateImagenThumbnails(activePromptText, 4);
 
@@ -608,6 +970,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
 
       setBatchVariants(paddedUrls);
+      setVariantLabels(['Вариант #1', 'Вариант #2', 'Вариант #3', 'Вариант #4']);
       setSelectedMasterVariantIdx(0);
       setLastModelUsed(modelUsed || 'imagen-4.0-generate-001');
       window.selectedMasterThumbnail = paddedUrls[0];
@@ -634,8 +997,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         err instanceof Error
           ? err.message
           : 'API не вернуло варианты изображений. Проверьте баланс квоты ключа.';
-      setImagenError(msg);
-      onNotify(msg, 'error');
+      const isQuotaOrPermissionError =
+        (err instanceof ImagenApiError &&
+          (err.quotaExhausted || err.status === 429 || err.status === 403)) ||
+        /429|403|RESOURCE_EXHAUSTED|limit:\s*0|PERMISSION_DENIED|quota/i.test(msg);
+
+      if (isQuotaOrPermissionError) {
+        handleGenerateProceduralBatchFallback(targetSlot, true);
+      } else {
+        setIsQuotaFallbackNotice(false);
+        setImagenError(msg);
+        onNotify(msg, 'error');
+      }
     } finally {
       setIsGeneratingImagen(false);
     }
@@ -877,37 +1250,52 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </button>
             </div>
 
-            {/* КРАСНЫЙ АЛЕРТ ПОД КНОПКОЙ ЗАПУСКА ПРИ ОШИБКЕ IMAGEN 4 API */}
+            {/* КОМПАКТНОЕ ОПОВЕЩЕНИЕ ПРИ 429 / 403 ИЛИ ОШИБКЕ API (max-w-md max-h-24 overflow-hidden text-ellipsis) */}
             {imagenError && (
               <div
                 role="alert"
-                className="bg-rose-950/80 border border-rose-500/70 rounded-xl p-3 text-xs text-rose-200 space-y-2"
+                className={`w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3 py-2 text-xs space-y-1 border ${
+                  isQuotaFallbackNotice
+                    ? 'bg-amber-950/70 border-amber-500/60 text-amber-100'
+                    : 'bg-rose-950/80 border-rose-500/70 text-rose-200'
+                }`}
               >
                 <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <p className="font-bold text-rose-300">Ошибка генерации Imagen 4 • 16:9 JPEG</p>
-                    <p className="text-[11px] text-rose-200/90 break-words font-mono leading-relaxed">
+                  <AlertTriangle
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      isQuotaFallbackNotice ? 'text-amber-400' : 'text-rose-400'
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p
+                      title={imagenError}
+                      className={`text-[11px] font-semibold leading-snug line-clamp-2 overflow-hidden text-ellipsis ${
+                        isQuotaFallbackNotice ? 'text-amber-200' : 'text-rose-200'
+                      }`}
+                    >
                       {imagenError}
                     </p>
                   </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => handleGenerateProceduralBatchFallback('A')}
-                    className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2.5 py-1 rounded-lg text-[11px] cursor-pointer transition"
+                    onClick={() => {
+                      setImagenError(null);
+                      setIsQuotaFallbackNotice(false);
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
                   >
-                    🎨 Сгенерировать 4 автономных 4K кадра (Canvas 2×2)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setImagenError(null)}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 cursor-pointer"
-                  >
-                    Скрыть
+                    ✕
                   </button>
                 </div>
+                {!isQuotaFallbackNotice && (
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateProceduralBatchFallback('A', false)}
+                    className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2 py-0.5 rounded text-[10px] cursor-pointer transition"
+                  >
+                    🎨 Сгенерировать 4 локальных 4K фона (Canvas 2×2)
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1247,27 +1635,95 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleGenerateImagen4Cover('A')}
-            disabled={isGeneratingImagen}
-            className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-60"
-          >
-            {isGeneratingImagen ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <Wand2 className="w-4 h-4" />
-            )}
-            <span>Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={localMediaInputRef}
+              type="file"
+              accept="video/*,image/png,image/jpeg,image/webp,.mp4,.mov,.webm,.png,.jpg,.jpeg"
+              onChange={handleSliceLocalMediaToGrid}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => localMediaInputRef.current?.click()}
+              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
+            >
+              {isSlicingLocalMedia ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              <span>Взять кадр из локального видео/арта</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleGenerateProceduralBatchFallback('A', false)}
+              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+            >
+              <span>🎨 4 локальных фона</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleGenerateImagen4Cover('A')}
+              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+            >
+              {isGeneratingImagen ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Wand2 className="w-4 h-4" />
+              )}
+              <span>Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)</span>
+            </button>
+          </div>
         </div>
 
-        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 4 */}
-        {isGeneratingImagen ? (
+        {imagenError && (
+          <div
+            role="alert"
+            className={`w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3.5 py-2 text-xs flex items-center justify-between gap-2 border ${
+              isQuotaFallbackNotice
+                ? 'bg-amber-950/60 border-amber-500/50 text-amber-200'
+                : 'bg-rose-950/75 border-rose-500/60 text-rose-200'
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle
+                className={`w-4 h-4 shrink-0 ${
+                  isQuotaFallbackNotice ? 'text-amber-400' : 'text-rose-400'
+                }`}
+              />
+              <span title={imagenError} className="truncate font-semibold">
+                {imagenError}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setImagenError(null);
+                setIsQuotaFallbackNotice(false);
+              }}
+              className="text-[11px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 4 / нарезки локального медиа */}
+        {isGeneratingImagen || isSlicingLocalMedia ? (
           <div className="space-y-3">
             <div className="flex items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-400">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Генерация 4 вариантов кадра через Imagen 4 • 16:9 JPEG...</span>
+              <span>
+                {isSlicingLocalMedia
+                  ? 'Нарезка 4 вариантов превью (16:9) из локального видео/арта...'
+                  : 'Генерация 4 вариантов кадра через Imagen 4 • 16:9 JPEG...'}
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-3 w-full my-4">
               {[0, 1, 2, 3].map(skeletonIdx => (
@@ -1277,7 +1733,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 >
                   <Wand2 className="w-6 h-6 text-cyan-400/60 animate-bounce" />
                   <span className="text-[11px] font-mono text-slate-400 text-center">
-                    Генерация 4 вариантов кадра через Imagen 4... (Вариант #{skeletonIdx + 1})
+                    {isSlicingLocalMedia
+                      ? `Подготовка кадра #${skeletonIdx + 1}...`
+                      : `Генерация 4 вариантов кадра через Imagen 4... (Вариант #${skeletonIdx + 1})`}
                   </span>
                 </div>
               ))}
@@ -1289,6 +1747,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             {batchVariants.map((imgSrc, index) => {
               const isMaster = selectedMasterVariantIdx === index;
               const isAttached = attachedToYoutubeIdx === index;
+              const sceneLabel = variantLabels[index] || `Вариант #${index + 1}`;
 
               return (
                 <div
@@ -1308,14 +1767,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <div className="relative w-full aspect-video overflow-hidden">
                     <img
                       src={imgSrc}
-                      alt={`Вариант превью ${index + 1}`}
+                      alt={`${sceneLabel} (${index + 1})`}
                       className={`w-full aspect-video object-cover ${
                         bwContrastFilter ? 'grayscale contrast-125' : ''
                       }`}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2">
-                      <span className="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded">
-                        Вариант #{index + 1}
+                      <span className="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded truncate max-w-[60%]">
+                        {sceneLabel}
                       </span>
                       <div className="flex items-center gap-1.5">
                         <button
@@ -1349,10 +1808,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
                   {/* Панель действий под выбранной карточкой */}
                   <div className="p-2.5 bg-[#0b0f17] border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="font-bold text-slate-200">Вариант #{index + 1}</span>
+                    <div className="flex items-center gap-1.5 text-xs min-w-0">
+                      <span className="font-bold text-slate-200 shrink-0">#{index + 1}</span>
+                      <span className="text-[11px] text-slate-400 truncate max-w-[180px]" title={sceneLabel}>
+                        {sceneLabel}
+                      </span>
                       {isMaster && (
-                        <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-2 py-0.5 rounded">
+                        <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-2 py-0.5 rounded shrink-0">
                           Мастер-кадр
                         </span>
                       )}

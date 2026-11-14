@@ -126,6 +126,47 @@ jobs:
           MANIFEST_B64: ${{ github.event.inputs.manifest_payload }}
         run: |
           python3 assemble_scenes.py 2>&1 | tee ffmpeg_render.log
+          python3 - << 'EOF'
+          import json, os, subprocess
+
+          if not os.path.exists("manifest.json") or not os.path.exists("./output.mp4"):
+              raise SystemExit(0)
+
+          with open("manifest.json", "r", encoding="utf-8") as f:
+              cfg = json.load(f)
+
+          shorts_factory = cfg.get("shorts_factory") or {}
+          if not shorts_factory.get("enabled"):
+              raise SystemExit(0)
+
+          clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
+          slots = cfg.get("timeline_slots") or cfg.get("slots") or []
+          insert_timestamps = []
+          for sl in slots:
+              for ins in (sl.get("inserts") or []):
+                  trig = float(ins.get("trigger_at_sec") or 0)
+                  insert_timestamps.append(max(0.0, trig))
+
+          if not insert_timestamps:
+              insert_timestamps = [0.0, 60.0, 120.0, 180.0]
+
+          os.makedirs("./output/Shorts", exist_ok=True)
+          for idx, start_sec in enumerate(insert_timestamps[:4]):
+              out_short = f"./output/Shorts/short_{idx + 1:02d}_1080x1920.mp4"
+              cmd = [
+                  "ffmpeg", "-y",
+                  "-ss", str(start_sec),
+                  "-i", "./output.mp4",
+                  "-t", str(clip_dur),
+                  "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
+                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                  "-c:a", "aac", "-b:a", "192k",
+                  "-movflags", "+faststart",
+                  out_short
+              ]
+              print(f"[SHORTS FACTORY] Generating 9:16 Short #{idx + 1} @ {start_sec}s ({clip_dur}s)...")
+              subprocess.run(cmd, check=True)
+          EOF
 
       # 2. Выгрузка готового видео на Google Диск
       - name: Upload Output Video to Google Drive
@@ -141,6 +182,18 @@ jobs:
             --low-level-retries 10 \
             --stats 15s \
             -v
+
+          if [ -d "./output/Shorts" ] && [ "$(ls -A ./output/Shorts)" ]; then
+            echo "Выгрузка вертикальных тизеров Shorts (1080x1920) в подпапку Shorts/ на Google Drive..."
+            rclone copy ./output/Shorts gdrive:AetherFlow_Output/Shorts/ \
+              --drive-chunk-size 64M \
+              --transfers 2 \
+              --checkers 4 \
+              --retries 5 \
+              --low-level-retries 10 \
+              --stats 15s \
+              -v
+          fi
 
       - name: Upload Emergency & Render Logs Artifact
         if: always() && github.event.inputs.preflight_only != 'true'

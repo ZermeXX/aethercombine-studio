@@ -33,6 +33,44 @@ def is_valid_cached_slot(slot_path: str) -> bool:
     return os.path.exists(slot_path) and os.path.getsize(slot_path) > 1024
 
 
+def generate_shorts_factory(cfg: dict, source_video: str) -> None:
+    shorts_factory = cfg.get("shorts_factory") or {}
+    if not shorts_factory.get("enabled") or not os.path.exists(source_video):
+        return
+
+    clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
+    slots = cfg.get("timeline_slots") or cfg.get("slots") or []
+    insert_timestamps = []
+    for sl in slots:
+        for ins in (sl.get("inserts") or []):
+            insert_timestamps.append(max(0.0, float(ins.get("trigger_at_sec") or 0)))
+
+    if not insert_timestamps:
+        insert_timestamps = [0.0, 60.0, 120.0, 180.0]
+
+    os.makedirs("./output/Shorts", exist_ok=True)
+    for idx, start_sec in enumerate(insert_timestamps[:4]):
+        out_short = f"./output/Shorts/short_{idx + 1:02d}_1080x1920.mp4"
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start_sec),
+            "-i", source_video,
+            "-t", str(clip_dur),
+            "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            out_short,
+        ]
+        print(f"[SHORTS FACTORY] Generating 9:16 Short #{idx + 1} @ {start_sec}s ({clip_dur}s)...")
+        subprocess.run(cmd, check=True)
+
+    subprocess.run(
+        ["rclone", "copy", "./output/Shorts", "gdrive:AetherFlow_Output/Shorts/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
+        check=True,
+    )
+
+
 def run_pipeline(cfg: dict) -> None:
     exp = cfg.get("export_settings") or {}
     res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
@@ -134,6 +172,7 @@ def run_pipeline(cfg: dict) -> None:
                     ["rclone", "copy", "./output.mp4", "gdrive:AetherFlow_Output/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
                     check=True,
                 )
+            generate_shorts_factory(cfg, "./output.mp4")
             send_telegram_alert(cfg, "✅ Рендеринг и выгрузка завершены успешно!")
             return
 

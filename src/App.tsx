@@ -224,6 +224,10 @@ interface LoopBuildManifest {
   };
   continuous_bed: ContinuousBedConfig;
   master_audio: LoopMasterAudioConfig;
+  shorts_factory?: {
+    enabled: boolean;
+    clip_duration_sec: number;
+  };
   timeline_slots: TimelineSlot[];
 }
 
@@ -899,6 +903,26 @@ jobs:
           import shutil
           if os.path.exists(out_name):
               shutil.copyfile(out_name, "./output.mp4")
+
+          shorts_factory = cfg.get("shorts_factory") or {}
+          if shorts_factory.get("enabled") and os.path.exists("./output.mp4"):
+              clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
+              insert_timestamps = []
+              for sl in slots:
+                  for ins in (sl.get("inserts") or []):
+                      insert_timestamps.append(max(0.0, float(ins.get("trigger_at_sec") or 0)))
+              if not insert_timestamps:
+                  insert_timestamps = [0.0, 60.0, 120.0, 180.0]
+              os.makedirs("./output/Shorts", exist_ok=True)
+              for idx, start_sec in enumerate(insert_timestamps[:4]):
+                  out_short = f"./output/Shorts/short_{idx + 1:02d}_1080x1920.mp4"
+                  s_cmd = [
+                      "ffmpeg", "-y", "-ss", str(start_sec), "-i", "./output.mp4",
+                      "-t", str(clip_dur), "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
+                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out_short
+                  ]
+                  subprocess.run(s_cmd, check=True)
           EOF
 
       # 2. Выгрузка готового видео на Google Диск
@@ -915,6 +939,18 @@ jobs:
             --low-level-retries 10 \\
             --stats 15s \\
             -v
+
+          if [ -d "./output/Shorts" ] && [ "\$(ls -A ./output/Shorts)" ]; then
+            echo "Выгрузка вертикальных тизеров Shorts (1080x1920) в подпапку Shorts/ на Google Drive..."
+            rclone copy ./output/Shorts gdrive:AetherFlow_Output/Shorts/ \\
+              --drive-chunk-size 64M \\
+              --transfers 2 \\
+              --checkers 4 \\
+              --retries 5 \\
+              --low-level-retries 10 \\
+              --stats 15s \\
+              -v
+          fi
 
       - name: Upload Emergency FFmpeg Logs
         if: always() && github.event.inputs.preflight_only != 'true'
@@ -1083,11 +1119,12 @@ export default function App() {
     ) => Promise<void>) | null
   >(null);
 
-  // Гибкая система субтитров для текущего манифеста (Hardsub / Softsub / Скачивание .SRT)
+  // Гибкая система субтитров и Shorts Factory для текущего манифеста
   const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
   const [loopUploadSrtToDrive, setLoopUploadSrtToDrive] = useState<boolean>(true);
   const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'>('en');
   const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>('');
+  const [shortsFactoryEnabled, setShortsFactoryEnabled] = useState<boolean>(false);
 
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
@@ -2917,6 +2954,14 @@ export default function App() {
     },
     continuous_bed: continuousBed,
     master_audio: loopMasterAudio,
+    ...(shortsFactoryEnabled
+      ? {
+          shorts_factory: {
+            enabled: true,
+            clip_duration_sec: 38
+          }
+        }
+      : {}),
     timeline_slots: timelineSlots.map(slot => ({
       ...slot,
       act_title: slot.act_title ?? slot.title ?? '',
@@ -3456,6 +3501,12 @@ export default function App() {
       if (typeof rawSubsObj.srt_content === 'string' && rawSubsObj.srt_content.trim()) {
         setLoopSrtCustomContent(rawSubsObj.srt_content);
       }
+    }
+
+    if (raw.shorts_factory && typeof raw.shorts_factory === 'object') {
+      setShortsFactoryEnabled(Boolean((raw.shorts_factory as Record<string, unknown>).enabled));
+    } else {
+      setShortsFactoryEnabled(false);
     }
 
     setImportedManifestName(sourceLabel);
@@ -6278,6 +6329,42 @@ export default function App() {
                       📥 Скачать .SRT файл
                     </button>
                   </div>
+                </div>
+
+                {/* ПЕРЕКЛЮЧАТЕЛЬ «ГЕНЕРИРОВАТЬ ПАКЕТ ВЕРТИКАЛЬНЫХ SHORTS (9:16)» */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <label className="flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/10 via-slate-900 to-slate-900 border border-purple-500/40 hover:border-purple-400/70 rounded-xl px-3 py-2.5 cursor-pointer select-none transition">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={shortsFactoryEnabled}
+                        onChange={e => setShortsFactoryEnabled(e.target.checked)}
+                        className="accent-purple-500 w-4 h-4 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <span className="text-xs font-bold text-purple-200 block">
+                          📱 Генерировать пакет вертикальных Shorts (9:16)
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">
+                          Автоматическая нарезка до 4 тизеров 1080×1920 (38с) по таймкодам врезок → папка <code className="text-purple-300">Shorts/</code> на GDrive
+                        </span>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border shrink-0 ${
+                        shortsFactoryEnabled
+                          ? 'bg-purple-500/25 border-purple-400/60 text-purple-200'
+                          : 'bg-slate-950 border-slate-700 text-slate-500'
+                      }`}
+                    >
+                      {shortsFactoryEnabled ? '9:16 • 38s ON' : 'OFF'}
+                    </span>
+                  </label>
+                  {shortsFactoryEnabled && (
+                    <div className="text-[10px] font-mono text-purple-300 bg-slate-950/90 border border-purple-500/30 rounded-lg px-2.5 py-1.5">
+                      manifest_payload → <code>&quot;shorts_factory&quot;: &#123; &quot;enabled&quot;: true, &quot;clip_duration_sec&quot;: 38 &#125;</code>
+                    </div>
+                  )}
                 </div>
 
                 {/* Быстрое поле ID папки Google Drive прямо в цехе */}

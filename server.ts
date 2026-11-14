@@ -209,59 +209,81 @@ Return JSON with:
         primaryError instanceof Error ? primaryError.message : primaryError
       );
 
-      const angleCues = [
-        'Wide cinematic establishing angle, crisp foreground subject.',
-        'Dramatic low-angle close-up, intense chiaroscuro lighting.',
-        'Dynamic rule-of-thirds framing with atmospheric depth of field.',
-        'High-contrast moody silhouette composition with vibrant rim light.'
-      ];
+      try {
+        const angleCues = [
+          'Wide cinematic establishing angle, crisp foreground subject.',
+          'Dramatic low-angle close-up, intense chiaroscuro lighting.',
+          'Dynamic rule-of-thirds framing with atmospheric depth of field.',
+          'High-contrast moody silhouette composition with vibrant rim light.'
+        ];
 
-      const fallbackResults = await Promise.all(
-        Array.from({ length: requestedCount }, async (_, idx) => {
-          const cue = angleCues[idx % angleCues.length];
-          const res = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: `${promptText}\n\nComposition variation ${idx + 1}: ${cue}`,
-            config: {
-              responseModalities: ['IMAGE'],
-              imageConfig: {
-                aspectRatio: '16:9'
+        const fallbackResults = await Promise.all(
+          Array.from({ length: requestedCount }, async (_, idx) => {
+            const cue = angleCues[idx % angleCues.length];
+            const res = await ai.models.generateContent({
+              model: 'gemini-2.5-flash-image',
+              contents: `${promptText}\n\nComposition variation ${idx + 1}: ${cue}`,
+              config: {
+                responseModalities: ['IMAGE'],
+                imageConfig: {
+                  aspectRatio: '16:9'
+                }
+              }
+            });
+
+            const parts = res.candidates?.[0]?.content?.parts ?? [];
+            for (const part of parts) {
+              if (part.inlineData?.data) {
+                return {
+                  bytesBase64Encoded: part.inlineData.data,
+                  mimeType: part.inlineData.mimeType || 'image/png'
+                };
               }
             }
-          });
-
-          const parts = res.candidates?.[0]?.content?.parts ?? [];
-          for (const part of parts) {
-            if (part.inlineData?.data) {
-              return {
-                bytesBase64Encoded: part.inlineData.data,
-                mimeType: part.inlineData.mimeType || 'image/png'
-              };
-            }
-          }
-          return null;
-        })
-      );
-
-      const validFallback = fallbackResults.filter(
-        (item): item is { bytesBase64Encoded: string; mimeType: string } => item !== null
-      );
-
-      if (!validFallback.length) {
-        const primaryMsg =
-          primaryError instanceof Error ? primaryError.message : String(primaryError);
-        throw new Error(
-          `Не удалось сгенерировать изображения ни через imagen-4.0-generate-001 (${primaryMsg}), ни через fallback gemini-2.5-flash-image.`
+            return null;
+          })
         );
-      }
 
-      return {
-        dataUrls: validFallback.map(
-          item => `data:${item.mimeType};base64,${item.bytesBase64Encoded}`
-        ),
-        predictions: validFallback,
-        modelUsed: 'gemini-2.5-flash-image'
-      };
+        const validFallback = fallbackResults.filter(
+          (item): item is { bytesBase64Encoded: string; mimeType: string } => item !== null
+        );
+
+        if (!validFallback.length) {
+          const primaryMsg =
+            primaryError instanceof Error ? primaryError.message : String(primaryError);
+          const quotaErr = new Error(
+            `Не удалось сгенерировать изображения через imagen-4.0-generate-001 и fallback gemini-2.5-flash-image: ${primaryMsg}`
+          ) as Error & { status?: number };
+          if (/429|RESOURCE_EXHAUSTED|limit:\s*0|quota/i.test(primaryMsg)) {
+            quotaErr.status = 429;
+          } else if (/403|PERMISSION_DENIED/i.test(primaryMsg)) {
+            quotaErr.status = 403;
+          }
+          throw quotaErr;
+        }
+
+        return {
+          dataUrls: validFallback.map(
+            item => `data:${item.mimeType};base64,${item.bytesBase64Encoded}`
+          ),
+          predictions: validFallback,
+          modelUsed: 'gemini-2.5-flash-image'
+        };
+      } catch (fallbackOrPrimaryError) {
+        const errObj = fallbackOrPrimaryError as { status?: number; code?: number; message?: string };
+        const msg =
+          fallbackOrPrimaryError instanceof Error
+            ? fallbackOrPrimaryError.message
+            : String(fallbackOrPrimaryError);
+        const wrapped = new Error(msg) as Error & { status?: number };
+        const rawStatus = errObj?.status ?? errObj?.code;
+        if (rawStatus === 429 || /429|RESOURCE_EXHAUSTED|limit:\s*0|quota/i.test(msg)) {
+          wrapped.status = 429;
+        } else if (rawStatus === 403 || /403|PERMISSION_DENIED/i.test(msg)) {
+          wrapped.status = 403;
+        }
+        throw wrapped;
+      }
     }
   }
 
@@ -298,8 +320,20 @@ Return JSON with:
         predictions
       });
     } catch (error) {
+      const errObj = error as { status?: number; message?: string };
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ ok: false, error: msg });
+      const statusCode =
+        errObj?.status === 429 || /429|RESOURCE_EXHAUSTED|limit:\s*0|quota/i.test(msg)
+          ? 429
+          : errObj?.status === 403 || /403|PERMISSION_DENIED/i.test(msg)
+            ? 403
+            : 500;
+      res.status(statusCode).json({
+        ok: false,
+        statusCode,
+        quotaExhausted: statusCode === 429 || statusCode === 403,
+        error: msg
+      });
     }
   });
 

@@ -58,7 +58,10 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   onNotify
 }) => {
   const [tone, setTone] = useState<SeoToneStyle>('Dark Mystery');
-  const [chapterSourceMode, setChapterSourceMode] = useState<'scenes' | 'loop'>('scenes');
+  const [chapterSourceMode, setChapterSourceMode] = useState<'scenes' | 'loop'>(
+    loopSlots.length > 0 && narrativeScenes.length === 0 ? 'loop' : 'scenes'
+  );
+  const [selectedTitleId, setSelectedTitleId] = useState<'A' | 'B' | 'C'>('A');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string>('');
 
@@ -184,6 +187,34 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       .map((name, i) => `${formatSecToTimestamp(i * 180)} - ${name}`)
       .join('\n');
   }, [tone, chapterSourceMode, narrativeScenes, loopSlots]);
+
+  const liveLoopTimestampsText = useMemo(() => {
+    const defaultNames = [
+      'Intro: Opening Atmosphere',
+      'Act I: First Movement',
+      'Act II: Deepening Atmosphere',
+      'Act III: Peak Tension',
+      'Act IV: Distant Resonance',
+      'Final Act: Outro & Stillness'
+    ];
+    if (loopSlots.length === 0) return '';
+    let cursorSec = 0;
+    return loopSlots
+      .map((slot, idx) => {
+        const ts = formatSecToTimestamp(cursorSec);
+        const isLast = idx === loopSlots.length - 1;
+        const overlap =
+          !isLast && slot.slot_transition_out.type !== 'none'
+            ? slot.slot_transition_out.duration_sec
+            : 0;
+        cursorSec += Math.max(1, slot.slot_duration_sec - overlap);
+
+        const rawTitle = (slot.act_title || slot.title || '').trim();
+        const label = rawTitle || defaultNames[idx % defaultNames.length];
+        return `${ts} - ${label}`;
+      })
+      .join('\n');
+  }, [loopSlots]);
 
   const [chaptersText, setChaptersText] = useState<string>(computedChaptersFromManifest);
 
@@ -401,6 +432,33 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     onNotify('📥 Файл metadata.txt (Titles + Description + Chapters + 30 Tags) скачан!', 'success');
   };
 
+  const activeReleaseTitle = useMemo(() => {
+    return (titles.find(t => t.id === selectedTitleId) || titles[0])?.title || '';
+  }, [titles, selectedTitleId]);
+
+  const releaseCardTimestamps = useMemo(() => {
+    if (chapterSourceMode === 'loop' && chaptersText.trim()) {
+      return chaptersText.trim();
+    }
+    return liveLoopTimestampsText || chaptersText.trim();
+  }, [chapterSourceMode, chaptersText, liveLoopTimestampsText]);
+
+  const releaseCardText = useMemo(() => {
+    return [
+      `TITLE:`,
+      activeReleaseTitle.trim(),
+      ``,
+      `DESCRIPTION:`,
+      description.trim(),
+      ``,
+      `TIMESTAMPS (CHAPTERS):`,
+      releaseCardTimestamps,
+      ``,
+      `TAGS:`,
+      tagsString.trim()
+    ].join('\n');
+  }, [activeReleaseTitle, description, releaseCardTimestamps, tagsString]);
+
   return (
     <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
       {/* ШАПКА ВКЛАДКИ «📦 YOUTUBE SEO & УПАКОВКА» */}
@@ -429,6 +487,23 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             )}
             <span>
               {isGenerating ? 'Генерация Gemini (EN)...' : '✨ Сгенерировать SEO через Gemini (EN)'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              copyWithToast(releaseCardText, 'release-card', 'Карточка релиза (Title + Description + Timestamps + Tags)')
+            }
+            className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-sky-500/20"
+          >
+            {copiedKey === 'release-card' ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Copy className="w-4 h-4" />
+            )}
+            <span>
+              {copiedKey === 'release-card' ? 'Карточка скопирована!' : 'Скопировать карточку релиза'}
             </span>
           </button>
 
@@ -728,6 +803,65 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <Download className="w-4 h-4" /> 📥 Скачать metadata.txt (Полный пакет)
           </button>
         </div>
+      </div>
+
+      {/* д) ЕДИНАЯ КАРТОЧКА РЕЛИЗА (ЗАГОЛОВОК + ОПИСАНИЕ + АКТУАЛЬНЫЕ ТАЙМКОДЫ СЛОТОВ + ТЕГИ) */}
+      <div className="bg-[#0b0f17] border border-sky-500/40 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="space-y-0.5">
+            <h3 className="text-xs font-bold text-sky-300 uppercase tracking-wider flex items-center gap-2">
+              <Package className="w-4 h-4 text-sky-400" />
+              д) Единая карточка релиза YouTube (Title + Description + Timestamps слотов + Tags)
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Объединяет выбранный заголовок, SEO-описание, теги и актуальные YouTube-таймкоды из текущих слотов таймлайна ({loopSlots.length} сл.)
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 text-[11px]">
+              {(['A', 'B', 'C'] as const).map(tid => (
+                <button
+                  key={tid}
+                  type="button"
+                  onClick={() => setSelectedTitleId(tid)}
+                  className={`px-2.5 py-1 rounded font-bold cursor-pointer transition ${
+                    selectedTitleId === tid
+                      ? 'bg-sky-500 text-slate-950'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Заголовок {tid}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                copyWithToast(
+                  releaseCardText,
+                  'release-card',
+                  'Карточка релиза (Title + Description + Timestamps + Tags)'
+                )
+              }
+              className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-sky-500/20"
+            >
+              {copiedKey === 'release-card' ? (
+                <Check className="w-4 h-4" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+              <span>
+                {copiedKey === 'release-card' ? 'Скопировано!' : 'Скопировать карточку релиза'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <pre className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto custom-scroll">
+          {releaseCardText}
+        </pre>
       </div>
     </div>
   );
