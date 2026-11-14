@@ -24,7 +24,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Link2,
-  Upload
+  Upload,
+  Zap,
+  KeyRound
 } from 'lucide-react';
 
 declare global {
@@ -43,75 +45,297 @@ interface ThumbnailStudioViewProps {
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-export class ImagenApiError extends Error {
-  status: number;
-  quotaExhausted: boolean;
+const CF_ACCOUNT_ID_STORAGE_KEY = 'aether_cf_account_id';
+const CF_API_TOKEN_STORAGE_KEY = 'aether_cf_api_token';
+const AI_HORDE_BASE_URL = 'https://aihorde.net/api/v2';
+const AI_HORDE_ANON_KEY = '0000000000';
 
-  constructor(message: string, status: number = 500, quotaExhausted: boolean = false) {
+export class FluxGenerationError extends Error {
+  status: number;
+
+  constructor(message: string, status: number = 500) {
     super(message);
-    this.name = 'ImagenApiError';
+    this.name = 'FluxGenerationError';
     this.status = status;
-    this.quotaExhausted = quotaExhausted;
   }
 }
 
 /**
- * 1. Функция обращения к серверному API генерации превью (Imagen 4 / fallback Gemini 2.5 Flash Image)
+ * Загружает изображение через fetch -> blob -> URL.createObjectURL (с автоматическим прокси-fallback),
+ * чтобы HTML5 Canvas 4K экспорт (3840x2160) никогда не падал с ошибкой CORS tainted canvas.
  */
-export async function generateImagenThumbnails(
+async function fetchImageAsBlobObjectUrl(
+  rawUrl: string,
+  cropTo16x9: boolean = false
+): Promise<string> {
+  let blob: Blob;
+
+  if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {
+    const res = await fetch(rawUrl);
+    blob = await res.blob();
+  } else {
+    try {
+      const directRes = await fetch(rawUrl, { mode: 'cors' });
+      if (!directRes.ok) {
+        throw new Error(`HTTP ${directRes.status}`);
+      }
+      blob = await directRes.blob();
+    } catch {
+      const proxyRes = await fetch(
+        `/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+      );
+      if (!proxyRes.ok) {
+        throw new Error(`Не удалось загрузить изображение (${proxyRes.status})`);
+      }
+      blob = await proxyRes.blob();
+    }
+  }
+
+  const rawObjectUrl = URL.createObjectURL(blob);
+  if (!cropTo16x9) {
+    return rawObjectUrl;
+  }
+
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Ошибка декодирования изображения'));
+      img.src = rawObjectUrl;
+    });
+
+    const targetW = 1344;
+    const targetH = 768;
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return rawObjectUrl;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    drawCoverImageToCanvas(
+      ctx,
+      img,
+      img.naturalWidth || targetW,
+      img.naturalHeight || targetH,
+      targetW,
+      targetH,
+      1
+    );
+
+    const croppedBlob = await new Promise<Blob | null>(resolve =>
+      canvas.toBlob(b => resolve(b), 'image/jpeg', 0.94)
+    );
+    if (croppedBlob) {
+      URL.revokeObjectURL(rawObjectUrl);
+      return URL.createObjectURL(croppedBlob);
+    }
+    return rawObjectUrl;
+  } catch {
+    return rawObjectUrl;
+  }
+}
+
+/**
+ * Генерация 4 чистых 16:9 обложек (1344x768) через бесплатный AI Horde API (Flux.1-Schnell)
+ * 1) POST /api/v2/generate/async (apikey: 0000000000, Flux.1-Schnell, n: 4, 1344x768)
+ * 2) Polling GET /api/v2/generate/check/{id} каждые 3 секунды до done === true
+ * 3) GET /api/v2/generate/status/{id} -> generations[].img -> fetch -> blob -> ObjectURL
+ */
+export async function generateViaAiHordeFlux(
   promptText: string,
-  count: number = 4
-): Promise<{ images: string[]; modelUsed?: string }> {
-  const response = await fetch('/api/imagen/generate', {
+  options?: {
+    onProgress?: (statusText: string) => void;
+    signal?: AbortSignal;
+  }
+): Promise<{ images: string[]; modelUsed: string }> {
+  const submitRes = await fetch(`${AI_HORDE_BASE_URL}/generate/async`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: AI_HORDE_ANON_KEY,
+      'Client-Agent': 'AetherCombine:1.0:studio'
+    },
+    body: JSON.stringify({
+      prompt: promptText,
+      params: {
+        sampler_name: 'k_euler',
+        cfg_scale: 1,
+        steps: 4,
+        width: 1344,
+        height: 768,
+        n: 4
+      },
+      models: ['Flux.1-Schnell'],
+      nsfw: false,
+      censor_nsfw: true,
+      r2: true,
+      n: 4
+    }),
+    signal: options?.signal
+  });
+
+  const submitData = (await submitRes.json().catch(() => ({}))) as {
+    id?: string;
+    message?: string;
+    rc?: string;
+  };
+
+  if (!submitRes.ok || !submitData.id) {
+    throw new FluxGenerationError(
+      submitData.message || `AI Horde отклонил запрос (${submitRes.status})`,
+      submitRes.status
+    );
+  }
+
+  const jobId = submitData.id;
+  options?.onProgress?.(`AI Horde задача создана (ID ${jobId.slice(0, 8)}), ждём воркера...`);
+
+  const maxWaitMs = 5 * 60 * 1000;
+  const startedAt = Date.now();
+
+  while (true) {
+    if (options?.signal?.aborted) {
+      throw new FluxGenerationError('Генерация отменена пользователем', 499);
+    }
+    if (Date.now() - startedAt > maxWaitMs) {
+      throw new FluxGenerationError(
+        'Превышено время ожидания очереди AI Horde (5 мин). Попробуйте снова или укажите Cloudflare токен.',
+        504
+      );
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        options?.signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, 3000);
+      const onAbort = () => {
+        window.clearTimeout(timer);
+        reject(new FluxGenerationError('Генерация отменена пользователем', 499));
+      };
+      options?.signal?.addEventListener('abort', onAbort, { once: true });
+    });
+
+    const checkRes = await fetch(`${AI_HORDE_BASE_URL}/generate/check/${encodeURIComponent(jobId)}`, {
+      headers: {
+        'Client-Agent': 'AetherCombine:1.0:studio'
+      },
+      signal: options?.signal
+    });
+
+    if (!checkRes.ok) {
+      throw new FluxGenerationError(`Ошибка проверки статуса AI Horde (${checkRes.status})`, checkRes.status);
+    }
+
+    const checkData = (await checkRes.json().catch(() => ({}))) as {
+      done?: boolean;
+      faulted?: boolean;
+      is_possible?: boolean;
+      finished?: number;
+      processing?: number;
+      waiting?: number;
+      queue_position?: number;
+      wait_time?: number;
+    };
+
+    if (checkData.faulted) {
+      throw new FluxGenerationError('AI Horde воркер вернул faulted при генерации.', 502);
+    }
+
+    if (checkData.is_possible === false) {
+      throw new FluxGenerationError('Сейчас нет свободных воркеров Flux.1-Schnell на AI Horde.', 503);
+    }
+
+    const qPos = typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
+    const eta = typeof checkData.wait_time === 'number' ? `~${checkData.wait_time}с` : '...';
+    const doneCnt = checkData.finished ?? 0;
+    options?.onProgress?.(`AI Horde (Flux.1-Schnell) • Очередь: ${qPos} • Осталось: ${eta} • Готово ${doneCnt}/4`);
+
+    if (checkData.done === true) {
+      break;
+    }
+  }
+
+  options?.onProgress?.('Забираем 4 готовых кадра (1344×768) из AI Horde...');
+
+  const statusRes = await fetch(`${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`, {
+    headers: {
+      'Client-Agent': 'AetherCombine:1.0:studio'
+    },
+    signal: options?.signal
+  });
+
+  if (!statusRes.ok) {
+    throw new FluxGenerationError(`Ошибка получения результатов AI Horde (${statusRes.status})`, statusRes.status);
+  }
+
+  const statusData = (await statusRes.json().catch(() => ({}))) as {
+    generations?: Array<{ img?: string; model?: string }>;
+  };
+
+  const rawUrls = (statusData.generations || [])
+    .map(g => g.img)
+    .filter((u): u is string => Boolean(u && u.trim()));
+
+  if (!rawUrls.length) {
+    throw new FluxGenerationError('AI Horde завершился без изображений.', 502);
+  }
+
+  const blobUrls = await Promise.all(rawUrls.slice(0, 4).map(url => fetchImageAsBlobObjectUrl(url, false)));
+
+  return {
+    images: blobUrls,
+    modelUsed: 'AI Horde • Flux.1-Schnell (1344×768)'
+  };
+}
+
+/**
+ * Генерация 4 обложек без очереди через Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)
+ */
+export async function generateViaCloudflareFlux(
+  promptText: string,
+  accountId: string,
+  apiToken: string,
+  signal?: AbortSignal
+): Promise<{ images: string[]; modelUsed: string }> {
+  const response = await fetch('/api/cloudflare/flux', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      promptText,
-      sampleCount: parseInt(String(count), 10)
-    })
+      accountId,
+      apiToken,
+      prompt: promptText,
+      count: 4
+    }),
+    signal
   });
 
   const result = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
     statusCode?: number;
-    quotaExhausted?: boolean;
     modelUsed?: string;
     images?: string[];
-    predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
     error?: string;
   };
 
-  if (!response.ok || !result.ok) {
-    const status = result.statusCode || response.status;
-    const rawMsg =
-      result.error || `Ошибка генерации Imagen 4 (${status}): Проверьте баланс квоты ключа.`;
-    const isQuota =
-      Boolean(result.quotaExhausted) ||
-      status === 429 ||
-      status === 403 ||
-      /429|403|RESOURCE_EXHAUSTED|limit:\s*0|PERMISSION_DENIED|quota/i.test(rawMsg);
-    throw new ImagenApiError(rawMsg, status, isQuota);
-  }
-
-  if (Array.isArray(result.images) && result.images.length > 0) {
-    return { images: result.images, modelUsed: result.modelUsed };
-  }
-
-  if (!result.predictions || !result.predictions.length) {
-    throw new ImagenApiError(
-      'API не вернуло варианты изображений. Проверьте баланс квоты ключа.',
-      response.status,
-      false
+  if (!response.ok || !result.ok || !Array.isArray(result.images) || !result.images.length) {
+    throw new FluxGenerationError(
+      result.error || `Ошибка Cloudflare Workers AI (${response.status})`,
+      result.statusCode || response.status
     );
   }
 
+  const blobUrls = await Promise.all(
+    result.images.slice(0, 4).map(imgUrl => fetchImageAsBlobObjectUrl(imgUrl, true))
+  );
+
   return {
-    images: result.predictions.map(
-      item => `data:${item.mimeType || 'image/jpeg'};base64,${item.bytesBase64Encoded || ''}`
-    ),
-    modelUsed: result.modelUsed
+    images: blobUrls,
+    modelUsed: 'Cloudflare Workers AI • @cf/black-forest-labs/flux-1-schnell'
   };
 }
 
@@ -446,7 +670,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
   const [badgeB] = useState<string>('ambience');
 
-  // Сетка 2x2 (4 варианта обложки от Imagen 4 с numberOfImages: 4)
+  // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_0', 0),
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_1', 1),
@@ -456,12 +680,80 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [selectedMasterVariantIdx, setSelectedMasterVariantIdx] = useState<number>(0);
   const [attachedToYoutubeIdx, setAttachedToYoutubeIdx] = useState<number | null>(0);
   const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
-  const [imagenError, setImagenError] = useState<string | null>(null);
-  const [isQuotaFallbackNotice, setIsQuotaFallbackNotice] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationStatusText, setGenerationStatusText] = useState<string>('');
   const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
   const [variantLabels, setVariantLabels] = useState<string[]>([...LOCAL_SCENE_LABELS]);
   const [isSlicingLocalMedia, setIsSlicingLocalMedia] = useState<boolean>(false);
   const localMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const activeBlobUrlsRef = useRef<string[]>([]);
+  const generationAbortRef = useRef<AbortController | null>(null);
+
+  // Опциональные настройки Cloudflare Workers AI (сохраняются в localStorage)
+  const [cfAccountId, setCfAccountId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [cfApiToken, setCfApiToken] = useState<string>(() => {
+    try {
+      return localStorage.getItem(CF_API_TOKEN_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [showCfSettings, setShowCfSettings] = useState<boolean>(() => {
+    try {
+      return Boolean(
+        localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) ||
+          localStorage.getItem(CF_API_TOKEN_STORAGE_KEY)
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  const isCloudflareConfigured = Boolean(cfAccountId.trim() && cfApiToken.trim());
+
+  const updateBatchVariantsSafely = useCallback((nextUrls: string[]) => {
+    const prevToRevoke = activeBlobUrlsRef.current.filter(
+      u => u.startsWith('blob:') && !nextUrls.includes(u)
+    );
+    activeBlobUrlsRef.current = nextUrls.filter(u => u.startsWith('blob:'));
+    setBatchVariants(nextUrls);
+    if (prevToRevoke.length > 0) {
+      window.setTimeout(() => {
+        prevToRevoke.forEach(u => URL.revokeObjectURL(u));
+      }, 1000);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CF_ACCOUNT_ID_STORAGE_KEY, cfAccountId.trim());
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [cfAccountId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CF_API_TOKEN_STORAGE_KEY, cfApiToken.trim());
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [cfApiToken]);
+
+  useEffect(() => {
+    return () => {
+      generationAbortRef.current?.abort();
+      activeBlobUrlsRef.current.forEach(u => {
+        if (u.startsWith('blob:')) URL.revokeObjectURL(u);
+      });
+    };
+  }, []);
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
@@ -489,12 +781,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
 
-  // 2. Генерация 16:9 без водяных знаков через @google/genai (imagen-4.0-generate-001 + fallback gemini-2.5-flash-image)
+  // 2. Генерация 16:9 без водяных знаков (AI Horde Flux.1-Schnell 1344x768 / Cloudflare Workers AI)
   const [promptStylePreset, setPromptStylePreset] = useState<
     'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
   >('mystery_dark');
-  const [customImagenPrompt, setCustomImagenPrompt] = useState<string>('');
-  const [isGeneratingImagen, setIsGeneratingImagen] = useState<boolean>(false);
+  const [customFluxPrompt, setCustomFluxPrompt] = useState<string>('');
+  const [isGeneratingCovers, setIsGeneratingCovers] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
 
   // Автогенератор визуального промпта на английском языке
@@ -528,7 +820,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | Thumbnail Hook (max 3 words): "${hookWords.toUpperCase()}" | Clean 16:9 composition without watermarks, clear silhouette readability on mobile 160x90px`;
   })();
 
-  const activePromptText = customImagenPrompt.trim() || generatedCoverPrompt;
+  const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
   // Ограничение короткого текст-хука на обложку (до 3 слов)
   const handleThumbHookChange = (val: string) => {
@@ -561,7 +853,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ctx.clearRect(0, 0, w, h);
 
       if (image) {
-        ctx.drawImage(image, 0, 0, w, h);
+        drawCoverImageToCanvas(
+          ctx,
+          image,
+          image.naturalWidth || w,
+          image.naturalHeight || h,
+          w,
+          h,
+          1
+        );
       } else {
         const bgGrad = ctx.createLinearGradient(0, 0, w, h);
         bgGrad.addColorStop(0, '#090d16');
@@ -589,8 +889,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.textAlign = 'center';
         ctx.fillText(
           variantLabel
-            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)»`
-            : 'Нажмите «Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)» или выберите кадр ниже',
+            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (Flux.1-Schnell 16:9)»`
+            : 'Нажмите «Сгенерировать 4 варианта (Flux.1-Schnell 16:9)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
@@ -735,29 +1035,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     );
   };
 
-  // Автономная генерация 4-х 4K кадров на Canvas (при отсутствии квоты/биллинга Imagen 4)
-  const handleGenerateProceduralBatchFallback = (
-    targetSlot: 'A' | 'B' = 'A',
-    fromQuotaLimit: boolean = false
-  ) => {
+  // Автономная генерация 4-х 4K кадров на Canvas (локальный бесплатный генератор)
+  const handleGenerateProceduralBatchFallback = (targetSlot: 'A' | 'B' = 'A') => {
     const fallbackUrls = [0, 1, 2, 3].map(idx =>
       renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
     );
-    setBatchVariants(fallbackUrls);
+    updateBatchVariantsSafely(fallbackUrls);
     setVariantLabels([...LOCAL_SCENE_LABELS]);
     setSelectedMasterVariantIdx(0);
-    setLastModelUsed('HTML5 Canvas 4K (локальный fallback)');
+    setLastModelUsed('HTML5 Canvas 4K (локальный генератор)');
+    setGenerationError(null);
     window.selectedMasterThumbnail = fallbackUrls[0];
-
-    if (fromQuotaLimit) {
-      setIsQuotaFallbackNotice(true);
-      setImagenError(
-        'Бесплатный ключ Gemini API не поддерживает генерацию картинок (limit: 0) — сгенерированы локальные 4K-фоны'
-      );
-    } else {
-      setIsQuotaFallbackNotice(false);
-      setImagenError(null);
-    }
 
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
@@ -766,12 +1054,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setAbModeEnabled(true);
         setImgB(fallbackImg);
       }
-      onNotify(
-        fromQuotaLimit
-          ? 'Бесплатный ключ Gemini API не поддерживает генерацию картинок (limit: 0) — сгенерированы локальные 4K-фоны'
-          : '🎨 Сгенерированы 4 локальных 4K фона (16:9) в сетку 2×2!',
-        fromQuotaLimit ? 'info' : 'success'
-      );
+      onNotify('🎨 Сгенерированы 4 локальных 4K фона (16:9) в сетку 2×2!', 'success');
     };
     fallbackImg.src = fallbackUrls[0];
   };
@@ -793,8 +1076,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
 
     setIsSlicingLocalMedia(true);
-    setImagenError(null);
-    setIsQuotaFallbackNotice(false);
+    setGenerationError(null);
 
     try {
       if (isVideo) {
@@ -867,7 +1149,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           slicedLabels.push(`Кадр #${slicedUrls.length}`);
         }
 
-        setBatchVariants(slicedUrls);
+        updateBatchVariantsSafely(slicedUrls);
         setVariantLabels(slicedLabels);
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Видео-нарезка (${file.name})`);
@@ -929,7 +1211,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
         URL.revokeObjectURL(objectUrl);
 
-        setBatchVariants(slicedUrls);
+        updateBatchVariantsSafely(slicedUrls);
         setVariantLabels(crops.map(c => c.label));
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Арт-нарезка (${file.name})`);
@@ -950,29 +1232,49 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   // ============================================================================
-  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 4 (ai.models.generateImages + fallback gemini-2.5-flash-image)
-  // При ошибке 429 / 403 автоматически запускается локальный HTML5 Canvas 4K генератор
+  // ПАКЕТНАЯ ГЕНЕРАЦИЯ 4 ЧИСТЫХ 16:9 ОБЛОЖЕК БЕЗ ВОДЯНЫХ ЗНАКОВ
+  // Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell) если заполнены ключи,
+  // иначе бесплатный AI Horde API (Flux.1-Schnell, 1344x768, поллинг каждые 3 сек)
   // ============================================================================
-  const handleGenerateImagen4Cover = async (targetSlot: 'A' | 'B' = 'A') => {
-    setIsGeneratingImagen(true);
-    setImagenError(null);
-    setIsQuotaFallbackNotice(false);
+  const handleGenerateFluxCover = async (targetSlot: 'A' | 'B' = 'A') => {
+    generationAbortRef.current?.abort();
+    const controller = new AbortController();
+    generationAbortRef.current = controller;
+
+    setIsGeneratingCovers(true);
+    setGenerationError(null);
+    setGenerationStatusText(
+      isCloudflareConfigured
+        ? 'Мгновенная генерация 4 вариантов через Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)...'
+        : 'Отправка задачи в AI Horde (Flux.1-Schnell • 1344×768)...'
+    );
+
     try {
-      const { images: dataUrls, modelUsed } = await generateImagenThumbnails(activePromptText, 4);
+      const result = isCloudflareConfigured
+        ? await generateViaCloudflareFlux(
+            activePromptText,
+            cfAccountId.trim(),
+            cfApiToken.trim(),
+            controller.signal
+          )
+        : await generateViaAiHordeFlux(activePromptText, {
+            signal: controller.signal,
+            onProgress: msg => setGenerationStatusText(msg)
+          });
 
       const paddedUrls: string[] = [];
       for (let i = 0; i < 4; i++) {
         paddedUrls.push(
-          dataUrls[i] ||
-            dataUrls[0] ||
+          result.images[i] ||
+            result.images[0] ||
             renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, i)
         );
       }
 
-      setBatchVariants(paddedUrls);
-      setVariantLabels(['Вариант #1', 'Вариант #2', 'Вариант #3', 'Вариант #4']);
+      updateBatchVariantsSafely(paddedUrls);
+      setVariantLabels(['Flux #1 (1344×768)', 'Flux #2 (1344×768)', 'Flux #3 (1344×768)', 'Flux #4 (1344×768)']);
       setSelectedMasterVariantIdx(0);
-      setLastModelUsed(modelUsed || 'imagen-4.0-generate-001');
+      setLastModelUsed(result.modelUsed);
       window.selectedMasterThumbnail = paddedUrls[0];
 
       const generatedImg = new Image();
@@ -982,12 +1284,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           setAbModeEnabled(true);
           setImgB(generatedImg);
         }
-        const usedLabel =
-          modelUsed === 'gemini-2.5-flash-image'
-            ? 'Gemini 2.5 Flash Image (fallback 16:9)'
-            : 'Imagen 4 • 16:9 JPEG';
         onNotify(
-          `🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) успешно сгенерирован через ${usedLabel}!`,
+          `🎨 4 чистые 16:9 обложки сгенерированы (${result.modelUsed})!`,
           'success'
         );
       };
@@ -996,22 +1294,24 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const msg =
         err instanceof Error
           ? err.message
-          : 'API не вернуло варианты изображений. Проверьте баланс квоты ключа.';
-      const isQuotaOrPermissionError =
-        (err instanceof ImagenApiError &&
-          (err.quotaExhausted || err.status === 429 || err.status === 403)) ||
-        /429|403|RESOURCE_EXHAUSTED|limit:\s*0|PERMISSION_DENIED|quota/i.test(msg);
-
-      if (isQuotaOrPermissionError) {
-        handleGenerateProceduralBatchFallback(targetSlot, true);
+          : 'Не удалось сгенерировать обложки через Flux.1-Schnell.';
+      setGenerationError(msg);
+      if (err instanceof FluxGenerationError && err.status === 499) {
+        onNotify(msg, 'info');
       } else {
-        setIsQuotaFallbackNotice(false);
-        setImagenError(msg);
         onNotify(msg, 'error');
       }
     } finally {
-      setIsGeneratingImagen(false);
+      setIsGeneratingCovers(false);
+      setGenerationStatusText('');
+      if (generationAbortRef.current === controller) {
+        generationAbortRef.current = null;
+      }
     }
+  };
+
+  const handleCancelGeneration = () => {
+    generationAbortRef.current?.abort();
   };
 
   const handleLoadImageForSlot = (
@@ -1150,7 +1450,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="flex items-center gap-2.5">
                 <ZoomIn className="w-5 h-5 text-cyan-400" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Imagen 4 • 16:9 JPEG)
+                  Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Flux.1-Schnell • 16:9)
                 </h3>
                 {selectedMasterVariantIdx === zoomedVariantIdx && (
                   <span className="text-[11px] font-bold bg-cyan-500 text-black px-2.5 py-0.5 rounded-lg">
@@ -1170,7 +1470,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-700 bg-black">
               <img
                 src={batchVariants[zoomedVariantIdx]}
-                alt={`Imagen 4 Variant ${zoomedVariantIdx + 1}`}
+                alt={`Flux.1-Schnell Variant ${zoomedVariantIdx + 1}`}
                 className="w-full h-full object-contain"
               />
             </div>
@@ -1202,100 +1502,177 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Левая колонка: Настройки Обложки A / B, Imagen 4 и переключатели контроля */}
+        {/* Левая колонка: Настройки Обложки A / B, AI Horde / Cloudflare Flux.1-Schnell и переключатели */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех (Imagen 4 • 16:9 JPEG)
+              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех (Flux.1-Schnell • 16:9)
             </h2>
-            <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-              Imagen 4 • 2×2
+            <span
+              className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                isCloudflareConfigured
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                  : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              }`}
+            >
+              {isCloudflareConfigured ? 'CF Instant • 2×2' : 'AI Horde • 1344×768'}
             </span>
           </div>
 
-          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через Imagen 4 + fallback Gemini 2.5 Flash Image */}
+          {/* Пакетная генерация 2x2 (4 варианта 16:9 без водяных знаков) */}
           <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-emerald-300 uppercase">
-                Пакетная генерация 2×2 (Imagen 4):
+              <span className="font-bold text-emerald-300 uppercase flex items-center gap-1.5">
+                {isCloudflareConfigured ? (
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                {isCloudflareConfigured
+                  ? 'Cloudflare Workers AI (Flux.1-Schnell):'
+                  : 'AI Horde (Flux.1-Schnell Free):'}
               </span>
               <span className="font-mono text-[10px] text-slate-400">
-                4 варианта • 16:9 • JPEG
+                4 кадра • 1344×768 • No Watermark
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => handleGenerateImagen4Cover('A')}
-                disabled={isGeneratingImagen}
+                onClick={() => handleGenerateFluxCover('A')}
+                disabled={isGeneratingCovers}
                 className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-60"
               >
-                {isGeneratingImagen ? (
+                {isGeneratingCovers ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Wand2 className="w-3.5 h-3.5" />
                 )}
-                <span>Imagen 4 (2×2) → A</span>
+                <span>Flux 2×2 → A</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => handleGenerateImagen4Cover('B')}
-                disabled={isGeneratingImagen}
+                onClick={() => handleGenerateFluxCover('B')}
+                disabled={isGeneratingCovers}
                 className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
                 <Wand2 className="w-3.5 h-3.5" />
-                <span>Imagen 4 (2×2) → B</span>
+                <span>Flux 2×2 → B</span>
               </button>
             </div>
 
-            {/* КОМПАКТНОЕ ОПОВЕЩЕНИЕ ПРИ 429 / 403 ИЛИ ОШИБКЕ API (max-w-md max-h-24 overflow-hidden text-ellipsis) */}
-            {imagenError && (
+            {isGeneratingCovers && (
+              <div className="bg-slate-950/80 border border-cyan-500/40 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-mono text-cyan-300 truncate">
+                  {generationStatusText || 'Генерация Flux.1-Schnell...'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCancelGeneration}
+                  className="text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 text-rose-200 px-2 py-0.5 rounded shrink-0 cursor-pointer"
+                >
+                  Отмена
+                </button>
+              </div>
+            )}
+
+            {/* Настройки опционального Cloudflare Workers AI (localStorage) */}
+            <div className="pt-1 border-t border-slate-800/80">
+              <button
+                type="button"
+                onClick={() => setShowCfSettings(prev => !prev)}
+                className="w-full flex items-center justify-between text-[11px] text-slate-300 hover:text-amber-300 font-semibold py-1 cursor-pointer transition"
+              >
+                <span className="flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                  Cloudflare Workers AI (опционально, без очереди)
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">
+                  {isCloudflareConfigured ? 'ACTIVE' : showCfSettings ? '▲' : '▼'}
+                </span>
+              </button>
+
+              {showCfSettings && (
+                <div className="mt-2 space-y-2 bg-[#0b0f17] border border-slate-800 rounded-xl p-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                      Cloudflare Account ID:
+                    </label>
+                    <input
+                      type="text"
+                      value={cfAccountId}
+                      onChange={e => setCfAccountId(e.target.value)}
+                      placeholder="Например: 8a1b2c3d4e5f67890..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                      Cloudflare API Token (Workers AI):
+                    </label>
+                    <input
+                      type="password"
+                      value={cfApiToken}
+                      onChange={e => setCfApiToken(e.target.value)}
+                      placeholder="Bearer API Token"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                    <span className="text-[10px] text-slate-500 leading-tight">
+                      Хранится в localStorage. Модель: <code>@cf/black-forest-labs/flux-1-schnell</code>
+                    </span>
+                    {(cfAccountId || cfApiToken) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCfAccountId('');
+                          setCfApiToken('');
+                          onNotify('Ключи Cloudflare очищены — активен бесплатный AI Horde.', 'info');
+                        }}
+                        className="text-[10px] text-rose-300 hover:text-rose-200 underline shrink-0 cursor-pointer"
+                      >
+                        Очистить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Компактный блок ошибки генерации */}
+            {generationError && (
               <div
                 role="alert"
-                className={`w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3 py-2 text-xs space-y-1 border ${
-                  isQuotaFallbackNotice
-                    ? 'bg-amber-950/70 border-amber-500/60 text-amber-100'
-                    : 'bg-rose-950/80 border-rose-500/70 text-rose-200'
-                }`}
+                className="w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3 py-2 text-xs space-y-1 border bg-rose-950/80 border-rose-500/70 text-rose-200"
               >
                 <div className="flex items-start gap-2">
-                  <AlertTriangle
-                    className={`w-4 h-4 shrink-0 mt-0.5 ${
-                      isQuotaFallbackNotice ? 'text-amber-400' : 'text-rose-400'
-                    }`}
-                  />
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
                   <div className="flex-1 min-w-0">
                     <p
-                      title={imagenError}
-                      className={`text-[11px] font-semibold leading-snug line-clamp-2 overflow-hidden text-ellipsis ${
-                        isQuotaFallbackNotice ? 'text-amber-200' : 'text-rose-200'
-                      }`}
+                      title={generationError}
+                      className="text-[11px] font-semibold leading-snug line-clamp-2 overflow-hidden text-ellipsis text-rose-200"
                     >
-                      {imagenError}
+                      {generationError}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setImagenError(null);
-                      setIsQuotaFallbackNotice(false);
-                    }}
+                    onClick={() => setGenerationError(null)}
                     className="text-[10px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
                   >
                     ✕
                   </button>
                 </div>
-                {!isQuotaFallbackNotice && (
-                  <button
-                    type="button"
-                    onClick={() => handleGenerateProceduralBatchFallback('A', false)}
-                    className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2 py-0.5 rounded text-[10px] cursor-pointer transition"
-                  >
-                    🎨 Сгенерировать 4 локальных 4K фона (Canvas 2×2)
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => handleGenerateProceduralBatchFallback('A')}
+                  className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2 py-0.5 rounded text-[10px] cursor-pointer transition"
+                >
+                  🎨 Сгенерировать 4 локальных 4K фона (Canvas 2×2)
+                </button>
               </div>
             )}
           </div>
@@ -1619,18 +1996,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         </div>
       </div>
 
-      {/* СЕТКА 2x2 IMAGEN 4 (grid grid-cols-2 gap-3 w-full my-4) */}
+      {/* СЕТКА 2x2 FLUX.1-SCHNELL (grid grid-cols-2 gap-3 w-full my-4) */}
       <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2.5">
             <Grid className="w-5 h-5 text-cyan-400" />
             <div>
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Сетка 2×2 вариантов обложки (Imagen 4 • 16:9 JPEG)
+                Сетка 2×2 обложек без водяных знаков (Flux.1-Schnell • 1344×768)
               </h3>
               <p className="text-xs text-slate-400">
                 Кликните по любой из 4-х карточек для выбора мастер-обложки (`window.selectedMasterThumbnail`)
-                {lastModelUsed ? ` • Модель: ${lastModelUsed}` : ''}
+                {lastModelUsed ? ` • Движок: ${lastModelUsed}` : ''}
               </p>
             </div>
           </div>
@@ -1646,7 +2023,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <button
               type="button"
               onClick={() => localMediaInputRef.current?.click()}
-              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
               className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
             >
               {isSlicingLocalMedia ? (
@@ -1659,8 +2036,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={() => handleGenerateProceduralBatchFallback('A', false)}
-              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              onClick={() => handleGenerateProceduralBatchFallback('A')}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
               className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition disabled:opacity-60"
             >
               <span>🎨 4 локальных фона</span>
@@ -1668,45 +2045,38 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={() => handleGenerateImagen4Cover('A')}
-              disabled={isGeneratingImagen || isSlicingLocalMedia}
+              onClick={() => handleGenerateFluxCover('A')}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
               className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-60"
             >
-              {isGeneratingImagen ? (
+              {isGeneratingCovers ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
               ) : (
                 <Wand2 className="w-4 h-4" />
               )}
-              <span>Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)</span>
+              <span>
+                {isCloudflareConfigured
+                  ? 'Сгенерировать 4 обложки (Cloudflare Flux)'
+                  : 'Сгенерировать 4 обложки (AI Horde Flux 1344×768)'}
+              </span>
             </button>
           </div>
         </div>
 
-        {imagenError && (
+        {generationError && (
           <div
             role="alert"
-            className={`w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3.5 py-2 text-xs flex items-center justify-between gap-2 border ${
-              isQuotaFallbackNotice
-                ? 'bg-amber-950/60 border-amber-500/50 text-amber-200'
-                : 'bg-rose-950/75 border-rose-500/60 text-rose-200'
-            }`}
+            className="w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3.5 py-2 text-xs flex items-center justify-between gap-2 border bg-rose-950/75 border-rose-500/60 text-rose-200"
           >
             <div className="flex items-center gap-2 min-w-0">
-              <AlertTriangle
-                className={`w-4 h-4 shrink-0 ${
-                  isQuotaFallbackNotice ? 'text-amber-400' : 'text-rose-400'
-                }`}
-              />
-              <span title={imagenError} className="truncate font-semibold">
-                {imagenError}
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span title={generationError} className="truncate font-semibold">
+                {generationError}
               </span>
             </div>
             <button
               type="button"
-              onClick={() => {
-                setImagenError(null);
-                setIsQuotaFallbackNotice(false);
-              }}
+              onClick={() => setGenerationError(null)}
               className="text-[11px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
             >
               ✕
@@ -1714,16 +2084,25 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         )}
 
-        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 4 / нарезки локального медиа */}
-        {isGeneratingImagen || isSlicingLocalMedia ? (
+        {/* Индикатор и 4 анимированных скелетона на время запроса к AI Horde / Cloudflare / нарезки медиа */}
+        {isGeneratingCovers || isSlicingLocalMedia ? (
           <div className="space-y-3">
-            <div className="flex items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-400">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-400">
               <RefreshCw className="w-4 h-4 animate-spin" />
               <span>
                 {isSlicingLocalMedia
                   ? 'Нарезка 4 вариантов превью (16:9) из локального видео/арта...'
-                  : 'Генерация 4 вариантов кадра через Imagen 4 • 16:9 JPEG...'}
+                  : generationStatusText || 'Генерация 4 чистых 16:9 обложек (Flux.1-Schnell)...'}
               </span>
+              {isGeneratingCovers && (
+                <button
+                  type="button"
+                  onClick={handleCancelGeneration}
+                  className="bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/50 text-rose-200 px-2.5 py-0.5 rounded-lg text-[11px] cursor-pointer"
+                >
+                  Отменить
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3 w-full my-4">
               {[0, 1, 2, 3].map(skeletonIdx => (
@@ -1735,7 +2114,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <span className="text-[11px] font-mono text-slate-400 text-center">
                     {isSlicingLocalMedia
                       ? `Подготовка кадра #${skeletonIdx + 1}...`
-                      : `Генерация 4 вариантов кадра через Imagen 4... (Вариант #${skeletonIdx + 1})`}
+                      : `Flux.1-Schnell 1344×768 • Вариант #${skeletonIdx + 1}...`}
                   </span>
                 </div>
               ))}
@@ -1978,14 +2357,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         </div>
 
-        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ IMAGEN 4 / MIDJOURNEY / LEONARDO.AI */}
+        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ FLUX.1-SCHNELL / AI HORDE / CLOUDFLARE WORKERS AI */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Layers className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  2. Генератор визуального промпта (Imagen 4 / Midjourney / Leonardo.ai)
+                  2. Генератор визуального промпта (Flux.1-Schnell / Midjourney / Leonardo.ai)
                 </h3>
               </div>
               <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
@@ -2007,7 +2386,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       | 'truecrime_contrast'
                       | 'scifi_neon'
                   );
-                  setCustomImagenPrompt('');
+                  setCustomFluxPrompt('');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-500"
               >
@@ -2028,12 +2407,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                Промпт для Imagen 4 (`imagen-4.0-generate-001` / fallback `gemini-2.5-flash-image`) и веб-генераторов:
+                Промпт для Flux.1-Schnell (AI Horde 1344×768 / Cloudflare Workers AI):
               </label>
               <textarea
                 rows={5}
                 value={activePromptText}
-                onChange={e => setCustomImagenPrompt(e.target.value)}
+                onChange={e => setCustomFluxPrompt(e.target.value)}
                 className="w-full bg-[#0b0f17] border border-slate-800 focus:border-indigo-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
               />
             </div>
@@ -2042,12 +2421,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
-              onClick={() => handleGenerateImagen4Cover('A')}
-              disabled={isGeneratingImagen}
+              onClick={() => handleGenerateFluxCover('A')}
+              disabled={isGeneratingCovers}
               className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-cyan-500/20 disabled:opacity-60"
             >
               <Wand2 className="w-4 h-4" />
-              <span>Сгенерировать 2×2 (Imagen 4 • 16:9 JPEG)</span>
+              <span>
+                {isCloudflareConfigured
+                  ? 'Сгенерировать 2×2 (Cloudflare Flux)'
+                  : 'Сгенерировать 2×2 (AI Horde Flux 1344×768)'}
+              </span>
             </button>
 
             <button

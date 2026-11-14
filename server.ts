@@ -338,6 +338,198 @@ Return JSON with:
   });
 
   // ==========================================================================
+  // 4. GET /api/proxy-image — CORS-безопасный прокси для AI Horde R2/CDN картинок
+  // ==========================================================================
+  app.get('/api/proxy-image', async (req, res) => {
+    try {
+      const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+      if (!rawUrl) {
+        res.status(400).json({ ok: false, error: 'Missing url query parameter' });
+        return;
+      }
+
+      let parsed: URL;
+      try {
+        parsed = new URL(rawUrl);
+      } catch {
+        res.status(400).json({ ok: false, error: 'Invalid URL' });
+        return;
+      }
+
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        res.status(400).json({ ok: false, error: 'Unsupported URL protocol' });
+        return;
+      }
+
+      const host = parsed.hostname.toLowerCase();
+      if (
+        host === 'localhost' ||
+        host === '0.0.0.0' ||
+        host === '::1' ||
+        host.startsWith('127.') ||
+        host.startsWith('10.') ||
+        host.startsWith('192.168.') ||
+        host.startsWith('169.254.') ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        host.endsWith('.local') ||
+        host.endsWith('.internal')
+      ) {
+        res.status(403).json({ ok: false, error: 'Blocked internal host' });
+        return;
+      }
+
+      const upstream = await fetch(parsed.toString(), {
+        headers: {
+          Accept: 'image/webp,image/png,image/jpeg,image/*;q=0.8'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!upstream.ok) {
+        res.status(upstream.status).json({
+          ok: false,
+          error: `Upstream image fetch failed (${upstream.status})`
+        });
+        return;
+      }
+
+      const contentType = upstream.headers.get('content-type') || 'image/webp';
+      if (!contentType.toLowerCase().startsWith('image/')) {
+        res.status(415).json({ ok: false, error: 'Upstream response is not an image' });
+        return;
+      }
+
+      const arrayBuf = await upstream.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(buffer);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(502).json({ ok: false, error: msg });
+    }
+  });
+
+  // ==========================================================================
+  // 5. POST /api/cloudflare/flux — Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)
+  // ==========================================================================
+  app.post('/api/cloudflare/flux', async (req, res) => {
+    try {
+      const { accountId, apiToken, prompt, count } = req.body as {
+        accountId?: string;
+        apiToken?: string;
+        prompt?: string;
+        count?: number;
+      };
+
+      const cleanAccountId = (accountId || '').trim();
+      const cleanApiToken = (apiToken || '').trim();
+      const cleanPrompt = (prompt || '').trim();
+
+      if (!cleanAccountId || !cleanApiToken) {
+        res.status(400).json({
+          ok: false,
+          error: 'Укажите Cloudflare Account ID и API Token.'
+        });
+        return;
+      }
+
+      if (!/^[a-zA-Z0-9_-]{8,64}$/.test(cleanAccountId)) {
+        res.status(400).json({
+          ok: false,
+          error: 'Некорректный формат Cloudflare Account ID.'
+        });
+        return;
+      }
+
+      if (!cleanPrompt) {
+        res.status(400).json({ ok: false, error: 'Prompt text is required' });
+        return;
+      }
+
+      const requestedCount = Math.min(Math.max(Number(count) || 4, 1), 4);
+      const angleCues = [
+        'Wide cinematic 16:9 establishing shot, crisp foreground subject, dramatic lighting.',
+        'Low-angle intense close-up focal point, rich chiaroscuro shadows, clean left negative space.',
+        'Rule-of-thirds atmospheric documentary framing, volumetric mist, sharp focal silhouette.',
+        'High-contrast moody backlight composition, glowing rim light, ultra-detailed texture.'
+      ];
+
+      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cleanAccountId)}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+
+      const images = await Promise.all(
+        Array.from({ length: requestedCount }, async (_, idx) => {
+          const seed = Math.floor(Math.random() * 2147483646) + 1;
+          const variantPrompt = `${cleanPrompt}. ${angleCues[idx % angleCues.length]}`.slice(0, 1900);
+
+          const cfResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cleanApiToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              prompt: variantPrompt,
+              steps: 4,
+              seed
+            }),
+            signal: AbortSignal.timeout(45000)
+          });
+
+          const ctype = (cfResp.headers.get('content-type') || '').toLowerCase();
+
+          if (ctype.startsWith('image/')) {
+            if (!cfResp.ok) {
+              throw new Error(`Cloudflare API error (${cfResp.status})`);
+            }
+            const buf = Buffer.from(await cfResp.arrayBuffer());
+            return `data:${ctype.split(';')[0]};base64,${buf.toString('base64')}`;
+          }
+
+          const json = (await cfResp.json().catch(() => ({}))) as {
+            success?: boolean;
+            errors?: Array<{ code?: number; message?: string }>;
+            result?: { image?: string };
+          };
+
+          if (!cfResp.ok || json.success === false || !json.result?.image) {
+            const cfErrMsg =
+              json.errors?.[0]?.message ||
+              `Cloudflare Workers AI HTTP ${cfResp.status}`;
+            const err = new Error(cfErrMsg) as Error & { status?: number };
+            err.status = cfResp.status;
+            throw err;
+          }
+
+          const rawImg = json.result.image;
+          return rawImg.startsWith('data:image/')
+            ? rawImg
+            : `data:image/jpeg;base64,${rawImg}`;
+        })
+      );
+
+      res.json({
+        ok: true,
+        modelUsed: '@cf/black-forest-labs/flux-1-schnell',
+        images
+      });
+    } catch (error) {
+      const errObj = error as { status?: number };
+      const msg = error instanceof Error ? error.message : String(error);
+      const status =
+        errObj?.status && errObj.status >= 400 && errObj.status < 600
+          ? errObj.status
+          : 500;
+      res.status(status).json({
+        ok: false,
+        statusCode: status,
+        error: msg
+      });
+    }
+  });
+
+  // ==========================================================================
   // VITE MIDDLEWARE / STATIC SERVING
   // ==========================================================================
   if (process.env.NODE_ENV !== 'production') {
