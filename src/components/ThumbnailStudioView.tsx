@@ -28,7 +28,9 @@ import {
   Zap,
   KeyRound,
   Type,
-  Flame
+  Flame,
+  RotateCcw,
+  Move
 } from 'lucide-react';
 
 declare global {
@@ -688,7 +690,7 @@ function renderProcedural16x9ArtworkDataUrl(
 }
 
 export type CinematicBadgeId =
-  | '4k_gold'
+  | '4k_ultra_hd'
   | '3_hours'
   | 'ambience_asmr'
   | 'deep_sleep'
@@ -703,7 +705,7 @@ export interface CinematicBadgeOption {
 }
 
 const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
-  { id: '4k_gold', label: '4K ULTRA HD • GOLD' },
+  { id: '4k_ultra_hd', label: '4K ULTRA HD' },
   { id: '3_hours', label: '3 HOURS' },
   { id: 'ambience_asmr', label: 'AMBIENCE • ASMR' },
   { id: 'deep_sleep', label: 'DEEP SLEEP' },
@@ -725,15 +727,19 @@ const VALID_BADGE_IDS = new Set<string>(CINEMATIC_BADGE_OPTIONS.map(b => b.id));
 
 function parseBadgeIds(raw: string): CinematicBadgeId[] {
   if (!raw || raw.trim().toLowerCase() === 'none') return [];
-  return raw
+  const normalized = raw
     .split(',')
-    .map(s => s.trim())
-    .filter((s): s is CinematicBadgeId => VALID_BADGE_IDS.has(s))
-    .slice(0, 3);
+    .map(s => {
+      const trimmed = s.trim();
+      return trimmed === '4k_gold' ? '4k_ultra_hd' : trimmed;
+    })
+    .filter((s): s is CinematicBadgeId => VALID_BADGE_IDS.has(s));
+  return Array.from(new Set(normalized)).slice(0, 3);
 }
 
 export type ThumbnailFontStyleId =
   | 'cinematic_sans'
+  | 'gold_ice_magic'
   | 'royal_gold_laurels'
   | 'medieval_serif'
   | 'minimal_clean';
@@ -751,6 +757,12 @@ const FONT_STYLE_OPTIONS: FontStyleOption[] = [
     label: 'Cinematic Sans (Montserrat / Impact)',
     subtitle: 'Современный жирный гротеск',
     previewFontFamily: '"Montserrat", Impact, sans-serif'
+  },
+  {
+    id: 'gold_ice_magic',
+    label: 'Gold & Ice Magic (Cinzel + Frost)',
+    subtitle: '3D-золото сверху (#FFE58F → #B86B00) и морозный лёд с инеем снизу (#FFFFFF → #5B9BD5)',
+    previewFontFamily: '"Cinzel", "Cinzel Decorative", serif'
   },
   {
     id: 'royal_gold_laurels',
@@ -771,6 +783,300 @@ const FONT_STYLE_OPTIONS: FontStyleOption[] = [
     previewFontFamily: '"Bebas Neue", "Inter", sans-serif'
   }
 ];
+
+export interface HookTextLayout {
+  xPct: number;
+  yPct: number;
+  fontScalePct: number;
+}
+
+interface HookBoundingBoxPct {
+  leftPct: number;
+  topPct: number;
+  widthPct: number;
+  heightPct: number;
+}
+
+const DEFAULT_HOOK_LAYOUT: HookTextLayout = {
+  xPct: 50,
+  yPct: 80,
+  fontScalePct: 100
+};
+
+function splitHookLines(rawText: string, balanceTwoLinesOnSpace: boolean): string[] {
+  const trimmed = (rawText || '').replace(/\r\n/g, '\n').trim();
+  if (!trimmed) return [];
+
+  if (trimmed.includes('\n')) {
+    return trimmed
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+  }
+
+  if (!balanceTwoLinesOnSpace) {
+    return [trimmed];
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return [trimmed];
+  if (words.length === 2) return [words[0], words[1]];
+
+  let bestSplit = 1;
+  let bestDiff = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const leftLen = words.slice(0, i).join(' ').length;
+    const rightLen = words.slice(i).join(' ').length;
+    const diff = Math.abs(leftLen - rightLen);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestSplit = i;
+    }
+  }
+  return [words.slice(0, bestSplit).join(' '), words.slice(bestSplit).join(' ')];
+}
+
+function drawSparkleStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  glowColor: string
+): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = radius * 1.1;
+
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 1.25);
+  halo.addColorStop(0, color);
+  halo.addColorStop(0.45, glowColor);
+  halo.addColorStop(1, 'transparent');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * 1.25, 0, Math.PI * 2);
+  ctx.fill();
+
+  const inner = radius * 0.19;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -radius);
+  ctx.quadraticCurveTo(inner * 0.4, -inner * 0.4, radius, 0);
+  ctx.quadraticCurveTo(inner * 0.4, inner * 0.4, 0, radius);
+  ctx.quadraticCurveTo(-inner * 0.4, inner * 0.4, -radius, 0);
+  ctx.quadraticCurveTo(-inner * 0.4, -inner * 0.4, 0, -radius);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawSnowflake(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  rotationRad: number,
+  alpha: number,
+  scale: number
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rotationRad);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#E8F7FF';
+  ctx.shadowColor = 'rgba(130, 210, 255, 0.85)';
+  ctx.shadowBlur = 10 * scale;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1, 1.8 * scale);
+
+  for (let arm = 0; arm < 6; arm++) {
+    ctx.save();
+    ctx.rotate((arm * Math.PI) / 3);
+
+    // Main branch
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -radius);
+    ctx.stroke();
+
+    // Outer V-barb
+    const b1 = radius * 0.64;
+    const b1Len = radius * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(-b1Len * 0.65, -b1 - b1Len * 0.55);
+    ctx.lineTo(0, -b1);
+    ctx.lineTo(b1Len * 0.65, -b1 - b1Len * 0.55);
+    ctx.stroke();
+
+    // Inner V-barb
+    const b2 = radius * 0.36;
+    const b2Len = radius * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(-b2Len * 0.65, -b2 - b2Len * 0.55);
+    ctx.lineTo(0, -b2);
+    ctx.lineTo(b2Len * 0.65, -b2 - b2Len * 0.55);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Tiny bright core dot
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.max(1, radius * 0.12), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawGoldenMagicSwirl(
+  ctx: CanvasRenderingContext2D,
+  anchorX: number,
+  anchorY: number,
+  span: number,
+  side: -1 | 1,
+  scale: number
+): void {
+  ctx.save();
+  ctx.translate(anchorX, anchorY);
+  ctx.scale(side, 1);
+
+  const grad = ctx.createLinearGradient(0, -span * 0.45, span * 0.9, span * 0.45);
+  grad.addColorStop(0, '#FFF8D6');
+  grad.addColorStop(0.45, '#FFE58F');
+  grad.addColorStop(0.85, '#F5A623');
+  grad.addColorStop(1, 'rgba(245, 166, 35, 0)');
+
+  ctx.shadowColor = 'rgba(255, 195, 65, 0.85)';
+  ctx.shadowBlur = 14 * scale;
+  ctx.strokeStyle = grad;
+  ctx.lineCap = 'round';
+
+  // Primary curling flourish ribbon
+  ctx.lineWidth = Math.max(1.2, 2.8 * scale);
+  ctx.beginPath();
+  ctx.moveTo(0, -span * 0.14);
+  ctx.bezierCurveTo(
+    span * 0.42,
+    -span * 0.56,
+    span * 0.88,
+    -span * 0.15,
+    span * 0.64,
+    span * 0.22
+  );
+  ctx.bezierCurveTo(
+    span * 0.48,
+    span * 0.44,
+    span * 0.24,
+    span * 0.24,
+    span * 0.42,
+    span * 0.06
+  );
+  ctx.stroke();
+
+  // Secondary delicate arc
+  ctx.lineWidth = Math.max(0.9, 1.5 * scale);
+  ctx.globalAlpha = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(span * 0.08, span * 0.06);
+  ctx.quadraticCurveTo(span * 0.52, -span * 0.28, span * 0.94, -span * 0.08);
+  ctx.stroke();
+
+  // Golden magic dust dots along the swirl
+  const dustPts = [
+    { x: span * 0.22, y: -span * 0.34, r: 2.3 },
+    { x: span * 0.54, y: -span * 0.36, r: 1.8 },
+    { x: span * 0.78, y: -span * 0.02, r: 2.5 },
+    { x: span * 0.52, y: span * 0.28, r: 1.7 },
+    { x: span * 0.88, y: -span * 0.24, r: 1.5 }
+  ];
+  ctx.fillStyle = '#FFF3B0';
+  for (const pt of dustPts) {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, Math.max(1, pt.r * scale), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawMagicGlowAndSnowflakes(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  maxLineW: number,
+  blockH: number,
+  fontSize: number,
+  scale: number,
+  fontScale: number
+): void {
+  const effScale = scale * fontScale;
+  const halfW = maxLineW / 2;
+
+  ctx.save();
+
+  // 1. Soft warm gold + cool ice dual aura behind the title
+  const goldAura = ctx.createRadialGradient(
+    centerX,
+    centerY - blockH * 0.22,
+    10 * effScale,
+    centerX,
+    centerY - blockH * 0.22,
+    Math.max(halfW * 1.15, 160 * effScale)
+  );
+  goldAura.addColorStop(0, 'rgba(255, 200, 75, 0.24)');
+  goldAura.addColorStop(0.55, 'rgba(245, 166, 35, 0.08)');
+  goldAura.addColorStop(1, 'transparent');
+  ctx.fillStyle = goldAura;
+  ctx.fillRect(
+    centerX - halfW * 1.4 - 120 * effScale,
+    centerY - blockH - 80 * effScale,
+    maxLineW * 1.4 + 240 * effScale,
+    blockH * 1.4 + 120 * effScale
+  );
+
+  const iceAura = ctx.createRadialGradient(
+    centerX,
+    centerY + blockH * 0.26,
+    10 * effScale,
+    centerX,
+    centerY + blockH * 0.26,
+    Math.max(halfW * 1.15, 160 * effScale)
+  );
+  iceAura.addColorStop(0, 'rgba(140, 215, 255, 0.22)');
+  iceAura.addColorStop(0.55, 'rgba(91, 155, 213, 0.08)');
+  iceAura.addColorStop(1, 'transparent');
+  ctx.fillStyle = iceAura;
+  ctx.fillRect(
+    centerX - halfW * 1.4 - 120 * effScale,
+    centerY - 40 * effScale,
+    maxLineW * 1.4 + 240 * effScale,
+    blockH * 1.4 + 120 * effScale
+  );
+
+  // 2. Golden light swirls flanking the left & right edges
+  const swirlSpan = Math.max(66 * effScale, fontSize * 1.05);
+  drawGoldenMagicSwirl(ctx, centerX - halfW - 14 * effScale, centerY - blockH * 0.14, swirlSpan, -1, effScale);
+  drawGoldenMagicSwirl(ctx, centerX + halfW + 14 * effScale, centerY - blockH * 0.14, swirlSpan, 1, effScale);
+
+  // 3. Detailed snowflakes flanking left & right of the text
+  const snowOffsetX = halfW + 34 * effScale;
+  drawSnowflake(ctx, centerX - snowOffsetX, centerY + blockH * 0.22, 18 * effScale, 0.22, 0.92, effScale);
+  drawSnowflake(ctx, centerX - snowOffsetX - 38 * effScale, centerY - blockH * 0.04, 11 * effScale, 0.65, 0.72, effScale);
+  drawSnowflake(ctx, centerX + snowOffsetX, centerY + blockH * 0.22, 18 * effScale, -0.22, 0.92, effScale);
+  drawSnowflake(ctx, centerX + snowOffsetX + 38 * effScale, centerY - blockH * 0.04, 11 * effScale, -0.65, 0.72, effScale);
+
+  // 4. Warm gold & icy white sparkle star flares
+  drawSparkleStar(ctx, centerX - halfW - 22 * effScale, centerY - blockH * 0.36, 15 * effScale, '#FFF9DB', 'rgba(255, 210, 80, 0.9)');
+  drawSparkleStar(ctx, centerX + halfW + 22 * effScale, centerY - blockH * 0.36, 15 * effScale, '#FFF9DB', 'rgba(255, 210, 80, 0.9)');
+  drawSparkleStar(ctx, centerX - halfW * 0.68, centerY - blockH * 0.48, 9 * effScale, '#FFE58F', 'rgba(245, 166, 35, 0.8)');
+  drawSparkleStar(ctx, centerX + halfW * 0.72, centerY + blockH * 0.44, 10 * effScale, '#FFFFFF', 'rgba(140, 215, 255, 0.85)');
+  drawSparkleStar(ctx, centerX - halfW - 58 * effScale, centerY + blockH * 0.34, 11 * effScale, '#E0F4FF', 'rgba(130, 210, 255, 0.85)');
+  drawSparkleStar(ctx, centerX + halfW + 58 * effScale, centerY + blockH * 0.34, 11 * effScale, '#E0F4FF', 'rgba(130, 210, 255, 0.85)');
+
+  ctx.restore();
+}
 
 function drawGoldenLaurelBranch(
   ctx: CanvasRenderingContext2D,
@@ -970,6 +1276,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>(['3_hours', 'deep_sleep']);
   const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
   const [royalDecorEnabled, setRoyalDecorEnabled] = useState<boolean>(true);
+  const [magicDecorEnabled, setMagicDecorEnabled] = useState<boolean>(true);
+  const [hookLayoutA, setHookLayoutA] = useState<HookTextLayout>({ ...DEFAULT_HOOK_LAYOUT });
+  const [hookLayoutB, setHookLayoutB] = useState<HookTextLayout>({ ...DEFAULT_HOOK_LAYOUT });
+  const [hookBoxA, setHookBoxA] = useState<HookBoundingBoxPct | null>(null);
+  const [hookBoxB, setHookBoxB] = useState<HookBoundingBoxPct | null>(null);
+  const [draggingSlot, setDraggingSlot] = useState<'A' | 'B' | null>(null);
+  const [hoveredSlot, setHoveredSlot] = useState<'A' | 'B' | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
 
   const selectedBadgesA = parseBadgeIds(thumbBadge);
@@ -1101,6 +1414,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       Promise.allSettled([
         document.fonts.load('900 64px "Montserrat"'),
         document.fonts.load('900 64px "Cinzel Decorative"'),
+        document.fonts.load('900 64px "Cinzel"'),
+        document.fonts.load('800 64px "Cinzel"'),
         document.fonts.load('700 64px "Cinzel"'),
         document.fonts.load('700 64px "Cormorant Garamond"'),
         document.fonts.load('700 64px "Bebas Neue"'),
@@ -1186,16 +1501,50 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
-  // Ограничение короткого текст-хука на обложку (до 3 слов)
+  // Свободный ввод текста-хука без авто-обрезки (поддерживает Enter для переноса на 2 строки)
   const handleThumbHookChange = (val: string) => {
-    const words = val.trimStart().split(/\s+/).filter(Boolean);
-    if (words.length > 3) {
-      onThumbTitleChange(words.slice(0, 3).join(' '));
-      onNotify('Thumbnail Hook ограничен максимум 3 словами для максимального CTR!', 'info');
-    } else {
-      onThumbTitleChange(val);
-    }
+    onThumbTitleChange(val);
   };
+
+  // Интерактивное перетаскивание мышкой и пальцем исключительно для заголовка (текста-хука)
+  const startHookDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, slot: 'A' | 'B') => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      const canvasEl = slot === 'A' ? canvasARef.current : canvasBRef.current;
+      if (!canvasEl) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = canvasEl.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initialLayout = slot === 'A' ? hookLayoutA : hookLayoutB;
+      const setLayout = slot === 'A' ? setHookLayoutA : setHookLayoutB;
+
+      setDraggingSlot(slot);
+
+      const onPointerMove = (moveEv: PointerEvent) => {
+        const dxPct = ((moveEv.clientX - startX) / Math.max(1, rect.width)) * 100;
+        const dyPct = ((moveEv.clientY - startY) / Math.max(1, rect.height)) * 100;
+        const nextX = Math.max(4, Math.min(96, Number((initialLayout.xPct + dxPct).toFixed(2))));
+        const nextY = Math.max(6, Math.min(94, Number((initialLayout.yPct + dyPct).toFixed(2))));
+        setLayout(prev => ({ ...prev, xPct: nextX, yPct: nextY }));
+      };
+
+      const onPointerUp = () => {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+        setDraggingSlot(null);
+      };
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+    },
+    [hookLayoutA, hookLayoutB]
+  );
 
   // Отрисовка обложки на выбранном Canvas (320x180, 1280x720 или 3840x2160) без водяных знаков
   const drawCoverOnCanvas = useCallback(
@@ -1206,11 +1555,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       activeBadges: CinematicBadgeId[],
       activeFontStyle: ThumbnailFontStyleId,
       showRoyalDecor: boolean,
+      showMagicDecor: boolean,
+      hookLayout: HookTextLayout,
       variantLabel?: string
-    ) => {
-      if (!canvas) return;
+    ): HookBoundingBoxPct | null => {
+      if (!canvas) return null;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      if (!ctx) return null;
 
       const w = canvas.width;
       const h = canvas.height;
@@ -1262,21 +1613,38 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         );
       }
 
-      const trimmedHook = (titleText || '').trim();
-      const shortHook = trimmedHook
-        ? trimmedHook.split(/\s+/).slice(0, 3).join(' ').toUpperCase()
-        : '';
+      const hookLines = splitHookLines(titleText, activeFontStyle === 'gold_ice_magic');
+      const hasHook = hookLines.length > 0;
+      const centerX = (Math.max(4, Math.min(96, hookLayout.xPct)) / 100) * w;
+      const centerY = (Math.max(6, Math.min(94, hookLayout.yPct)) / 100) * h;
+      const fontScale = Math.max(0.6, Math.min(1.5, hookLayout.fontScalePct / 100));
 
-      // Нижний градиент/тень под текст рисуем ТОЛЬКО если текст-хук не пустой
-      if (shortHook) {
-        const grad = ctx.createLinearGradient(0, h * 0.5, 0, h);
-        grad.addColorStop(0, 'rgba(0,0,0,0)');
-        grad.addColorStop(1, 'rgba(0,0,0,0.86)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, h * 0.5, w, h * 0.5);
+      // Затемнение/контрастная подложка под текст рисуется ТОЛЬКО если текст-хук не пустой
+      if (hasHook) {
+        if (hookLayout.yPct >= 55) {
+          const grad = ctx.createLinearGradient(0, h * 0.48, 0, h);
+          grad.addColorStop(0, 'rgba(0,0,0,0)');
+          grad.addColorStop(1, 'rgba(0,0,0,0.84)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, h * 0.48, w, h * 0.52);
+        } else {
+          const softSpot = ctx.createRadialGradient(
+            centerX,
+            centerY,
+            40 * scale,
+            centerX,
+            centerY,
+            480 * scale * fontScale
+          );
+          softSpot.addColorStop(0, 'rgba(2, 6, 14, 0.58)');
+          softSpot.addColorStop(0.65, 'rgba(2, 6, 14, 0.22)');
+          softSpot.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = softSpot;
+          ctx.fillRect(0, 0, w, h);
+        }
       }
 
-      // Мультивыбор кинематографичных бейджей (1..3 шт.) в верхней безопасной зоне (не перекрывает нижний правый таймкод YouTube)
+      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу в аккуратном горизонтальном ряду (не перетаскивается и не мешает таймкоду)
       const badgesToDraw = activeBadges
         .map(id => BADGE_LABEL_BY_ID[id])
         .filter((lbl): lbl is string => Boolean(lbl))
@@ -1284,7 +1652,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       if (badgesToDraw.length > 0) {
         const badgeFontPx =
-          activeFontStyle === 'royal_gold_laurels'
+          activeFontStyle === 'royal_gold_laurels' || activeFontStyle === 'gold_ice_magic'
             ? 13 * scale
             : activeFontStyle === 'medieval_serif'
             ? 15 * scale
@@ -1293,7 +1661,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             : 14 * scale;
 
         const badgeFontFamily =
-          activeFontStyle === 'royal_gold_laurels'
+          activeFontStyle === 'gold_ice_magic'
+            ? '"Cinzel", "Cinzel Decorative", Georgia, serif'
+            : activeFontStyle === 'royal_gold_laurels'
             ? '"Cinzel Decorative", "Cinzel", Georgia, serif'
             : activeFontStyle === 'medieval_serif'
             ? '"Cormorant Garamond", Georgia, serif'
@@ -1335,9 +1705,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.fillStyle =
             activeFontStyle === 'minimal_clean'
               ? 'rgba(10, 14, 23, 0.82)'
+              : activeFontStyle === 'gold_ice_magic'
+              ? 'rgba(8, 14, 28, 0.86)'
               : 'rgba(9, 13, 22, 0.88)';
 
-          if (activeFontStyle === 'royal_gold_laurels') {
+          if (activeFontStyle === 'gold_ice_magic') {
+            const borderGrad = ctx.createLinearGradient(bx, topY, bx + bw, topY + effectiveH);
+            borderGrad.addColorStop(0, '#FFE58F');
+            borderGrad.addColorStop(0.5, '#BCE6FF');
+            borderGrad.addColorStop(1, '#5B9BD5');
+            ctx.strokeStyle = borderGrad;
+          } else if (activeFontStyle === 'royal_gold_laurels') {
             const borderGrad = ctx.createLinearGradient(bx, topY, bx, topY + effectiveH);
             borderGrad.addColorStop(0, '#F6D365');
             borderGrad.addColorStop(1, '#C59B27');
@@ -1362,7 +1740,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.fill();
           ctx.stroke();
 
-          if (activeFontStyle === 'royal_gold_laurels') {
+          if (activeFontStyle === 'gold_ice_magic') {
+            const txtGrad = ctx.createLinearGradient(bx, topY + 6 * scale, bx, topY + effectiveH - 6 * scale);
+            txtGrad.addColorStop(0, '#FFF8DC');
+            txtGrad.addColorStop(0.5, '#FFE58F');
+            txtGrad.addColorStop(1, '#BCE6FF');
+            ctx.fillStyle = txtGrad;
+          } else if (activeFontStyle === 'royal_gold_laurels') {
             const txtGrad = ctx.createLinearGradient(bx, topY + 6 * scale, bx, topY + effectiveH - 6 * scale);
             txtGrad.addColorStop(0, '#FFF3B0');
             txtGrad.addColorStop(0.5, '#F6D365');
@@ -1385,178 +1769,567 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      // Отрисовка короткого текст-хука (ТОЛЬКО если не пусто)
-      if (shortHook) {
-        ctx.save();
-        ctx.textBaseline = 'alphabetic';
+      // Отрисовка текста-хука (с точным сохранением введённого текста, переносами и координатами x/y)
+      if (!hasHook) {
+        return null;
+      }
 
-        if (activeFontStyle === 'royal_gold_laurels') {
-          let fontSize = 68 * scale;
-          const decorReserve = showRoyalDecor ? 190 * scale : 32 * scale;
-          const maxTextW = Math.max(160 * scale, w - 250 * scale - decorReserve);
-          ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
-          let measuredW = ctx.measureText(shortHook).width;
-          if (measuredW > maxTextW) {
-            fontSize = fontSize * (maxTextW / measuredW);
-            ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
-            measuredW = ctx.measureText(shortHook).width;
+      let returnBox: HookBoundingBoxPct | null = null;
+      ctx.save();
+      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'center';
+      ctx.lineJoin = 'round';
+
+      if (activeFontStyle === 'gold_ice_magic') {
+        let fontSize = 80 * scale * fontScale;
+        const maxTextW = w * 0.88;
+        const buildFontStr = (fs: number) =>
+          `900 ${Math.max(1, Math.round(fs))}px "Cinzel", "Cinzel Decorative", Georgia, serif`;
+
+        ctx.font = buildFontStr(fontSize);
+        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        if (maxLineW > maxTextW) {
+          fontSize = fontSize * (maxTextW / maxLineW);
+          ctx.font = buildFontStr(fontSize);
+          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        }
+
+        const fontStr = buildFontStr(fontSize);
+        const lineHeight = fontSize * 1.12;
+        const capHeight = fontSize * 0.72;
+        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
+        const topOfCaps = centerY - visualSpan / 2;
+        const firstBaselineY = topOfCaps + capHeight;
+
+        if (showMagicDecor) {
+          drawMagicGlowAndSnowflakes(
+            ctx,
+            centerX,
+            centerY,
+            maxLineW,
+            visualSpan,
+            fontSize,
+            scale,
+            fontScale
+          );
+        }
+
+        const effScale = scale * fontScale;
+
+        hookLines.forEach((line, lineIdx) => {
+          const baselineY = firstBaselineY + lineIdx * lineHeight;
+          const isTopGoldLine = lineIdx === 0;
+
+          if (isTopGoldLine) {
+            // 1. 3D-экструзия для тёплого золотого текста
+            const depthSteps = 5;
+            for (let d = depthSteps; d >= 1; d--) {
+              ctx.save();
+              ctx.font = fontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.lineJoin = 'round';
+              if (d === depthSteps) {
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.92)';
+                ctx.shadowBlur = 18 * effScale;
+                ctx.shadowOffsetY = 5 * effScale;
+              } else {
+                ctx.shadowBlur = 0;
+              }
+              ctx.strokeStyle = '#291102';
+              ctx.lineWidth = Math.max(2, 9.5 * effScale);
+              const ox = d * 0.45 * effScale;
+              const oy = d * 1.15 * effScale;
+              ctx.strokeText(line, centerX + ox, baselineY + oy);
+              ctx.fillStyle = '#3B1903';
+              ctx.fillText(line, centerX + ox, baselineY + oy);
+              ctx.restore();
+            }
+
+            // 2. Тёмно-коричневая обводка и тёплое золотое свечение
+            ctx.save();
+            ctx.font = fontStr;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'alphabetic';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = 'rgba(255, 190, 55, 0.78)';
+            ctx.shadowBlur = 24 * effScale;
+            ctx.strokeStyle = '#3A1B02';
+            ctx.lineWidth = Math.max(2, 9 * effScale);
+            ctx.strokeText(line, centerX, baselineY);
+            ctx.restore();
+
+            // 3. Тёплый золотой 3D-градиент (#FFE58F -> #F5A623 -> #B86B00)
+            ctx.save();
+            ctx.font = fontStr;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'alphabetic';
+            const goldGrad = ctx.createLinearGradient(
+              0,
+              baselineY - fontSize * 0.78,
+              0,
+              baselineY + fontSize * 0.1
+            );
+            goldGrad.addColorStop(0.0, '#FFF7CC');
+            goldGrad.addColorStop(0.2, '#FFE58F');
+            goldGrad.addColorStop(0.56, '#F5A623');
+            goldGrad.addColorStop(0.9, '#B86B00');
+            goldGrad.addColorStop(1.0, '#8A4800');
+            ctx.fillStyle = goldGrad;
+            ctx.fillText(line, centerX, baselineY);
+            ctx.restore();
+          } else {
+            // Нижняя строка: морозный ледяной градиент (#FFFFFF -> #BCE6FF -> #5B9BD5) + холодная синяя обводка + фактура инея
+            const lineW = ctx.measureText(line).width;
+
+            // 1. 3D-экструзия в глубокий арктический синий
+            const depthSteps = 5;
+            for (let d = depthSteps; d >= 1; d--) {
+              ctx.save();
+              ctx.font = fontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.lineJoin = 'round';
+              if (d === depthSteps) {
+                ctx.shadowColor = 'rgba(2, 12, 28, 0.94)';
+                ctx.shadowBlur = 18 * effScale;
+                ctx.shadowOffsetY = 5 * effScale;
+              } else {
+                ctx.shadowBlur = 0;
+              }
+              ctx.strokeStyle = '#091E3A';
+              ctx.lineWidth = Math.max(2, 9.5 * effScale);
+              const ox = d * 0.45 * effScale;
+              const oy = d * 1.15 * effScale;
+              ctx.strokeText(line, centerX + ox, baselineY + oy);
+              ctx.fillStyle = '#0D2B4F';
+              ctx.fillText(line, centerX + ox, baselineY + oy);
+              ctx.restore();
+            }
+
+            // 2. Холодная синяя обводка + ледяное свечение
+            ctx.save();
+            ctx.font = fontStr;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'alphabetic';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = 'rgba(120, 210, 255, 0.82)';
+            ctx.shadowBlur = 24 * effScale;
+            ctx.strokeStyle = '#123A68';
+            ctx.lineWidth = Math.max(2, 9 * effScale);
+            ctx.strokeText(line, centerX, baselineY);
+            ctx.restore();
+
+            // 3. Ледяной градиент + фактура инея на offscreen canvas
+            const padX = Math.ceil(36 * effScale);
+            const padY = Math.ceil(32 * effScale);
+            const boxW = Math.max(8, Math.ceil(lineW + padX * 2));
+            const boxH = Math.max(8, Math.ceil(fontSize * 1.25 + padY * 2));
+            const off = document.createElement('canvas');
+            off.width = boxW;
+            off.height = boxH;
+            const octx = off.getContext('2d');
+
+            if (octx) {
+              const localCx = boxW / 2;
+              const localBaselineY = padY + fontSize * 0.92;
+              octx.font = fontStr;
+              octx.textAlign = 'center';
+              octx.textBaseline = 'alphabetic';
+
+              const iceGrad = octx.createLinearGradient(
+                0,
+                localBaselineY - fontSize * 0.78,
+                0,
+                localBaselineY + fontSize * 0.1
+              );
+              iceGrad.addColorStop(0.0, '#FFFFFF');
+              iceGrad.addColorStop(0.4, '#BCE6FF');
+              iceGrad.addColorStop(0.82, '#5B9BD5');
+              iceGrad.addColorStop(1.0, '#3C7AB8');
+              octx.fillStyle = iceGrad;
+              octx.fillText(line, localCx, localBaselineY);
+
+              // Клиппинг фактуры инея строго внутрь букв
+              octx.globalCompositeOperation = 'source-atop';
+
+              const facetSeed = Array.from(line).reduce(
+                (acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 7),
+                41
+              );
+              const facetCount = Math.max(14, Math.round(lineW / Math.max(8, 18 * effScale)));
+              for (let f = 0; f < facetCount; f++) {
+                const fx = padX + ((f * 73 + facetSeed * 13) % Math.max(10, Math.round(lineW)));
+                const fy = padY + ((f * 37 + facetSeed * 5) % Math.max(10, Math.round(fontSize * 0.95)));
+                const fw = (14 + (f % 5) * 8) * effScale;
+                const fh = (18 + (f % 4) * 9) * effScale;
+                octx.fillStyle =
+                  f % 2 === 0 ? 'rgba(255, 255, 255, 0.25)' : 'rgba(125, 211, 252, 0.22)';
+                octx.beginPath();
+                octx.moveTo(fx, fy);
+                octx.lineTo(fx + fw, fy - fh * 0.35);
+                octx.lineTo(fx + fw * 0.45, fy + fh);
+                octx.closePath();
+                octx.fill();
+              }
+
+              const speckCount = Math.min(
+                360,
+                Math.max(80, Math.round((lineW * fontSize) / Math.max(12, 110 * effScale * effScale)))
+              );
+              for (let s = 0; s < speckCount; s++) {
+                const sx = padX + ((s * 137 + facetSeed * 19) % Math.max(10, Math.round(lineW)));
+                const sy = padY + ((s * 67 + facetSeed * 11) % Math.max(10, Math.round(fontSize * 0.96)));
+                const sr = (0.7 + (s % 4) * 0.45) * effScale;
+                octx.fillStyle =
+                  s % 3 === 0 ? 'rgba(255, 255, 255, 0.65)' : 'rgba(210, 240, 255, 0.45)';
+                octx.beginPath();
+                octx.arc(sx, sy, sr, 0, Math.PI * 2);
+                octx.fill();
+              }
+
+              octx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+              octx.lineWidth = Math.max(0.7, 1.1 * effScale);
+              const veinCount = Math.max(8, Math.round(lineW / Math.max(12, 34 * effScale)));
+              for (let v = 0; v < veinCount; v++) {
+                const vx = padX + ((v * 97 + facetSeed * 23) % Math.max(10, Math.round(lineW)));
+                const vy = localBaselineY - fontSize * (0.1 + ((v * 17) % 60) / 100);
+                const len = (8 + (v % 4) * 6) * effScale;
+                const ang = ((v % 6) - 2.5) * 0.45;
+                octx.beginPath();
+                octx.moveTo(vx, vy);
+                octx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
+                octx.lineTo(
+                  vx + Math.cos(ang + 0.5) * len * 1.4,
+                  vy + Math.sin(ang + 0.5) * len * 1.4
+                );
+                octx.stroke();
+              }
+
+              ctx.drawImage(off, centerX - localCx, baselineY - localBaselineY);
+            } else {
+              const iceFallback = ctx.createLinearGradient(
+                0,
+                baselineY - fontSize * 0.78,
+                0,
+                baselineY + fontSize * 0.1
+              );
+              iceFallback.addColorStop(0.0, '#FFFFFF');
+              iceFallback.addColorStop(0.45, '#BCE6FF');
+              iceFallback.addColorStop(1.0, '#5B9BD5');
+              ctx.fillStyle = iceFallback;
+              ctx.fillText(line, centerX, baselineY);
+            }
           }
+        });
 
-          const centerX = w / 2;
-          const textY = h - 60 * scale;
+        const padX = 20 * effScale;
+        const padY = 14 * effScale;
+        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
+        const rawTop = Math.max(0, topOfCaps - padY);
+        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
+        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
+      } else if (activeFontStyle === 'royal_gold_laurels') {
+        let fontSize = 68 * scale * fontScale;
+        const decorReserve = showRoyalDecor ? 190 * scale * fontScale : 32 * scale;
+        const maxTextW = Math.max(160 * scale, w - 120 * scale - decorReserve);
+        const buildFontStr = (fs: number) =>
+          `900 ${Math.max(1, Math.round(fs))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
 
-          // Свеча сверху и лавровые ветви по бокам
-          if (showRoyalDecor) {
-            drawGoldenLaurelBranch(
-              ctx,
-              centerX - measuredW / 2 - 42 * scale,
-              textY - fontSize * 0.36,
-              fontSize * 1.16,
-              -1,
-              scale
-            );
-            drawGoldenLaurelBranch(
-              ctx,
-              centerX + measuredW / 2 + 42 * scale,
-              textY - fontSize * 0.36,
-              fontSize * 1.16,
-              1,
-              scale
-            );
-            drawGoldenCandle(
-              ctx,
-              centerX,
-              textY - fontSize * 0.96,
-              fontSize * 0.88,
-              scale
-            );
-          }
+        ctx.font = buildFontStr(fontSize);
+        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        if (maxLineW > maxTextW) {
+          fontSize = fontSize * (maxTextW / maxLineW);
+          ctx.font = buildFontStr(fontSize);
+          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        }
 
-          ctx.textAlign = 'center';
-          ctx.lineJoin = 'round';
-          // Объёмная тёмная тень и обводка
+        const lineHeight = fontSize * 1.14;
+        const capHeight = fontSize * 0.72;
+        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
+        const topOfCaps = centerY - visualSpan / 2;
+        const firstBaselineY = topOfCaps + capHeight;
+
+        if (showRoyalDecor) {
+          const effScale = scale * fontScale;
+          drawGoldenLaurelBranch(
+            ctx,
+            centerX - maxLineW / 2 - 42 * effScale,
+            centerY,
+            Math.max(fontSize * 1.16, visualSpan * 1.08),
+            -1,
+            effScale
+          );
+          drawGoldenLaurelBranch(
+            ctx,
+            centerX + maxLineW / 2 + 42 * effScale,
+            centerY,
+            Math.max(fontSize * 1.16, visualSpan * 1.08),
+            1,
+            effScale
+          );
+          drawGoldenCandle(
+            ctx,
+            centerX,
+            topOfCaps - 12 * effScale,
+            fontSize * 0.88,
+            effScale
+          );
+        }
+
+        hookLines.forEach((line, idx) => {
+          const baselineY = firstBaselineY + idx * lineHeight;
+          ctx.save();
           ctx.shadowColor = 'rgba(0, 0, 0, 0.96)';
           ctx.shadowBlur = 20 * scale;
           ctx.shadowOffsetX = 0;
           ctx.shadowOffsetY = 5 * scale;
           ctx.strokeStyle = 'rgba(10, 6, 2, 0.96)';
-          ctx.lineWidth = Math.max(2, 10 * scale);
-          ctx.strokeText(shortHook, centerX, textY);
+          ctx.lineWidth = Math.max(2, 10 * scale * fontScale);
+          ctx.strokeText(line, centerX, baselineY);
 
-          // Золотистый градиент (#F6D365 -> #C59B27)
           ctx.shadowBlur = 0;
           ctx.shadowOffsetY = 0;
-          const goldGrad = ctx.createLinearGradient(0, textY - fontSize * 0.88, 0, textY + 6 * scale);
+          const goldGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.88, 0, baselineY + 6 * scale);
           goldGrad.addColorStop(0, '#FFF5B8');
           goldGrad.addColorStop(0.45, '#F6D365');
           goldGrad.addColorStop(0.78, '#D4AF37');
           goldGrad.addColorStop(1, '#C59B27');
           ctx.fillStyle = goldGrad;
-          ctx.fillText(shortHook, centerX, textY);
-        } else if (activeFontStyle === 'medieval_serif') {
-          let fontSize = 76 * scale;
-          const maxTextW = w - 260 * scale;
-          ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
-          const measuredW = ctx.measureText(shortHook).width;
-          if (measuredW > maxTextW) {
-            fontSize = fontSize * (maxTextW / measuredW);
-            ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
-          }
+          ctx.fillText(line, centerX, baselineY);
+          ctx.restore();
+        });
 
-          const textX = 48 * scale;
-          const textY = h - 56 * scale;
-          ctx.textAlign = 'left';
-          ctx.lineJoin = 'round';
+        const padX = 20 * scale * fontScale;
+        const padY = 14 * scale * fontScale;
+        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
+        const rawTop = Math.max(0, topOfCaps - padY);
+        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
+        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
+      } else if (activeFontStyle === 'medieval_serif') {
+        let fontSize = 76 * scale * fontScale;
+        const maxTextW = w * 0.88;
+        const buildFontStr = (fs: number) =>
+          `700 ${Math.max(1, Math.round(fs))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
+
+        ctx.font = buildFontStr(fontSize);
+        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        if (maxLineW > maxTextW) {
+          fontSize = fontSize * (maxTextW / maxLineW);
+          ctx.font = buildFontStr(fontSize);
+          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        }
+
+        const lineHeight = fontSize * 1.1;
+        const capHeight = fontSize * 0.7;
+        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
+        const topOfCaps = centerY - visualSpan / 2;
+        const firstBaselineY = topOfCaps + capHeight;
+
+        hookLines.forEach((line, idx) => {
+          const baselineY = firstBaselineY + idx * lineHeight;
+          ctx.save();
           ctx.shadowColor = 'rgba(245, 158, 11, 0.65)';
           ctx.shadowBlur = 24 * scale;
           ctx.strokeStyle = 'rgba(10, 7, 4, 0.94)';
-          ctx.lineWidth = Math.max(2, 6 * scale);
-          ctx.strokeText(shortHook, textX, textY);
+          ctx.lineWidth = Math.max(2, 6 * scale * fontScale);
+          ctx.strokeText(line, centerX, baselineY);
 
-          const parchmentGrad = ctx.createLinearGradient(0, textY - fontSize * 0.85, 0, textY);
+          const parchmentGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.85, 0, baselineY);
           parchmentGrad.addColorStop(0, '#FFFBEB');
           parchmentGrad.addColorStop(1, '#FDE68A');
           ctx.fillStyle = parchmentGrad;
-          ctx.fillText(shortHook, textX, textY);
-        } else if (activeFontStyle === 'minimal_clean') {
-          let fontSize = 78 * scale;
-          const maxTextW = w - 260 * scale;
-          ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Bebas Neue", "Inter", sans-serif`;
-          const measuredW = ctx.measureText(shortHook).width;
-          if (measuredW > maxTextW) {
-            fontSize = fontSize * (maxTextW / measuredW);
-            ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Bebas Neue", "Inter", sans-serif`;
-          }
+          ctx.fillText(line, centerX, baselineY);
+          ctx.restore();
+        });
 
-          const textX = 48 * scale;
-          const textY = h - 54 * scale;
-          ctx.textAlign = 'left';
-          ctx.lineJoin = 'round';
+        const padX = 20 * scale * fontScale;
+        const padY = 14 * scale * fontScale;
+        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
+        const rawTop = Math.max(0, topOfCaps - padY);
+        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
+        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
+      } else if (activeFontStyle === 'minimal_clean') {
+        let fontSize = 78 * scale * fontScale;
+        const maxTextW = w * 0.88;
+        const buildFontStr = (fs: number) =>
+          `700 ${Math.max(1, Math.round(fs))}px "Bebas Neue", "Inter", sans-serif`;
+
+        ctx.font = buildFontStr(fontSize);
+        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        if (maxLineW > maxTextW) {
+          fontSize = fontSize * (maxTextW / maxLineW);
+          ctx.font = buildFontStr(fontSize);
+          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        }
+
+        const lineHeight = fontSize * 1.08;
+        const capHeight = fontSize * 0.72;
+        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
+        const topOfCaps = centerY - visualSpan / 2;
+        const firstBaselineY = topOfCaps + capHeight;
+
+        hookLines.forEach((line, idx) => {
+          const baselineY = firstBaselineY + idx * lineHeight;
+          ctx.save();
           ctx.shadowColor = 'rgba(0, 0, 0, 0.88)';
           ctx.shadowBlur = 12 * scale;
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.82)';
-          ctx.lineWidth = Math.max(1.5, 4.5 * scale);
-          ctx.strokeText(shortHook, textX, textY);
+          ctx.lineWidth = Math.max(1.5, 4.5 * scale * fontScale);
+          ctx.strokeText(line, centerX, baselineY);
 
           ctx.fillStyle = '#F8FAFC';
-          ctx.fillText(shortHook, textX, textY);
-        } else {
-          // Cinematic Sans (Montserrat / Impact)
-          let fontSize = 72 * scale;
-          const maxTextW = w - 260 * scale;
-          ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Montserrat", Impact, "Arial Black", sans-serif`;
-          const measuredW = ctx.measureText(shortHook).width;
-          if (measuredW > maxTextW) {
-            fontSize = fontSize * (maxTextW / measuredW);
-            ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Montserrat", Impact, "Arial Black", sans-serif`;
-          }
+          ctx.fillText(line, centerX, baselineY);
+          ctx.restore();
+        });
 
-          const textX = 48 * scale;
-          const textY = h - 58 * scale;
-          ctx.textAlign = 'left';
-          ctx.lineJoin = 'round';
+        const padX = 20 * scale * fontScale;
+        const padY = 14 * scale * fontScale;
+        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
+        const rawTop = Math.max(0, topOfCaps - padY);
+        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
+        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
+      } else {
+        // Cinematic Sans (Montserrat / Impact)
+        let fontSize = 72 * scale * fontScale;
+        const maxTextW = w * 0.88;
+        const buildFontStr = (fs: number) =>
+          `900 ${Math.max(1, Math.round(fs))}px "Montserrat", Impact, "Arial Black", sans-serif`;
+
+        ctx.font = buildFontStr(fontSize);
+        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        if (maxLineW > maxTextW) {
+          fontSize = fontSize * (maxTextW / maxLineW);
+          ctx.font = buildFontStr(fontSize);
+          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+        }
+
+        const lineHeight = fontSize * 1.12;
+        const capHeight = fontSize * 0.72;
+        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
+        const topOfCaps = centerY - visualSpan / 2;
+        const firstBaselineY = topOfCaps + capHeight;
+
+        hookLines.forEach((line, idx) => {
+          const baselineY = firstBaselineY + idx * lineHeight;
+          ctx.save();
           ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
           ctx.shadowBlur = 18 * scale;
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.88)';
-          ctx.lineWidth = Math.max(2, 7 * scale);
-          ctx.strokeText(shortHook, textX, textY);
+          ctx.lineWidth = Math.max(2, 7 * scale * fontScale);
+          ctx.strokeText(line, centerX, baselineY);
 
           ctx.fillStyle = '#ffffff';
-          ctx.fillText(shortHook, textX, textY);
-        }
+          ctx.fillText(line, centerX, baselineY);
+          ctx.restore();
+        });
 
-        ctx.restore();
+        const padX = 20 * scale * fontScale;
+        const padY = 14 * scale * fontScale;
+        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
+        const rawTop = Math.max(0, topOfCaps - padY);
+        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
+        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
       }
+
+      ctx.restore();
+      return returnBox;
     },
     []
   );
 
   const renderAllCanvases = useCallback(() => {
-    drawCoverOnCanvas(
+    const nextBoxA = drawCoverOnCanvas(
       canvasARef.current,
       imgA,
       thumbTitle,
       selectedBadgesA,
       fontStyle,
       royalDecorEnabled,
+      magicDecorEnabled,
+      hookLayoutA,
       'Обложка A'
     );
-    drawCoverOnCanvas(
+    setHookBoxA(prev => {
+      if (!prev && !nextBoxA) return prev;
+      if (
+        prev &&
+        nextBoxA &&
+        Math.abs(prev.leftPct - nextBoxA.leftPct) < 0.05 &&
+        Math.abs(prev.topPct - nextBoxA.topPct) < 0.05 &&
+        Math.abs(prev.widthPct - nextBoxA.widthPct) < 0.05 &&
+        Math.abs(prev.heightPct - nextBoxA.heightPct) < 0.05
+      ) {
+        return prev;
+      }
+      return nextBoxA;
+    });
+
+    const nextBoxB = drawCoverOnCanvas(
       canvasBRef.current,
       imgB || imgA,
       titleB,
       badgesB,
       fontStyle,
       royalDecorEnabled,
+      magicDecorEnabled,
+      hookLayoutB,
       'Обложка B'
     );
+    setHookBoxB(prev => {
+      if (!prev && !nextBoxB) return prev;
+      if (
+        prev &&
+        nextBoxB &&
+        Math.abs(prev.leftPct - nextBoxB.leftPct) < 0.05 &&
+        Math.abs(prev.topPct - nextBoxB.topPct) < 0.05 &&
+        Math.abs(prev.widthPct - nextBoxB.widthPct) < 0.05 &&
+        Math.abs(prev.heightPct - nextBoxB.heightPct) < 0.05
+      ) {
+        return prev;
+      }
+      return nextBoxB;
+    });
+
     drawCoverOnCanvas(
       mobileCanvasRef.current,
       imgA,
       thumbTitle,
       selectedBadgesA,
       fontStyle,
-      royalDecorEnabled
+      royalDecorEnabled,
+      magicDecorEnabled,
+      hookLayoutA
     );
   }, [
     drawCoverOnCanvas,
@@ -1568,6 +2341,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     badgesB,
     fontStyle,
     royalDecorEnabled,
+    magicDecorEnabled,
+    hookLayoutA,
+    hookLayoutB,
+    abModeEnabled,
     fontsReadyTick
   ]);
 
@@ -1608,7 +2385,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     selectedImage.src = url;
   };
 
-  // Кнопка «📥 Скачать мастер-кадр»
+  // Кнопка «📥 Скачать мастер-кадр» (экспорт в честном 4K PNG)
   const handleDownloadVariantFromGrid = (idx: number) => {
     const url = batchVariants[idx];
     if (!url) return;
@@ -1623,13 +2400,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         thumbTitle,
         selectedBadgesA,
         fontStyle,
-        royalDecorEnabled
+        royalDecorEnabled,
+        magicDecorEnabled,
+        hookLayoutA
       );
       const link = document.createElement('a');
-      link.download = `thumbnail_${idx + 1}.jpg`;
-      link.href = offscreen.toDataURL('image/jpeg', 0.96);
+      link.download = `thumbnail_4k_${idx + 1}.png`;
+      link.href = offscreen.toDataURL('image/png');
       link.click();
-      onNotify(`📥 Вариант #${idx + 1} (thumbnail_${idx + 1}.jpg) скачан на устройство!`, 'success');
+      onNotify(`📥 Вариант #${idx + 1} (4K PNG thumbnail_4k_${idx + 1}.png) скачан на устройство!`, 'success');
     };
     tempImg.src = url;
   };
@@ -2037,7 +2816,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     capturedImg.src = dataUrl;
   };
 
-  // Кнопка «📥 Скачать 4K обложку»
+  // Кнопка «📥 Скачать 4K обложку» (финальный экспорт 3840×2160 PNG с сохранёнными x/y и масштабом)
   const downloadCover4K = (slot: 'A' | 'B') => {
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
@@ -2049,7 +2828,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         thumbTitle,
         selectedBadgesA,
         fontStyle,
-        royalDecorEnabled
+        royalDecorEnabled,
+        magicDecorEnabled,
+        hookLayoutA
       );
     } else {
       drawCoverOnCanvas(
@@ -2058,14 +2839,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         titleB,
         badgesB,
         fontStyle,
-        royalDecorEnabled
+        royalDecorEnabled,
+        magicDecorEnabled,
+        hookLayoutB
       );
     }
     const link = document.createElement('a');
-    link.download = `thumbnail_4k_3840x2160_${slot}.jpg`;
-    link.href = offscreen.toDataURL('image/jpeg', 0.96);
+    link.download = `thumbnail_4k_3840x2160_${slot}.png`;
+    link.href = offscreen.toDataURL('image/png');
     link.click();
-    onNotify(`📥 4K обложка ${slot} (3840×2160 без водяных знаков) скачана!`, 'success');
+    onNotify(`📥 4K обложка ${slot} (3840×2160 PNG без водяных знаков) скачана!`, 'success');
   };
 
   // Кнопка «📋 Скопировать промпт для веб-генератора»
@@ -2079,12 +2862,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
-  const wordCountHookA = thumbTitle.trim()
-    ? thumbTitle.trim().split(/\s+/).filter(Boolean).length
-    : 0;
-  const wordCountHookB = titleB.trim()
-    ? titleB.trim().split(/\s+/).filter(Boolean).length
-    : 0;
+  const lineCountHookA = splitHookLines(thumbTitle, fontStyle === 'gold_ice_magic').length;
+  const lineCountHookB = splitHookLines(titleB, fontStyle === 'gold_ice_magic').length;
 
   return (
     <div className="space-y-6">
@@ -2419,6 +3198,26 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               {FONT_STYLE_OPTIONS.find(o => o.id === fontStyle)?.subtitle}
             </p>
 
+            {fontStyle === 'gold_ice_magic' && (
+              <button
+                type="button"
+                onClick={() => setMagicDecorEnabled(prev => !prev)}
+                className={`w-full px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center justify-between gap-2 cursor-pointer transition ${
+                  magicDecorEnabled
+                    ? 'bg-sky-500/15 border-sky-400/60 text-sky-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 text-left">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>Магическое сияние и снежинки (завитки, блики, снежинки)</span>
+                </span>
+                <span className="font-mono text-[10px] shrink-0">
+                  {magicDecorEnabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            )}
+
             {fontStyle === 'royal_gold_laurels' && (
               <button
                 type="button"
@@ -2460,11 +3259,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] text-slate-400 uppercase">
-                  Короткий текст-хук на обложку (до 3 слов):
+                  Текст-хук A (Enter — перенос строки):
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono text-amber-300 tabular-nums">
-                    {wordCountHookA}/3 слов
+                    {lineCountHookA} {lineCountHookA === 1 ? 'строка' : 'строки'}
                   </span>
                   {thumbTitle.length > 0 && (
                     <button
@@ -2478,13 +3277,51 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   )}
                 </div>
               </div>
-              <input
-                type="text"
+              <textarea
+                rows={2}
                 value={thumbTitle}
                 onChange={e => handleThumbHookChange(e.target.value)}
-                placeholder="Пусто = чистый арт без текста и тени"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-amber-500"
+                placeholder="Введите заголовок (Enter для 2-й строки, пусто = чистый арт)"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-amber-500 resize-none leading-snug"
               />
+            </div>
+
+            {/* Размер шрифта и позиция текста-хука A */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300 font-semibold">Размер шрифта A:</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-400 tabular-nums">
+                    X: {Math.round(hookLayoutA.xPct)}% • Y: {Math.round(hookLayoutA.yPct)}%
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-amber-300 tabular-nums">
+                    {hookLayoutA.fontScalePct}%
+                  </span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={60}
+                max={150}
+                step={1}
+                value={hookLayoutA.fontScalePct}
+                onChange={e => {
+                  const val = Number(e.target.value);
+                  setHookLayoutA(prev => ({ ...prev, fontScalePct: val }));
+                }}
+                className="w-full accent-amber-400 cursor-pointer"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-slate-500">60% – 150% • Drag &amp; Drop на превью</span>
+                <button
+                  type="button"
+                  onClick={() => setHookLayoutA({ ...DEFAULT_HOOK_LAYOUT })}
+                  className="text-[10px] font-semibold text-amber-300 hover:text-amber-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 cursor-pointer transition"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Сбросить позицию текста</span>
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -2551,11 +3388,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[10px] text-slate-400 uppercase">
-                    Thumbnail Hook B (до 3 слов):
+                    Текст-хук B (Enter — перенос строки):
                   </label>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
-                      {wordCountHookB}/3 слов
+                      {lineCountHookB} {lineCountHookB === 1 ? 'строка' : 'строки'}
                     </span>
                     {titleB.length > 0 && (
                       <button
@@ -2569,21 +3406,51 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     )}
                   </div>
                 </div>
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={titleB}
-                  onChange={e => {
-                    const words = e.target.value.trimStart().split(/\s+/).filter(Boolean);
-                    if (words.length > 3) {
-                      setTitleB(words.slice(0, 3).join(' '));
-                      onNotify('Thumbnail Hook B ограничен максимум 3 словами!', 'info');
-                    } else {
-                      setTitleB(e.target.value);
-                    }
-                  }}
-                  placeholder="Пусто = чистый арт без текста и тени"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-emerald-500"
+                  onChange={e => setTitleB(e.target.value)}
+                  placeholder="Введите заголовок B (Enter для 2-й строки, пусто = чистый арт)"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-emerald-500 resize-none leading-snug"
                 />
+              </div>
+
+              {/* Размер шрифта и позиция текста-хука B */}
+              <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-300 font-semibold">Размер шрифта B:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-slate-400 tabular-nums">
+                      X: {Math.round(hookLayoutB.xPct)}% • Y: {Math.round(hookLayoutB.yPct)}%
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-300 tabular-nums">
+                      {hookLayoutB.fontScalePct}%
+                    </span>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={60}
+                  max={150}
+                  step={1}
+                  value={hookLayoutB.fontScalePct}
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    setHookLayoutB(prev => ({ ...prev, fontScalePct: val }));
+                  }}
+                  className="w-full accent-emerald-400 cursor-pointer"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-500">60% – 150% • Drag &amp; Drop на превью B</span>
+                  <button
+                    type="button"
+                    onClick={() => setHookLayoutB({ ...DEFAULT_HOOK_LAYOUT })}
+                    className="text-[10px] font-semibold text-emerald-300 hover:text-emerald-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Сбросить позицию текста</span>
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -2637,7 +3504,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               onClick={() => downloadCover4K('A')}
               className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 px-4 rounded-xl transition text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20"
             >
-              <Download className="w-4 h-4" /> 📥 Скачать 4K обложку (3840×2160)
+              <Download className="w-4 h-4" /> 📥 Скачать 4K обложку A (3840×2160 PNG)
             </button>
             {abModeEnabled && (
               <button
@@ -2645,7 +3512,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 onClick={() => downloadCover4K('B')}
                 className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Download className="w-4 h-4 text-emerald-400" /> 📥 Скачать 4K обложку (Вариант B)
+                <Download className="w-4 h-4 text-emerald-400" /> 📥 Скачать 4K обложку B (3840×2160 PNG)
               </button>
             )}
           </div>
@@ -2683,6 +3550,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   }`}
                 />
 
+                {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука A) */}
+                {hookBoxA && (
+                  <div
+                    role="button"
+                    aria-label="Перетащить заголовок обложки A"
+                    title="Зажмите и перетащите текст-хук в любую точку кадра"
+                    onPointerDown={e => startHookDrag(e, 'A')}
+                    onPointerEnter={() => setHoveredSlot('A')}
+                    onPointerLeave={() => setHoveredSlot(prev => (prev === 'A' ? null : prev))}
+                    style={{
+                      left: `${hookBoxA.leftPct}%`,
+                      top: `${hookBoxA.topPct}%`,
+                      width: `${hookBoxA.widthPct}%`,
+                      height: `${hookBoxA.heightPct}%`
+                    }}
+                    className={`absolute z-20 touch-none select-none rounded-md transition-colors ${
+                      draggingSlot === 'A'
+                        ? 'cursor-grabbing border-[1.5px] border-dashed border-amber-300 bg-amber-300/10'
+                        : hoveredSlot === 'A'
+                        ? 'cursor-grab border-[1.5px] border-dashed border-amber-300/85 bg-amber-300/5'
+                        : 'cursor-grab border border-dashed border-transparent'
+                    }`}
+                  />
+                )}
+
                 {showYoutubeOverlay && (
                   <>
                     <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
@@ -2703,6 +3595,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </>
                 )}
               </div>
+
+              {hookBoxA && (
+                <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                  <span className="flex items-center gap-1">
+                    <Move className="w-3 h-3 text-amber-400" />
+                    Наведите и перетащите заголовок A мышкой или пальцем
+                  </span>
+                  <span className="font-mono text-amber-300/80 tabular-nums">
+                    X: {Math.round(hookLayoutA.xPct)}% • Y: {Math.round(hookLayoutA.yPct)}% • {hookLayoutA.fontScalePct}%
+                  </span>
+                </div>
+              )}
 
               {showYoutubeOverlay && (
                 <div className="flex items-start gap-3 pt-1 px-1">
@@ -2746,12 +3650,49 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     }`}
                   />
 
+                  {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука B) */}
+                  {hookBoxB && (
+                    <div
+                      role="button"
+                      aria-label="Перетащить заголовок обложки B"
+                      title="Зажмите и перетащите текст-хук B в любую точку кадра"
+                      onPointerDown={e => startHookDrag(e, 'B')}
+                      onPointerEnter={() => setHoveredSlot('B')}
+                      onPointerLeave={() => setHoveredSlot(prev => (prev === 'B' ? null : prev))}
+                      style={{
+                        left: `${hookBoxB.leftPct}%`,
+                        top: `${hookBoxB.topPct}%`,
+                        width: `${hookBoxB.widthPct}%`,
+                        height: `${hookBoxB.heightPct}%`
+                      }}
+                      className={`absolute z-20 touch-none select-none rounded-md transition-colors ${
+                        draggingSlot === 'B'
+                          ? 'cursor-grabbing border-[1.5px] border-dashed border-emerald-300 bg-emerald-300/10'
+                          : hoveredSlot === 'B'
+                          ? 'cursor-grab border-[1.5px] border-dashed border-emerald-300/85 bg-emerald-300/5'
+                          : 'cursor-grab border border-dashed border-transparent'
+                      }`}
+                    />
+                  )}
+
                   {showYoutubeOverlay && (
                     <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-white font-mono font-bold text-xs px-2 py-0.5 rounded shadow-md border border-white/10">
                       {youtubeDurationBadge || '3:00:00'}
                     </div>
                   )}
                 </div>
+
+                {hookBoxB && (
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                    <span className="flex items-center gap-1">
+                      <Move className="w-3 h-3 text-emerald-400" />
+                      Перетащите заголовок B мышкой или пальцем
+                    </span>
+                    <span className="font-mono text-emerald-300/80 tabular-nums">
+                      X: {Math.round(hookLayoutB.xPct)}% • Y: {Math.round(hookLayoutB.yPct)}% • {hookLayoutB.fontScalePct}%
+                    </span>
+                  </div>
+                )}
 
                 {showYoutubeOverlay && (
                   <div className="flex items-start gap-3 pt-1 px-1">
@@ -2794,7 +3735,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <Smartphone className="w-4 h-4" /> Мобильный масштаб YouTube (160×90 px)
                 </span>
                 <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                  Проверка читаемости Thumbnail Hook (до 3 слов), аватарки и таймкода{' '}
+                  Проверка читаемости заголовка, бейджей в правом верхнем углу и таймкода{' '}
                   <code>{youtubeDurationBadge}</code> в правом нижнем углу на экране смартфона.
                 </p>
               </div>

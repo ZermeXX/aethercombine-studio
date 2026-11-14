@@ -1154,7 +1154,7 @@ export default function App() {
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
   const [thumbTitle, setThumbTitle] = useState<string>('');
-  const [thumbBadge, setThumbBadge] = useState<string>('4k_gold');
+  const [thumbBadge, setThumbBadge] = useState<string>('4k_ultra_hd');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // VerbaFlow Retention Engine state
@@ -3888,7 +3888,8 @@ export default function App() {
     if (thumbBadge && thumbBadge !== 'none') {
       const firstId = thumbBadge.split(',')[0]?.trim();
       const labelMap: Record<string, string> = {
-        '4k_gold': '4K ULTRA HD • GOLD',
+        '4k_ultra_hd': '4K ULTRA HD',
+        '4k_gold': '4K ULTRA HD',
         '3_hours': '3 HOURS',
         ambience_asmr: 'AMBIENCE • ASMR',
         deep_sleep: 'DEEP SLEEP',
@@ -3897,7 +3898,7 @@ export default function App() {
         cozy_fireplace: 'COZY FIREPLACE',
         '432_hz': '432 HZ'
       };
-      const bText = labelMap[firstId || ''] || '4K ULTRA HD • GOLD';
+      const bText = labelMap[firstId || ''] || '4K ULTRA HD';
       const badgeX = 1280 - 210;
       const badgeY = 30;
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
