@@ -39,7 +39,11 @@ import {
   Subtitles,
   Mic,
   Package,
-  Send
+  Send,
+  Flag,
+  ListOrdered,
+  Trash2,
+  Clock
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
@@ -236,7 +240,29 @@ interface SavedManifestPreset {
   manifest: LoopBuildManifest;
 }
 
+interface QueuedManifestItem {
+  id: string;
+  projectName: string;
+  codec: 'libx264' | 'libx265';
+  crf: number;
+  fps: number;
+  resolution: '720p' | '1080p' | '2k' | '4k';
+  hours: number;
+  slotsCount: number;
+  addedAt: string;
+  manifest: LoopBuildManifest;
+}
+
 const MANIFEST_PRESETS_STORAGE_KEY = 'ac_manifest_presets_v1';
+const BATCH_QUEUE_STORAGE_KEY = 'ac_batch_queue_v1';
+
+const formatTimeHMS = (totalSeconds: number): string => {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
 
 // Универсальная начальная структура слотов (без захардкоженных имен видеофайлов)
 const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
@@ -1031,6 +1057,31 @@ export default function App() {
     }
   });
   const [presetNameInput, setPresetNameInput] = useState<string>('');
+  const [selectedScrubberInsert, setSelectedScrubberInsert] = useState<{
+    slotIdx: number;
+    insIdx: number;
+  } | null>(null);
+
+  // Локальная очередь сборок (Batch Queue) в localStorage
+  const [batchQueue, setBatchQueue] = useState<QueuedManifestItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(BATCH_QUEUE_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as QueuedManifestItem[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const lastDispatchWasPreflightRef = useRef<boolean>(false);
+  const queueAutoConsumedRunRef = useRef<string | number | null>(null);
+  const dispatchLoopWorkflowRef = useRef<
+    ((
+      preflightOnly: boolean,
+      overrideManifest?: LoopBuildManifest,
+      options?: { bypassActiveGuard?: boolean }
+    ) => Promise<void>) | null
+  >(null);
 
   // Гибкая система субтитров для текущего манифеста (Hardsub / Softsub / Скачивание .SRT)
   const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
@@ -1696,6 +1747,44 @@ export default function App() {
     showToast,
     appendTerminalLog
   ]);
+
+  // Автоматический запуск следующего манифеста из локальной очереди (Batch Queue), когда текущий run переходит в completed (success)
+  useEffect(() => {
+    if (
+      renderStatus.status !== 'success' ||
+      lastDispatchWasPreflightRef.current ||
+      batchQueue.length === 0
+    ) {
+      return;
+    }
+
+    const completedKey = renderStatus.runId ?? `success-${renderStatus.seconds}-${renderStatus.runUrl}`;
+    if (queueAutoConsumedRunRef.current === completedKey) {
+      return;
+    }
+    queueAutoConsumedRunRef.current = completedKey;
+
+    const [nextItem, ...restQueue] = batchQueue;
+    if (!nextItem) return;
+
+    const timer = setTimeout(() => {
+      setBatchQueue(restQueue);
+      localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify(restQueue));
+      appendTerminalLog(
+        `[QUEUE] 🚀 Текущий run завершён (completed/success). Авто-запуск следующего манифеста из очереди: «${nextItem.projectName}» (осталось в очереди: ${restQueue.length})...`,
+        'step'
+      );
+      showToast(
+        `Очередь сборок: авто-запуск «${nextItem.projectName}» (${restQueue.length} осталось)`,
+        'info'
+      );
+      if (dispatchLoopWorkflowRef.current) {
+        void dispatchLoopWorkflowRef.current(false, nextItem.manifest, { bypassActiveGuard: true });
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [renderStatus.status, renderStatus.runId, renderStatus.seconds, renderStatus.runUrl, batchQueue, appendTerminalLog, showToast]);
 
   const formatTime = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -3495,9 +3584,65 @@ export default function App() {
     }
   };
 
-  // Единая функция запуска workflow_dispatch (полная сборка или Preflight-проверка файлов на GDrive)
-  const dispatchLoopWorkflow = async (preflightOnly: boolean) => {
+  // Управление локальной очередью сборок (Batch Queue)
+  const enqueueCurrentManifest = () => {
+    const manifestSnapshot = JSON.parse(JSON.stringify(currentManifest)) as LoopBuildManifest;
+    const item: QueuedManifestItem = {
+      id: `q-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      projectName: manifestSnapshot.project_name || 'Ambient Loop 4K',
+      codec: manifestSnapshot.video_codec,
+      crf: manifestSnapshot.crf,
+      fps: manifestSnapshot.fps,
+      resolution: manifestSnapshot.resolution,
+      hours: manifestSnapshot.hours,
+      slotsCount: manifestSnapshot.timeline_slots.length,
+      addedAt: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+      manifest: manifestSnapshot
+    };
+    setBatchQueue(prev => {
+      const next = [...prev, item];
+      localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+    showToast(
+      `➕ Манифест «${item.projectName}» добавлен в очередь сборок (всего в очереди: ${batchQueue.length + 1})`,
+      'success'
+    );
+  };
+
+  const removeFromBatchQueue = (id: string) => {
+    setBatchQueue(prev => {
+      const next = prev.filter(item => item.id !== id);
+      localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const clearBatchQueue = () => {
+    setBatchQueue([]);
+    localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify([]));
+    showToast('Очередь сборок очищена', 'info');
+  };
+
+  const startNextFromBatchQueue = () => {
     if (isRunnerActive || isLoopDispatching) {
+      showToast('Дождитесь завершения активного run — следующий манифест стартует автоматически!', 'info');
+      return;
+    }
+    const [nextItem, ...restQueue] = batchQueue;
+    if (!nextItem) return;
+    setBatchQueue(restQueue);
+    localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify(restQueue));
+    void dispatchLoopWorkflow(false, nextItem.manifest);
+  };
+
+  // Единая функция запуска workflow_dispatch (полная сборка, Preflight или авто-запуск из очереди)
+  const dispatchLoopWorkflow = async (
+    preflightOnly: boolean,
+    overrideManifest?: LoopBuildManifest,
+    options?: { bypassActiveGuard?: boolean }
+  ) => {
+    if (!options?.bypassActiveGuard && (isRunnerActive || isLoopDispatching)) {
       showToast(
         'Раннер уже выполняет задачу (RUNNING/QUEUED). Дождитесь завершения или отмените текущий run.',
         'info'
@@ -3511,7 +3656,8 @@ export default function App() {
       openConfigModal();
       return;
     }
-    if (!preflightOnly && (loopHours < 3 || loopHours > 10)) {
+    const manifestToSend = overrideManifest || currentManifest;
+    if (!preflightOnly && (manifestToSend.hours < 3 || manifestToSend.hours > 10)) {
       showToast('Длительность лупа должна быть строго от 3 до 10 часов!', 'error');
       return;
     }
@@ -3519,10 +3665,11 @@ export default function App() {
     const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
     const targetBranch = (ghBranch || 'main').trim();
     const startTime = Date.now();
-    const scaleFlag = getScaleFilter(loopResolution);
-    const crfVal = videoCrf;
-    const manifestBase64 = encodeManifestBase64(currentManifest);
+    const scaleFlag = getScaleFilter(manifestToSend.resolution);
+    const crfVal = manifestToSend.crf;
+    const manifestBase64 = encodeManifestBase64(manifestToSend);
 
+    lastDispatchWasPreflightRef.current = preflightOnly;
     setIsLoopDispatching(true);
     try {
       const response = await fetch(
@@ -3553,16 +3700,16 @@ export default function App() {
       if (response.status === 204) {
         const statusTitle = preflightOnly
           ? '🔍 Preflight-проверка файлов на GDrive запущена...'
-          : 'Сборка успешно запущена в GitHub Actions!';
+          : `Сборка «${manifestToSend.project_name}» запущена в GitHub Actions!`;
         const statusDesc = preflightOnly
-          ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${gdriveFolderId || 'GDrive'}`
-          : `Проект: ${loopProjectName} | Кодек: ${videoCodec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | ${scaleFlag}`;
+          ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${manifestToSend.gdrive_folder_id || 'GDrive'}`
+          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
 
         showStatusBar(statusTitle, statusDesc, targetRepo, startTime);
         appendTerminalLog(
           preflightOnly
             ? '[00:00] 🔍 Запущена быстрая Preflight-проверка наличия файлов на Google Drive (preflight_only: "true")...'
-            : '[00:00] ✅ Сборка успешно запущена в GitHub Actions! Ожидание регистрации нового workflow run (4 сек)...',
+            : `[00:00] ✅ Сборка «${manifestToSend.project_name}» запущена в GitHub Actions! Ожидание регистрации нового workflow run (4 сек)...`,
           'success'
         );
         showToast(statusTitle, 'success');
@@ -3599,6 +3746,8 @@ export default function App() {
       setIsLoopDispatching(false);
     }
   };
+
+  dispatchLoopWorkflowRef.current = dispatchLoopWorkflow;
 
   const startLoopRender = () => dispatchLoopWorkflow(false);
   const startPreflightCheck = () => dispatchLoopWorkflow(true);
@@ -4967,6 +5116,358 @@ export default function App() {
                 </div>
               </div>
 
+              {/* ИНТЕРАКТИВНАЯ ВИЗУАЛЬНАЯ КАРТА ТАЙМЛАЙНА (TIMELINE SCRUBBER) */}
+              {(() => {
+                const totalSpan = Math.max(1, calculatedProjectDurationSec);
+                const actPalette = [
+                  'from-purple-600/80 to-indigo-600/80 border-purple-400/50',
+                  'from-amber-500/80 to-orange-600/80 border-amber-300/50',
+                  'from-sky-500/80 to-cyan-600/80 border-sky-300/50',
+                  'from-emerald-500/80 to-teal-600/80 border-emerald-300/50',
+                  'from-pink-500/80 to-rose-600/80 border-pink-300/50',
+                  'from-violet-500/80 to-fuchsia-600/80 border-violet-300/50'
+                ];
+
+                let cursorSec = 0;
+                const scrubberActs: Array<{
+                  slotIdx: number;
+                  slotId: string;
+                  title: string;
+                  startSec: number;
+                  slotDur: number;
+                  overlapOut: number;
+                  effectiveStep: number;
+                }> = [];
+                const scrubberInserts: Array<{
+                  slotIdx: number;
+                  insIdx: number;
+                  ins: SlotInsertItem;
+                  globalSec: number;
+                  timecodeHMS: string;
+                }> = [];
+
+                timelineSlots.forEach((slot, sIdx) => {
+                  const isLast = sIdx === timelineSlots.length - 1;
+                  const slotDur = Math.max(1, Number(slot.slot_duration_sec) || 1800);
+                  const overlapOut =
+                    !isLast && slot.slot_transition_out.type !== 'none'
+                      ? Math.min(slotDur, Math.max(0, Number(slot.slot_transition_out.duration_sec) || 0))
+                      : 0;
+                  const effectiveStep = Math.max(1, slotDur - overlapOut);
+                  const slotStart = cursorSec;
+
+                  scrubberActs.push({
+                    slotIdx: sIdx,
+                    slotId: slot.slot_id,
+                    title: slot.act_title || slot.title || `Акт #${sIdx + 1}`,
+                    startSec: slotStart,
+                    slotDur,
+                    overlapOut,
+                    effectiveStep
+                  });
+
+                  (slot.inserts || []).forEach((ins, insIdx) => {
+                    const globalSec = Math.min(
+                      totalSpan,
+                      slotStart + Math.max(0, Number(ins.trigger_at_sec) || 0)
+                    );
+                    scrubberInserts.push({
+                      slotIdx: sIdx,
+                      insIdx,
+                      ins,
+                      globalSec,
+                      timecodeHMS: formatTimeHMS(globalSec)
+                    });
+                  });
+
+                  cursorSec += effectiveStep;
+                });
+
+                const activeEditInsert =
+                  selectedScrubberInsert &&
+                  timelineSlots[selectedScrubberInsert.slotIdx]?.inserts?.[
+                    selectedScrubberInsert.insIdx
+                  ]
+                    ? {
+                        slotIdx: selectedScrubberInsert.slotIdx,
+                        insIdx: selectedScrubberInsert.insIdx,
+                        ins: timelineSlots[selectedScrubberInsert.slotIdx].inserts[
+                          selectedScrubberInsert.insIdx
+                        ],
+                        actStartSec:
+                          scrubberActs[selectedScrubberInsert.slotIdx]?.startSec ?? 0
+                      }
+                    : null;
+
+                return (
+                  <div className="bg-[#080c14] border border-slate-800/90 rounded-xl p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <div className="flex items-center gap-2 font-semibold text-slate-200">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Визуальная карта таймлайна (Timeline Scrubber)</span>
+                        <span className="font-mono text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                          00:00:00 — {formatTimeHMS(calculatedProjectDurationSec)}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-400/40 border border-amber-300/70" />
+                          Зона кроссфейда
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Flag className="w-3 h-3 text-emerald-400" />
+                          Врезка ({scrubberInserts.length}) — клик для правки
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Пропорциональная шкала + вертикальные маркеры-флажки */}
+                    <div className="relative pt-7 pb-2 select-none">
+                      {/* Маркеры-флажки всех врезок (inserts) */}
+                      {scrubberInserts.map(item => {
+                        const leftPct = Math.min(99.2, Math.max(0.8, (item.globalSec / totalSpan) * 100));
+                        const isSelected =
+                          selectedScrubberInsert?.slotIdx === item.slotIdx &&
+                          selectedScrubberInsert?.insIdx === item.insIdx;
+                        return (
+                          <button
+                            key={`flag-${item.slotIdx}-${item.insIdx}-${item.ins.insert_id}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedScrubberInsert({
+                                slotIdx: item.slotIdx,
+                                insIdx: item.insIdx
+                              });
+                              const el = document.getElementById(
+                                `insert-card-${item.slotIdx}-${item.insIdx}`
+                              );
+                              if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }
+                            }}
+                            style={{ left: `${leftPct}%` }}
+                            className="group/flag absolute top-0 bottom-1 -translate-x-1/2 z-20 flex flex-col items-center cursor-pointer focus:outline-none"
+                            title={`${item.ins.insert_id} • ${item.timecodeHMS} (${item.ins.file_name || 'без файла'})`}
+                          >
+                            {/* Флажок маркера */}
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold shadow-md border transition flex items-center gap-0.5 whitespace-nowrap ${
+                                isSelected
+                                  ? 'bg-amber-400 text-slate-950 border-white scale-110 shadow-amber-400/50'
+                                  : 'bg-emerald-500 text-slate-950 border-emerald-200/70 group-hover/flag:bg-amber-400 group-hover/flag:scale-110'
+                              }`}
+                            >
+                              <Flag className="w-2.5 h-2.5 fill-current" />
+                              {item.ins.insert_id}
+                            </span>
+
+                            {/* Вертикальная направляющая линия */}
+                            <span
+                              className={`w-[2px] flex-1 transition ${
+                                isSelected
+                                  ? 'bg-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.9)]'
+                                  : 'bg-emerald-400/85 group-hover/flag:bg-amber-300'
+                              }`}
+                            />
+
+                            {/* Всплывающий точный таймкод ЧЧ:ММ:СС при наведении */}
+                            <span className="pointer-events-none opacity-0 group-hover/flag:opacity-100 transition-opacity duration-150 absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-amber-400/60 text-amber-300 font-mono text-[10px] px-2 py-0.5 rounded-md shadow-xl whitespace-nowrap z-30">
+                              {item.timecodeHMS} • {item.ins.insert_id}
+                            </span>
+                          </button>
+                        );
+                      })}
+
+                      {/* Горизонтальная цветная дорожка актов и зон кроссфейдов */}
+                      <div className="relative h-10 w-full rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
+                        {scrubberActs.map(act => {
+                          const leftPct = (act.startSec / totalSpan) * 100;
+                          const widthPct = (act.effectiveStep / totalSpan) * 100;
+                          const colorCls = actPalette[act.slotIdx % actPalette.length];
+                          return (
+                            <div
+                              key={`act-seg-${act.slotIdx}-${act.slotId}`}
+                              style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                              className={`absolute top-0 bottom-0 bg-gradient-to-r ${colorCls} border-r flex items-center justify-center px-1.5 overflow-hidden`}
+                              title={`${act.title} • Старт ${formatTimeHMS(act.startSec)} (${act.slotDur}с)`}
+                            >
+                              <span className="text-[10px] font-mono font-bold text-white drop-shadow truncate">
+                                #{act.slotIdx + 1} {act.title}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Полупрозрачные зоны кроссфейдов между актами */}
+                        {scrubberActs.map(act => {
+                          if (act.overlapOut <= 0) return null;
+                          const xfadeStart = act.startSec + act.effectiveStep;
+                          const leftPct = (xfadeStart / totalSpan) * 100;
+                          const widthPct = Math.max(0.8, (act.overlapOut / totalSpan) * 100);
+                          return (
+                            <div
+                              key={`xfade-zone-${act.slotIdx}`}
+                              style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                              className="absolute top-0 bottom-0 z-10 bg-amber-300/35 backdrop-blur-[1px] border-x border-amber-200/80 flex items-center justify-center"
+                              title={`Кроссфейд Акт #${act.slotIdx + 1} → #${act.slotIdx + 2}: ${act.overlapOut}с (${formatTimeHMS(xfadeStart)})`}
+                            >
+                              <span className="text-[8px] font-mono font-bold text-slate-950 bg-amber-300/80 px-1 rounded hidden md:inline">
+                                ⇄{act.overlapOut}s
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Нижняя линейка таймкодов */}
+                      <div className="flex justify-between text-[9px] font-mono text-slate-500 mt-1 px-0.5">
+                        <span>00:00:00</span>
+                        <span>{formatTimeHMS(Math.round(totalSpan * 0.25))}</span>
+                        <span>{formatTimeHMS(Math.round(totalSpan * 0.5))}</span>
+                        <span>{formatTimeHMS(Math.round(totalSpan * 0.75))}</span>
+                        <span>{formatTimeHMS(totalSpan)}</span>
+                      </div>
+                    </div>
+
+                    {/* Быстрый редактор выбранного маркера врезки */}
+                    {activeEditInsert && (
+                      <div className="bg-slate-900/95 border border-amber-500/45 rounded-xl p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="bg-amber-400 text-slate-950 font-mono font-bold px-2 py-0.5 rounded text-[10px]">
+                              {activeEditInsert.ins.insert_id} • Акт #{activeEditInsert.slotIdx + 1}
+                            </span>
+                            <span className="font-mono text-emerald-300 text-[11px]">
+                              Глобальный таймкод:{' '}
+                              {formatTimeHMS(
+                                activeEditInsert.actStartSec +
+                                  (Number(activeEditInsert.ins.trigger_at_sec) || 0)
+                              )}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedScrubberInsert(null)}
+                            className="text-slate-400 hover:text-white text-xs cursor-pointer px-1.5 py-0.5 rounded bg-slate-800"
+                          >
+                            ✕ Закрыть
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
+                          <div className="col-span-2">
+                            <label className="text-[9px] text-slate-400 block mb-0.5">
+                              Файл клипа врезки:
+                            </label>
+                            <input
+                              type="text"
+                              value={activeEditInsert.ins.file_name}
+                              onChange={e =>
+                                updateSlotInsert(
+                                  activeEditInsert.slotIdx,
+                                  activeEditInsert.insIdx,
+                                  { file_name: e.target.value }
+                                )
+                              }
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-slate-200 outline-none focus:border-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-slate-400 block mb-0.5">
+                              trigger_at_sec (в акте):
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step={10}
+                              value={activeEditInsert.ins.trigger_at_sec}
+                              onChange={e =>
+                                updateSlotInsert(
+                                  activeEditInsert.slotIdx,
+                                  activeEditInsert.insIdx,
+                                  {
+                                    trigger_at_sec: Math.max(0, Number(e.target.value) || 0)
+                                  }
+                                )
+                              }
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-amber-300 outline-none focus:border-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-slate-400 block mb-0.5">
+                              duration_sec:
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={activeEditInsert.ins.duration_sec}
+                              onChange={e =>
+                                updateSlotInsert(
+                                  activeEditInsert.slotIdx,
+                                  activeEditInsert.insIdx,
+                                  {
+                                    duration_sec: Math.max(1, Number(e.target.value) || 10)
+                                  }
+                                )
+                              }
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-slate-200 outline-none focus:border-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-slate-400 block mb-0.5">
+                              fade_in / fade_out (с):
+                            </label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0.1}
+                                step={0.5}
+                                value={activeEditInsert.ins.transition_in.duration_sec}
+                                onChange={e =>
+                                  updateSlotInsert(
+                                    activeEditInsert.slotIdx,
+                                    activeEditInsert.insIdx,
+                                    {
+                                      transition_in: {
+                                        ...activeEditInsert.ins.transition_in,
+                                        duration_sec: Math.max(0.1, Number(e.target.value) || 1.5)
+                                      }
+                                    }
+                                  )
+                                }
+                                className="w-1/2 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 font-mono text-emerald-300 outline-none"
+                              />
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={activeEditInsert.ins.transition_out?.duration_sec ?? 0}
+                                onChange={e => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  updateSlotInsert(
+                                    activeEditInsert.slotIdx,
+                                    activeEditInsert.insIdx,
+                                    {
+                                      hold_until_end: val === 0,
+                                      transition_out: {
+                                        type: val === 0 ? 'none' : 'dissolve',
+                                        duration_sec: val
+                                      }
+                                    }
+                                  );
+                                }}
+                                className="w-1/2 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 font-mono text-amber-300 outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Список слотов (1..N) */}
               <div className="space-y-4 max-h-[580px] overflow-y-auto custom-scroll pr-1">
                 {timelineSlots.map((slot, sIdx) => {
@@ -5225,10 +5726,18 @@ export default function App() {
                               const isNoFadeOut = Boolean(
                                 ins.hold_until_end || ins.transition_out?.type === 'none'
                               );
+                              const isHighlightedByScrubber =
+                                selectedScrubberInsert?.slotIdx === sIdx &&
+                                selectedScrubberInsert?.insIdx === insIdx;
                               return (
                                 <div
+                                  id={`insert-card-${sIdx}-${insIdx}`}
                                   key={ins.insert_id + '-' + insIdx}
-                                  className="bg-slate-900/90 border border-slate-800 rounded-lg p-3 space-y-2 text-[11px]"
+                                  className={`bg-slate-900/90 border rounded-lg p-3 space-y-2 text-[11px] transition ${
+                                    isHighlightedByScrubber
+                                      ? 'border-amber-400 ring-2 ring-amber-400/40'
+                                      : 'border-slate-800'
+                                  }`}
                                 >
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex flex-wrap items-center gap-2">
@@ -5871,22 +6380,95 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Вторичная кнопка Preflight-проверки файлов на Google Диске (~15 сек) */}
-                  <button
-                    type="button"
-                    onClick={startPreflightCheck}
-                    disabled={isRunnerActive || isLoopDispatching}
-                    className={`w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
-                      isRunnerActive || isLoopDispatching
-                        ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
-                        : 'bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/40 text-sky-300 cursor-pointer'
-                    }`}
-                  >
-                    <span>🔍 Проверить файлы на GDrive (Preflight)</span>
-                    <span className="text-[10px] font-mono text-sky-400/80 hidden sm:inline">
-                      preflight_only: &quot;true&quot; (~15 сек)
-                    </span>
-                  </button>
+                  {/* Вторичные кнопки: Preflight-проверка GDrive и добавление в Batch Queue */}
+                  <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={startPreflightCheck}
+                      disabled={isRunnerActive || isLoopDispatching}
+                      className={`flex-1 flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
+                        isRunnerActive || isLoopDispatching
+                          ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                          : 'bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/40 text-sky-300 cursor-pointer'
+                      }`}
+                    >
+                      <span>🔍 Проверить файлы на GDrive (Preflight)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={enqueueCurrentManifest}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-purple-500/45 bg-purple-500/15 hover:bg-purple-500/25 px-4 py-2.5 text-xs font-semibold text-purple-200 transition cursor-pointer whitespace-nowrap"
+                      title="Поставить текущий манифест в локальную очередь: после завершения текущего run он запустится автоматически"
+                    >
+                      <ListOrdered className="w-3.5 h-3.5 text-purple-300" />
+                      <span>+ В очередь</span>
+                      {batchQueue.length > 0 && (
+                        <span className="ml-0.5 px-1.5 py-0.2 rounded-md bg-purple-400 text-slate-950 font-mono text-[10px] font-bold">
+                          {batchQueue.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Панель локальной очереди сборок (Batch Queue) */}
+                  {batchQueue.length > 0 && (
+                    <div className="bg-[#080c14] border border-purple-500/35 rounded-xl p-3 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                        <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1.5">
+                          <ListOrdered className="w-3.5 h-3.5" />
+                          Очередь сборок (Batch Queue: {batchQueue.length}) — авто-старт по completed (success)
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {!isRunnerActive && !isLoopDispatching && (
+                            <button
+                              type="button"
+                              onClick={startNextFromBatchQueue}
+                              className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer flex items-center gap-1"
+                            >
+                              <Play className="w-2.5 h-2.5 fill-current" /> Запустить #1
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={clearBatchQueue}
+                            className="text-slate-400 hover:text-rose-400 px-1.5 py-0.5 rounded text-[10px] cursor-pointer"
+                          >
+                            Очистить
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scroll pr-1">
+                        {batchQueue.map((qItem, qIdx) => (
+                          <div
+                            key={qItem.id}
+                            className="flex items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div className="min-w-0 flex items-center gap-2">
+                              <span className="font-mono font-bold text-purple-300 bg-purple-500/15 px-1.5 py-0.5 rounded text-[10px]">
+                                #{qIdx + 1}
+                              </span>
+                              <span className="font-semibold text-slate-200 truncate">
+                                {qItem.projectName}
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-400 hidden sm:inline">
+                                {qItem.codec} CRF{qItem.crf} • {qItem.resolution} • {qItem.slotsCount} сл.
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeFromBatchQueue(qItem.id)}
+                              className="text-slate-500 hover:text-rose-400 p-1 rounded cursor-pointer shrink-0"
+                              title="Убрать из очереди"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
