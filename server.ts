@@ -157,68 +157,112 @@ Return JSON with:
   });
 
   // ==========================================================================
-  // 3. POST /api/imagen/generate — Точный вызов generateImagenBatch (imagen-3.0-generate-002:predict)
+  // 3. POST /api/imagen/generate — Генерация 4 вариантов 16:9 через @google/genai
+  //    Основная модель: imagen-4.0-generate-001 (generateImages)
+  //    Авто-fallback: gemini-2.5-flash-image (generateContent)
   // ==========================================================================
-  async function generateImagenBatch(
+  async function generateImagen4Batch(
     promptText: string,
-    apiKey: string,
     sampleCount: number = 4
-  ): Promise<{ dataUrls: string[]; predictions: Array<{ bytesBase64Encoded: string; mimeType: string }> }> {
-    // Эндпоинт Imagen 3 требует метода :predict, а не :generateContent
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+  ): Promise<{
+    dataUrls: string[];
+    predictions: Array<{ bytesBase64Encoded: string; mimeType: string }>;
+    modelUsed: string;
+  }> {
+    const ai = getGenAIClient();
+    const requestedCount = Math.min(Math.max(Number(sampleCount) || 4, 1), 4);
 
-    const payload = {
-      instances: [{ prompt: promptText }],
-      parameters: {
-        sampleCount: Number(sampleCount),
-        aspectRatio: '16:9',
-        outputMimeType: 'image/jpeg'
+    try {
+      const response = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: promptText,
+        config: {
+          numberOfImages: requestedCount,
+          aspectRatio: '16:9',
+          outputMimeType: 'image/jpeg'
+        }
+      });
+
+      const generated = response.generatedImages ?? [];
+      const validPredictions = generated
+        .filter(item => Boolean(item?.image?.imageBytes))
+        .map(item => ({
+          bytesBase64Encoded: item.image?.imageBytes || '',
+          mimeType: item.image?.mimeType || 'image/jpeg'
+        }));
+
+      if (validPredictions.length > 0) {
+        const dataUrls = validPredictions.map(
+          pred => `data:${pred.mimeType};base64,${pred.bytesBase64Encoded}`
+        );
+        return {
+          dataUrls,
+          predictions: validPredictions,
+          modelUsed: 'imagen-4.0-generate-001'
+        };
       }
-    };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const errorDetails = await response.text();
-      throw new Error(`Ошибка Imagen 3 API (${response.status}): ${errorDetails}`);
-    }
-
-    const result = (await response.json()) as {
-      predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
-    };
-
-    if (!result.predictions || !result.predictions.length) {
-      throw new Error(
-        'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+      throw new Error('imagen-4.0-generate-001 returned no generatedImages.');
+    } catch (primaryError) {
+      console.warn(
+        'imagen-4.0-generate-001 unavailable, falling back to gemini-2.5-flash-image:',
+        primaryError instanceof Error ? primaryError.message : primaryError
       );
-    }
 
-    const validPredictions = result.predictions
-      .filter(pred => Boolean(pred?.bytesBase64Encoded))
-      .map(pred => ({
-        bytesBase64Encoded: pred.bytesBase64Encoded || '',
-        mimeType: pred.mimeType || 'image/jpeg'
-      }));
+      const angleCues = [
+        'Wide cinematic establishing angle, crisp foreground subject.',
+        'Dramatic low-angle close-up, intense chiaroscuro lighting.',
+        'Dynamic rule-of-thirds framing with atmospheric depth of field.',
+        'High-contrast moody silhouette composition with vibrant rim light.'
+      ];
 
-    if (!validPredictions.length) {
-      throw new Error(
-        'API не вернул сгенерированные изображения. Проверьте валидность API-ключа и квоту Imagen 3.'
+      const fallbackResults = await Promise.all(
+        Array.from({ length: requestedCount }, async (_, idx) => {
+          const cue = angleCues[idx % angleCues.length];
+          const res = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: `${promptText}\n\nComposition variation ${idx + 1}: ${cue}`,
+            config: {
+              responseModalities: ['IMAGE'],
+              imageConfig: {
+                aspectRatio: '16:9'
+              }
+            }
+          });
+
+          const parts = res.candidates?.[0]?.content?.parts ?? [];
+          for (const part of parts) {
+            if (part.inlineData?.data) {
+              return {
+                bytesBase64Encoded: part.inlineData.data,
+                mimeType: part.inlineData.mimeType || 'image/png'
+              };
+            }
+          }
+          return null;
+        })
       );
+
+      const validFallback = fallbackResults.filter(
+        (item): item is { bytesBase64Encoded: string; mimeType: string } => item !== null
+      );
+
+      if (!validFallback.length) {
+        const primaryMsg =
+          primaryError instanceof Error ? primaryError.message : String(primaryError);
+        throw new Error(
+          `Не удалось сгенерировать изображения ни через imagen-4.0-generate-001 (${primaryMsg}), ни через fallback gemini-2.5-flash-image.`
+        );
+      }
+
+      return {
+        dataUrls: validFallback.map(
+          item => `data:${item.mimeType};base64,${item.bytesBase64Encoded}`
+        ),
+        predictions: validFallback,
+        modelUsed: 'gemini-2.5-flash-image'
+      };
     }
-
-    // Извлекаем чистый base64 и преобразуем в data-url
-    const dataUrls = validPredictions.map(pred => {
-      const base64 = pred.bytesBase64Encoded;
-      return `data:image/jpeg;base64,${base64}`;
-    });
-
-    return { dataUrls, predictions: validPredictions };
   }
 
   app.post('/api/imagen/generate', async (req, res) => {
@@ -232,8 +276,7 @@ Return JSON with:
         return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || '';
-      if (!apiKey) {
+      if (!process.env.GEMINI_API_KEY) {
         res.status(500).json({
           ok: false,
           error: 'GEMINI_API_KEY не настроен на сервере.'
@@ -241,14 +284,14 @@ Return JSON with:
         return;
       }
 
-      const { dataUrls, predictions } = await generateImagenBatch(
+      const { dataUrls, predictions, modelUsed } = await generateImagen4Batch(
         promptText.trim(),
-        apiKey,
         sampleCount || 4
       );
 
       res.json({
         ok: true,
+        modelUsed,
         images: dataUrls,
         bytesBase64Encoded: predictions[0].bytesBase64Encoded,
         mimeType: predictions[0].mimeType,

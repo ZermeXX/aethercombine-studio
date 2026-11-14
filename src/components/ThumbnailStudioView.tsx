@@ -43,52 +43,12 @@ interface ThumbnailStudioViewProps {
 }
 
 /**
- * 1. Функция обращения к Imagen 3 API (v1beta :predict)
+ * 1. Функция обращения к серверному API генерации превью (Imagen 4 / fallback Gemini 2.5 Flash Image)
  */
 export async function generateImagenThumbnails(
   promptText: string,
-  apiKey?: string,
   count: number = 4
-): Promise<string[]> {
-  if (apiKey && apiKey.trim()) {
-    // Эндпоинт для Imagen 3 API v1beta
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey.trim()}`;
-
-    const requestBody = {
-      instances: [{ prompt: promptText }],
-      parameters: {
-        sampleCount: parseInt(String(count), 10),
-        aspectRatio: '16:9',
-        outputMimeType: 'image/jpeg'
-      }
-    };
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Ошибка генерации Imagen 3 (${response.status}): ${errorBody}`);
-    }
-
-    const result = (await response.json()) as {
-      predictions?: Array<{ bytesBase64Encoded?: string }>;
-    };
-
-    if (!result.predictions || !result.predictions.length) {
-      throw new Error('API не вернуло варианты изображений. Проверьте баланс квоты ключа.');
-    }
-
-    // Преобразуем массив base64 в валидные data:URL
-    return result.predictions.map(item => `data:image/jpeg;base64,${item.bytesBase64Encoded || ''}`);
-  }
-
-  // Обращение через серверный прокси /api/imagen/generate (использующий серверный GEMINI_API_KEY)
+): Promise<{ images: string[]; modelUsed?: string }> {
   const response = await fetch('/api/imagen/generate', {
     method: 'POST',
     headers: {
@@ -102,26 +62,32 @@ export async function generateImagenThumbnails(
 
   const result = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
+    modelUsed?: string;
     images?: string[];
-    predictions?: Array<{ bytesBase64Encoded?: string }>;
+    predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
     error?: string;
   };
 
   if (!response.ok || !result.ok) {
     throw new Error(
-      result.error || `Ошибка генерации Imagen 3 (${response.status}): Проверьте баланс квоты ключа.`
+      result.error || `Ошибка генерации Imagen 4 (${response.status}): Проверьте баланс квоты ключа.`
     );
   }
 
   if (Array.isArray(result.images) && result.images.length > 0) {
-    return result.images;
+    return { images: result.images, modelUsed: result.modelUsed };
   }
 
   if (!result.predictions || !result.predictions.length) {
     throw new Error('API не вернуло варианты изображений. Проверьте баланс квоты ключа.');
   }
 
-  return result.predictions.map(item => `data:image/jpeg;base64,${item.bytesBase64Encoded || ''}`);
+  return {
+    images: result.predictions.map(
+      item => `data:${item.mimeType || 'image/jpeg'};base64,${item.bytesBase64Encoded || ''}`
+    ),
+    modelUsed: result.modelUsed
+  };
 }
 
 /**
@@ -313,7 +279,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
   const [badgeB] = useState<string>('ambience');
 
-  // Сетка 2x2 (4 варианта обложки от Imagen 3 с sampleCount: 4)
+  // Сетка 2x2 (4 варианта обложки от Imagen 4 с numberOfImages: 4)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_0', 0),
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_1', 1),
@@ -324,6 +290,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [attachedToYoutubeIdx, setAttachedToYoutubeIdx] = useState<number | null>(0);
   const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
   const [imagenError, setImagenError] = useState<string | null>(null);
+  const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
 
   // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
   const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
@@ -351,7 +318,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
 
-  // 2. Генерация 16:9 без водяных знаков через официальный Imagen 3 API (imagen-3.0-generate-002:predict)
+  // 2. Генерация 16:9 без водяных знаков через @google/genai (imagen-4.0-generate-001 + fallback gemini-2.5-flash-image)
   const [promptStylePreset, setPromptStylePreset] = useState<
     'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
   >('mystery_dark');
@@ -451,8 +418,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.textAlign = 'center';
         ctx.fillText(
           variantLabel
-            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (2×2 Imagen 3)»`
-            : 'Нажмите «Сгенерировать 4 варианта (2×2 Imagen 3)» или выберите кадр ниже',
+            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)»`
+            : 'Нажмите «Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
@@ -597,7 +564,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     );
   };
 
-  // Автономная генерация 4-х 4K кадров на Canvas (при отсутствии квоты/биллинга Imagen 3)
+  // Автономная генерация 4-х 4K кадров на Canvas (при отсутствии квоты/биллинга Imagen 4)
   const handleGenerateProceduralBatchFallback = (targetSlot: 'A' | 'B' = 'A') => {
     const fallbackUrls = [0, 1, 2, 3].map(idx =>
       renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
@@ -623,13 +590,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   // ============================================================================
-  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 3 (generateImagenThumbnails: :predict, sampleCount: 4)
+  // ПАКЕТНЫЙ ВЫЗОВ IMAGEN 4 (ai.models.generateImages + fallback gemini-2.5-flash-image)
   // ============================================================================
-  const handleGenerateImagen3Cover = async (targetSlot: 'A' | 'B' = 'A') => {
+  const handleGenerateImagen4Cover = async (targetSlot: 'A' | 'B' = 'A') => {
     setIsGeneratingImagen(true);
     setImagenError(null);
     try {
-      const dataUrls = await generateImagenThumbnails(activePromptText, undefined, 4);
+      const { images: dataUrls, modelUsed } = await generateImagenThumbnails(activePromptText, 4);
 
       const paddedUrls: string[] = [];
       for (let i = 0; i < 4; i++) {
@@ -642,6 +609,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       setBatchVariants(paddedUrls);
       setSelectedMasterVariantIdx(0);
+      setLastModelUsed(modelUsed || 'imagen-4.0-generate-001');
       window.selectedMasterThumbnail = paddedUrls[0];
 
       const generatedImg = new Image();
@@ -651,8 +619,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           setAbModeEnabled(true);
           setImgB(generatedImg);
         }
+        const usedLabel =
+          modelUsed === 'gemini-2.5-flash-image'
+            ? 'Gemini 2.5 Flash Image (fallback 16:9)'
+            : 'Imagen 4 • 16:9 JPEG';
         onNotify(
-          '🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) успешно сгенерирован через Imagen 3 (:predict)!',
+          `🎨 Пакет из 4-х вариантов (2×2 сетка 16:9) успешно сгенерирован через ${usedLabel}!`,
           'success'
         );
       };
@@ -805,7 +777,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="flex items-center gap-2.5">
                 <ZoomIn className="w-5 h-5 text-cyan-400" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Imagen 3 • 16:9)
+                  Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Imagen 4 • 16:9 JPEG)
                 </h3>
                 {selectedMasterVariantIdx === zoomedVariantIdx && (
                   <span className="text-[11px] font-bold bg-cyan-500 text-black px-2.5 py-0.5 rounded-lg">
@@ -825,7 +797,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-700 bg-black">
               <img
                 src={batchVariants[zoomedVariantIdx]}
-                alt={`Imagen 3 Variant ${zoomedVariantIdx + 1}`}
+                alt={`Imagen 4 Variant ${zoomedVariantIdx + 1}`}
                 className="w-full h-full object-contain"
               />
             </div>
@@ -857,32 +829,32 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Левая колонка: Настройки Обложки A / B, Imagen 3 и переключатели контроля */}
+        {/* Левая колонка: Настройки Обложки A / B, Imagen 4 и переключатели контроля */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех (Imagen 3)
+              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех (Imagen 4 • 16:9 JPEG)
             </h2>
             <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-              :predict • 2×2
+              Imagen 4 • 2×2
             </span>
           </div>
 
-          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через официальный Imagen 3 API (:predict) */}
+          {/* Кнопка пакетной генерации 2x2 (4 варианта 16:9) через Imagen 4 + fallback Gemini 2.5 Flash Image */}
           <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-bold text-emerald-300 uppercase">
-                Пакетная генерация 2×2 (Imagen 3):
+                Пакетная генерация 2×2 (Imagen 4):
               </span>
               <span className="font-mono text-[10px] text-slate-400">
-                sampleCount: 4 • 16:9 • JPEG
+                4 варианта • 16:9 • JPEG
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => handleGenerateImagen3Cover('A')}
+                onClick={() => handleGenerateImagen4Cover('A')}
                 disabled={isGeneratingImagen}
                 className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-60"
               >
@@ -891,21 +863,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 ) : (
                   <Wand2 className="w-3.5 h-3.5" />
                 )}
-                <span>Imagen 3 (2×2) → A</span>
+                <span>Imagen 4 (2×2) → A</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => handleGenerateImagen3Cover('B')}
+                onClick={() => handleGenerateImagen4Cover('B')}
                 disabled={isGeneratingImagen}
                 className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
                 <Wand2 className="w-3.5 h-3.5" />
-                <span>Imagen 3 (2×2) → B</span>
+                <span>Imagen 4 (2×2) → B</span>
               </button>
             </div>
 
-            {/* КРАСНЫЙ АЛЕРТ ПОД КНОПКОЙ ЗАПУСКА ПРИ ОШИБКЕ IMAGEN 3 API */}
+            {/* КРАСНЫЙ АЛЕРТ ПОД КНОПКОЙ ЗАПУСКА ПРИ ОШИБКЕ IMAGEN 4 API */}
             {imagenError && (
               <div
                 role="alert"
@@ -914,7 +886,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                   <div className="space-y-1 flex-1 min-w-0">
-                    <p className="font-bold text-rose-300">Ошибка генерации Imagen 3 (:predict)</p>
+                    <p className="font-bold text-rose-300">Ошибка генерации Imagen 4 • 16:9 JPEG</p>
                     <p className="text-[11px] text-rose-200/90 break-words font-mono leading-relaxed">
                       {imagenError}
                     </p>
@@ -1259,24 +1231,25 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         </div>
       </div>
 
-      {/* СЕТКА 2x2 IMAGEN 3 (grid grid-cols-2 gap-3 w-full my-4) */}
+      {/* СЕТКА 2x2 IMAGEN 4 (grid grid-cols-2 gap-3 w-full my-4) */}
       <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2.5">
             <Grid className="w-5 h-5 text-cyan-400" />
             <div>
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Сетка 2×2 вариантов обложки (Imagen 3 • :predict • sampleCount: 4 • 16:9 JPEG)
+                Сетка 2×2 вариантов обложки (Imagen 4 • 16:9 JPEG)
               </h3>
               <p className="text-xs text-slate-400">
                 Кликните по любой из 4-х карточек для выбора мастер-обложки (`window.selectedMasterThumbnail`)
+                {lastModelUsed ? ` • Модель: ${lastModelUsed}` : ''}
               </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={() => handleGenerateImagen3Cover('A')}
+            onClick={() => handleGenerateImagen4Cover('A')}
             disabled={isGeneratingImagen}
             className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-60"
           >
@@ -1285,16 +1258,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             ) : (
               <Wand2 className="w-4 h-4" />
             )}
-            <span>Сгенерировать 4 варианта (Imagen 3 :predict)</span>
+            <span>Сгенерировать 4 варианта (Imagen 4 • 16:9 JPEG)</span>
           </button>
         </div>
 
-        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 3 */}
+        {/* Индикатор и 4 анимированных скелетона на время запроса к Imagen 4 */}
         {isGeneratingImagen ? (
           <div className="space-y-3">
             <div className="flex items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-400">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Генерация 4 вариантов кадра через Imagen 3...</span>
+              <span>Генерация 4 вариантов кадра через Imagen 4 • 16:9 JPEG...</span>
             </div>
             <div className="grid grid-cols-2 gap-3 w-full my-4">
               {[0, 1, 2, 3].map(skeletonIdx => (
@@ -1304,7 +1277,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 >
                   <Wand2 className="w-6 h-6 text-cyan-400/60 animate-bounce" />
                   <span className="text-[11px] font-mono text-slate-400 text-center">
-                    Генерация 4 вариантов кадра через Imagen 3... (Вариант #{skeletonIdx + 1})
+                    Генерация 4 вариантов кадра через Imagen 4... (Вариант #{skeletonIdx + 1})
                   </span>
                 </div>
               ))}
@@ -1424,7 +1397,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         )}
       </div>
 
-      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА IMAGEN 3 / MIDJOURNEY / LEONARDO */}
+      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА IMAGEN 4 / MIDJOURNEY / LEONARDO */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 1. АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
@@ -1543,14 +1516,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         </div>
 
-        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ IMAGEN 3 / MIDJOURNEY / LEONARDO.AI */}
+        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ IMAGEN 4 / MIDJOURNEY / LEONARDO.AI */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Layers className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  2. Генератор визуального промпта (Imagen 3 / Midjourney / Leonardo.ai)
+                  2. Генератор визуального промпта (Imagen 4 / Midjourney / Leonardo.ai)
                 </h3>
               </div>
               <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
@@ -1593,7 +1566,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                Промпт для Imagen 3 (`imagen-3.0-generate-002:predict`, sampleCount: 4) и веб-генераторов:
+                Промпт для Imagen 4 (`imagen-4.0-generate-001` / fallback `gemini-2.5-flash-image`) и веб-генераторов:
               </label>
               <textarea
                 rows={5}
@@ -1607,12 +1580,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
-              onClick={() => handleGenerateImagen3Cover('A')}
+              onClick={() => handleGenerateImagen4Cover('A')}
               disabled={isGeneratingImagen}
               className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-cyan-500/20 disabled:opacity-60"
             >
               <Wand2 className="w-4 h-4" />
-              <span>Сгенерировать 2×2 в Imagen 3 (16:9)</span>
+              <span>Сгенерировать 2×2 (Imagen 4 • 16:9 JPEG)</span>
             </button>
 
             <button
