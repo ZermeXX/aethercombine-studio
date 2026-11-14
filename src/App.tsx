@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Layers,
   Clapperboard,
@@ -63,6 +63,14 @@ import {
   TerminalRunnerState,
   formatTerminalTime
 } from './components/StudioTerminal';
+import {
+  YoutubeSeoState,
+  YoutubeSeoManifestBlock,
+  YOUTUBE_SEO_STORAGE_KEY,
+  loadStoredYoutubeSeoState,
+  toEnglishChapterTitle,
+  buildEnglishYoutubeSeoBlock
+} from './utils/englishExport';
 
 type TabId = 'combine' | 'loop' | 'hooks' | 'voice' | 'seo' | 'thumb';
 
@@ -228,6 +236,7 @@ interface LoopBuildManifest {
     enabled: boolean;
     clip_duration_sec: number;
   };
+  youtube_seo?: YoutubeSeoManifestBlock;
   timeline_slots: TimelineSlot[];
 }
 
@@ -1016,6 +1025,22 @@ export default function App() {
 
   // Loop studio state (Universal dynamic manifest state)
   const [loopProjectName, setLoopProjectName] = useState<string>('Ambient Loop 4K');
+  const [youtubeSeoState, setYoutubeSeoState] = useState<YoutubeSeoState>(() =>
+    loadStoredYoutubeSeoState()
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem(YOUTUBE_SEO_STORAGE_KEY, JSON.stringify(youtubeSeoState));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [youtubeSeoState]);
+
+  const exportYoutubeSeoBlock = useMemo(
+    () => buildEnglishYoutubeSeoBlock(youtubeSeoState, loopProjectName),
+    [youtubeSeoState, loopProjectName]
+  );
+
   const [loopMedia, setLoopMedia] = useState<File | null>(null);
   const [loopAudio, setLoopAudio] = useState<File | null>(null);
   const [uploadedLoopAssets, setUploadedLoopAssets] = useState<Record<string, File>>({});
@@ -2962,21 +2987,29 @@ export default function App() {
           }
         }
       : {}),
-    timeline_slots: timelineSlots.map(slot => ({
-      ...slot,
-      act_title: slot.act_title ?? slot.title ?? '',
-      title: slot.title ?? slot.act_title ?? '',
-      file_name: slot.file_name ?? '',
-      base_content: {
-        ...(slot.base_content || {}),
-        file_name: slot.file_name ?? ''
-      },
-      inserts: slot.inserts.map(ins => ({
-        ...ins,
-        file_name: ins.file_name ?? '',
-        filename: ins.file_name ?? ''
-      }))
-    }))
+    youtube_seo: exportYoutubeSeoBlock,
+    timeline_slots: timelineSlots.map((slot, idx) => {
+      const englishChapterTitle = toEnglishChapterTitle(
+        slot.act_title ?? slot.title ?? '',
+        idx,
+        slot.act_timecode
+      );
+      return {
+        ...slot,
+        act_title: englishChapterTitle,
+        title: englishChapterTitle,
+        file_name: slot.file_name ?? '',
+        base_content: {
+          ...(slot.base_content || {}),
+          file_name: slot.file_name ?? ''
+        },
+        inserts: slot.inserts.map(ins => ({
+          ...ins,
+          file_name: ins.file_name ?? '',
+          filename: ins.file_name ?? ''
+        }))
+      };
+    })
   };
 
   // Безопасное UTF-8 кодирование строки с кириллицей в Base64
@@ -3707,7 +3740,23 @@ export default function App() {
       openConfigModal();
       return;
     }
-    const manifestToSend = overrideManifest || currentManifest;
+    const baseManifestToSend = overrideManifest || currentManifest;
+    const manifestToSend: LoopBuildManifest = {
+      ...baseManifestToSend,
+      youtube_seo: baseManifestToSend.youtube_seo || exportYoutubeSeoBlock,
+      timeline_slots: baseManifestToSend.timeline_slots.map((slot, idx) => {
+        const englishChapterTitle = toEnglishChapterTitle(
+          slot.act_title ?? slot.title ?? '',
+          idx,
+          slot.act_timecode
+        );
+        return {
+          ...slot,
+          act_title: englishChapterTitle,
+          title: englishChapterTitle
+        };
+      })
+    };
     if (!preflightOnly && (manifestToSend.hours < 3 || manifestToSend.hours > 10)) {
       showToast('Длительность лупа должна быть строго от 3 до 10 часов!', 'error');
       return;
@@ -4427,6 +4476,7 @@ export default function App() {
             externalMasterAudioFile={externalMasterAudioFile}
             onConsumeExternalMasterAudio={() => setExternalMasterAudioFile(null)}
             onScenesChange={setActiveNarrativeScenes}
+            youtubeSeo={exportYoutubeSeoBlock}
             telegramBotToken={telegramBotToken}
             telegramChatId={telegramChatId}
             onOpenConfigModal={openConfigModal}
@@ -6698,6 +6748,8 @@ export default function App() {
             scriptContext={seoScriptText || transferredScript || sourceText}
             narrativeScenes={activeNarrativeScenes}
             loopSlots={timelineSlots}
+            seoState={youtubeSeoState}
+            onSeoStateChange={setYoutubeSeoState}
             onApplyTitleToThumbnail={selectedTitle => {
               const words = selectedTitle
                 .replace(/[^a-zA-Z0-9\s'-]/g, ' ')

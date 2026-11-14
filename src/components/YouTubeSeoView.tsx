@@ -19,24 +19,25 @@ import {
 import type { NarrativeSceneItem } from './MontageCombineView';
 import type { TimelineSlot } from '../App';
 
-export type SeoToneStyle =
-  | 'Dark Mystery'
-  | 'Cozy Ambient'
-  | 'Historical Doc'
-  | 'Cinematic Drama';
+import {
+  SeoToneStyle,
+  SeoTitleVariant,
+  YoutubeSeoState,
+  SEO_PRESETS_BY_TONE,
+  createDefaultYoutubeSeoState,
+  toEnglishChapterTitle,
+  toEnglishSceneTitle
+} from '../utils/englishExport';
 
-export interface SeoTitleVariant {
-  id: 'A' | 'B' | 'C';
-  category: 'Intrigue' | 'Contradiction' | 'Drama';
-  categoryRu: string;
-  title: string;
-}
+export type { SeoToneStyle, SeoTitleVariant };
 
 interface YouTubeSeoViewProps {
   scriptContext: string;
   narrativeScenes: NarrativeSceneItem[];
   loopSlots: TimelineSlot[];
   projectName: string;
+  seoState?: YoutubeSeoState;
+  onSeoStateChange?: React.Dispatch<React.SetStateAction<YoutubeSeoState>>;
   onApplyTitleToThumbnail?: (title: string) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
@@ -54,43 +55,67 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   narrativeScenes,
   loopSlots,
   projectName,
+  seoState,
+  onSeoStateChange,
   onApplyTitleToThumbnail,
   onNotify
 }) => {
-  const [tone, setTone] = useState<SeoToneStyle>('Dark Mystery');
+  const [internalSeoState, setInternalSeoState] = useState<YoutubeSeoState>(() =>
+    createDefaultYoutubeSeoState('Dark Mystery')
+  );
+  const activeSeoState = seoState ?? internalSeoState;
+  const updateSeoState: React.Dispatch<React.SetStateAction<YoutubeSeoState>> =
+    onSeoStateChange ?? setInternalSeoState;
+
+  const { tone, selectedTitleId, titles, description, tagsString } = activeSeoState;
+
+  const setTone = useCallback(
+    (nextTone: SeoToneStyle) => {
+      updateSeoState(prev => ({ ...prev, tone: nextTone }));
+    },
+    [updateSeoState]
+  );
+
+  const setSelectedTitleId = useCallback(
+    (nextId: 'A' | 'B' | 'C') => {
+      updateSeoState(prev => ({ ...prev, selectedTitleId: nextId }));
+    },
+    [updateSeoState]
+  );
+
+  const setTitles = useCallback(
+    (
+      updater:
+        | SeoTitleVariant[]
+        | ((prev: SeoTitleVariant[]) => SeoTitleVariant[])
+    ) => {
+      updateSeoState(prev => ({
+        ...prev,
+        titles: typeof updater === 'function' ? updater(prev.titles) : updater
+      }));
+    },
+    [updateSeoState]
+  );
+
+  const setDescription = useCallback(
+    (nextDesc: string) => {
+      updateSeoState(prev => ({ ...prev, description: nextDesc }));
+    },
+    [updateSeoState]
+  );
+
+  const setTagsString = useCallback(
+    (nextTags: string) => {
+      updateSeoState(prev => ({ ...prev, tagsString: nextTags }));
+    },
+    [updateSeoState]
+  );
+
   const [chapterSourceMode, setChapterSourceMode] = useState<'scenes' | 'loop'>(
     loopSlots.length > 0 && narrativeScenes.length === 0 ? 'loop' : 'scenes'
   );
-  const [selectedTitleId, setSelectedTitleId] = useState<'A' | 'B' | 'C'>('A');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string>('');
-
-  // а) Кликабельные заголовки (A/B Titles): 3 контрастных варианта (Интрига, Противоречие, Драма) до 60 символов
-  const [titles, setTitles] = useState<SeoTitleVariant[]>([
-    {
-      id: 'A',
-      category: 'Intrigue',
-      categoryRu: 'Интрига (Intrigue)',
-      title: 'The 1974 Alpine Tape They Hid for 50 Years'
-    },
-    {
-      id: 'B',
-      category: 'Contradiction',
-      categoryRu: 'Противоречие (Contradiction)',
-      title: 'Evacuated in 24 Hours, Yet It Broadcast for 21 Days'
-    },
-    {
-      id: 'C',
-      category: 'Drama',
-      categoryRu: 'Драма (Cinematic Drama)',
-      title: 'Why the Night Shift Signed a 50-Year Silence Pact'
-    }
-  ]);
-
-  // б) SEO-описание (Description): плотный продающий текст на 150-200 слов с поисковыми ключами (US English)
-  const [description, setDescription] = useState<string>(
-    `In 1974, a remote high-altitude Alpine weather station was abruptly evacuated in under twenty-four hours after recording an unexplained low-frequency acoustic signal. While declassified official reports blamed a sudden mountain avalanche, every telemetry sensor inside the sealed, unpowered bunker continued broadcasting a structured pulse for three straight weeks.\n\nIn this 4K investigative documentary, we examine the original magnetic tape logs, the missing forty-minute communication window, and the fifty-year non-disclosure agreement signed by the surviving night shift engineers. Using forensic audio analysis and archival blueprints, we reconstruct what actually happened behind the welded steel doors of Outpost 7.\n\nWhether you enjoy dark historical mysteries, unsolved Cold War anomalies, or deep-dive investigative storytelling, this documentary uncovers the evidence that authorities tried to erase from history. Watch until the final act to hear the unfiltered fourteen-second recording that started it all.`
-  );
 
   // в) Кликабельные главы (Timestamps / Chapters) из сцен манифеста (00:00:00 - Intro...)
   const computedChaptersFromManifest = useMemo(() => {
@@ -164,14 +189,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           const chapterIdx = lines.length;
           if (chapterIdx < 8) {
             const ts = formatSecToTimestamp(cursorSec);
-            const rawOverlay = sc.text_overlay
-              .replace(/\[[^\]]*\]/g, '')
-              .replace(/[а-яёА-ЯЁ]+/g, '')
-              .trim();
-            const label =
-              rawOverlay.length > 6
-                ? rawOverlay.slice(0, 52)
-                : presetNames[chapterIdx % presetNames.length];
+            const label = toEnglishSceneTitle(sc, chapterIdx);
             lines.push(`${ts} - ${label}`);
           }
         }
@@ -189,14 +207,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   }, [tone, chapterSourceMode, narrativeScenes, loopSlots]);
 
   const liveLoopTimestampsText = useMemo(() => {
-    const defaultNames = [
-      'Intro: Opening Atmosphere',
-      'Act I: First Movement',
-      'Act II: Deepening Atmosphere',
-      'Act III: Peak Tension',
-      'Act IV: Distant Resonance',
-      'Final Act: Outro & Stillness'
-    ];
     if (loopSlots.length === 0) return '';
     let cursorSec = 0;
     return loopSlots
@@ -209,9 +219,12 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             : 0;
         cursorSec += Math.max(1, slot.slot_duration_sec - overlap);
 
-        const rawTitle = (slot.act_title || slot.title || '').trim();
-        const label = rawTitle || defaultNames[idx % defaultNames.length];
-        return `${ts} - ${label}`;
+        const englishLabel = toEnglishChapterTitle(
+          slot.act_title || slot.title,
+          idx,
+          slot.act_timecode
+        );
+        return `${ts} - ${englishLabel}`;
       })
       .join('\n');
   }, [loopSlots]);
@@ -221,11 +234,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   useEffect(() => {
     setChaptersText(computedChaptersFromManifest);
   }, [computedChaptersFromManifest]);
-
-  // г) Теги YouTube (Tags): 30 релевантных тегов единой строкой через запятую (до 500 символов)
-  const [tagsString, setTagsString] = useState<string>(
-    'dark mystery, classified files, 1974 alpine tape, unexplained signal, abandoned station, cold war mystery, documentary 4k, investigative doc, unsolved history, audio anomaly, ghost broadcast, secret bunker, reel to reel tape, declassified archive, true mystery story, snowbound outpost, acoustic phenomenon, mystery documentary, deep dive history, lost recording, 50 year nda, vanished crew, forensic investigation, cinematic doc, eerie history, numbers station, arctic anomaly, dark history, mysterious broadcast, aether studio'
-  );
 
   const copyWithToast = (text: string, key: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -237,77 +245,35 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   // Генерация по тональности (локальный мгновенный пресет + Gemini API)
   const applyTonePresetsLocally = useCallback(
     (selectedTone: SeoToneStyle) => {
-      const presetsByTone: Record<
-        SeoToneStyle,
-        {
-          titles: [string, string, string];
-          desc: string;
-          tags: string;
-        }
-      > = {
-        'Dark Mystery': {
-          titles: [
-            'The 1974 Alpine Tape They Hid for 50 Years',
-            'Evacuated in 24 Hours, Yet It Broadcast for 21 Days',
-            'Why the Night Shift Signed a 50-Year Silence Pact'
-          ],
-          desc: `In 1974, a remote high-altitude Alpine weather station was abruptly evacuated in under twenty-four hours after recording an unexplained low-frequency acoustic signal. While declassified official reports blamed a sudden mountain avalanche, every telemetry sensor inside the sealed, unpowered bunker continued broadcasting a structured pulse for three straight weeks.\n\nIn this 4K investigative documentary, we examine the original magnetic tape logs, the missing forty-minute communication window, and the fifty-year non-disclosure agreement signed by the surviving night shift engineers. Using forensic audio analysis and archival blueprints, we reconstruct what actually happened behind the welded steel doors of Outpost 7.\n\nWhether you enjoy dark historical mysteries, unsolved Cold War anomalies, or deep-dive investigative storytelling, this documentary uncovers the evidence that authorities tried to erase from history. Watch until the final act to hear the unfiltered fourteen-second recording that started it all.`,
-          tags: 'dark mystery, classified files, 1974 alpine tape, unexplained signal, abandoned station, cold war mystery, documentary 4k, investigative doc, unsolved history, audio anomaly, ghost broadcast, secret bunker, reel to reel tape, declassified archive, true mystery story, snowbound outpost, acoustic phenomenon, mystery documentary, deep dive history, lost recording, 50 year nda, vanished crew, forensic investigation, cinematic doc, eerie history, numbers station, arctic anomaly, dark history, mysterious broadcast, aether studio'
-        },
-        'Cozy Ambient': {
-          titles: [
-            'Heavy Arctic Blizzard Outside Warm Cabin (4K Loop)',
-            'Frozen Storm Outside, Yet 100% Warm Peace Inside',
-            '3 Hours of Deep Winter Wind & Crackling Fireplace'
-          ],
-          desc: `Immerse yourself in an ultra-detailed 4K ambient soundscape where a relentless high-altitude snowstorm meets the warm, comforting glow of a secluded mountain cabin. Mastered at -16 LUFS with seamless 90-second act transitions, this multi-hour audiovisual experience is engineered for deep sleep, uninterrupted study sessions, reading, and stress relief.\n\nEvery visual act blends organic snowfall physics with natural low-frequency wind resonance and soft hearth embers—free from jarring cuts or sudden volume spikes. Put on your headphones, dim the room lights, and let the peaceful contrast between the freezing arctic blizzard outside and the safe shelter inside calm your mind.\n\nSubscribe for weekly 4K Ultra HD ambient loops, dark screen sleep soundscapes, and cinematic atmospheric environments designed to help you focus, relax, and recharge every single night.`,
-          tags: 'cozy ambient 4k, snowstorm ambience, winter blizzard sounds, howling wind 4k, deep sleep ambience, study ambience, cozy cabin storm, crackling fireplace, arctic wind soundscape, seamless loop 4k, relaxation video, white noise sleep, atmospheric soundscape, heavy snowstorm, insomnia relief, meditation nature, binaural wind, ultra hd 4k loop, ambient drone, deep focus audio, storm outside window, night blizzard 4k, peaceful winter, sleep aid 4k, ambient study, nature soundscape, cozy rain snow, dark screen sleep, cabin ambience, 4k ambience'
-        },
-        'Historical Doc': {
-          titles: [
-            'Inside the Classified 1974 Alpine Station Dossier',
-            'Official Logs Said Avalanche, Telemetry Proved Otherwise',
-            'The Forgotten Engineers Who Locked Outpost 7 Forever'
-          ],
-          desc: `Declassified after fifty years, the archival records of the 1974 high-altitude weather station incident reveal one of the most compelling technological mysteries of the twentieth century. Within twenty-four hours of logging a persistent sub-audible frequency, the entire research facility was shuttered and placed under strict military quarantine.\n\nIn this historical documentary, we cross-reference primary source duty rosters, analog oscilloscope transcripts, and geopolitical records to understand why an ordinary meteorological outpost required a half-century secrecy mandate. Step by step, we trace the timeline from the first anomalous signal at 03:17 AM to the final automated transmission twenty-one days later.\n\nIdeal for viewers who appreciate rigorous historical documentaries, archival history, Cold War engineering, and fact-based investigative journalism in crisp 4K Ultra HD resolution.`,
-          tags: 'historical documentary, cold war history, declassified history, 1974 archive, history documentary 4k, engineering mystery, archival footage doc, military history, scientific expedition, forgotten history, twentieth century history, investigative history, historical enigma, radar station history, alpine expedition, secret research facility, documentary film, historical analysis, primary sources, cold war bunker, analog telemetry, history channel style, deep history dive, unsolved historical event, meteorological station, classified dossier, history buff, true history, geopolitical history, 4k doc'
-        },
-        'Cinematic Drama': {
-          titles: [
-            '14 Seconds on Tape That Changed Everything',
-            'The Power Was Cut, But the Microphone Stayed Live',
-            'They Had 24 Hours to Vanish & Never Speak Again'
-          ],
-          desc: `At 03:17 AM, during the worst mountain blizzard of the decade, a single red indicator lamp began blinking inside a locked communications room. What the duty officer recorded on that magnetic reel forced an immediate evacuation at dawn—and bound every witness to fifty years of silence.\n\nShot and edited with cinematic 4K pacing, dramatic sound design, and frame-by-frame tension, this film reconstructs the final hours inside the station before the steel doors were welded shut. Every clue leads closer to the forty-minute gap that investigators were ordered never to mention.\n\nExperience gripping cinematic storytelling, atmospheric visuals, and relentless suspense as we uncover the human drama behind the sealed tape that refused to stay buried.`,
-          tags: 'cinematic drama, suspense documentary, thriller storytelling, 4k short film, dramatic true story, mystery thriller, atmospheric cinema, dark storytelling, gripping documentary, untold story, 24 hours to evacuate, classified tape drama, night shift story, bunker mystery, cinematic investigation, high tension doc, true suspense, emotional documentary, film look 4k, dramatic reconstruction, voiceover story, immersive documentary, mystery cinema, cold war drama, survival story, locked room mystery, investigative drama, plot twist doc, deep storytelling, aether cinema'
-        }
-      };
-
-      const selected = presetsByTone[selectedTone];
-      setTitles([
-        {
-          id: 'A',
-          category: 'Intrigue',
-          categoryRu: 'Интрига (Intrigue)',
-          title: selected.titles[0].slice(0, 60)
-        },
-        {
-          id: 'B',
-          category: 'Contradiction',
-          categoryRu: 'Противоречие (Contradiction)',
-          title: selected.titles[1].slice(0, 60)
-        },
-        {
-          id: 'C',
-          category: 'Drama',
-          categoryRu: 'Драма (Cinematic Drama)',
-          title: selected.titles[2].slice(0, 60)
-        }
-      ]);
-      setDescription(selected.desc);
-      setTagsString(selected.tags.slice(0, 495));
+      const selected = SEO_PRESETS_BY_TONE[selectedTone];
+      updateSeoState(prev => ({
+        ...prev,
+        tone: selectedTone,
+        titles: [
+          {
+            id: 'A',
+            category: 'Intrigue',
+            categoryRu: 'Интрига (Intrigue)',
+            title: selected.titles[0].slice(0, 60)
+          },
+          {
+            id: 'B',
+            category: 'Contradiction',
+            categoryRu: 'Противоречие (Contradiction)',
+            title: selected.titles[1].slice(0, 60)
+          },
+          {
+            id: 'C',
+            category: 'Drama',
+            categoryRu: 'Драма (Cinematic Drama)',
+            title: selected.titles[2].slice(0, 60)
+          }
+        ],
+        description: selected.desc,
+        tagsString: selected.tags.slice(0, 495)
+      }));
     },
-    []
+    [updateSeoState]
   );
 
   // Генерация через Gemini API (с гарантированным мгновенным результатом)

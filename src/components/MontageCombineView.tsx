@@ -37,10 +37,15 @@ import {
   getDriveAccessToken,
   resumableUploadToGoogleDrive
 } from '../googleDriveAuth';
+import {
+  YoutubeSeoManifestBlock,
+  toEnglishSceneTitle
+} from '../utils/englishExport';
 
 export interface NarrativeSceneItem {
   scene_index: number;
   scene_id: string;
+  title?: string;
   file_name: string;
   start_time: string | number;
   duration: number;
@@ -148,6 +153,7 @@ export interface NarrativeMontageManifest {
     diff_sec: number;
     within_tolerance: boolean;
   };
+  youtube_seo?: YoutubeSeoManifestBlock;
   scenes: NarrativeSceneItem[];
 }
 
@@ -167,12 +173,13 @@ interface MontageCombineViewProps {
   externalMasterAudioFile?: { fileName: string; file?: File; durationSec?: number } | null;
   onConsumeExternalMasterAudio?: () => void;
   onScenesChange?: (scenes: NarrativeSceneItem[]) => void;
+  youtubeSeo?: YoutubeSeoManifestBlock;
   telegramBotToken?: string;
   telegramChatId?: string;
   onOpenConfigModal: () => void;
   onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
   onCancelRenderRun: () => void;
-  onNotify: (message: string, type: 'info' | 'error' | 'success') => void;
+  onNotify: (message: string, type?: 'info' | 'error' | 'success') => void;
   encodeManifestBase64: (manifestObj: unknown) => string;
   terminalStatus: TerminalRunnerState;
   terminalSeconds: number;
@@ -226,6 +233,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   externalMasterAudioFile,
   onConsumeExternalMasterAudio,
   onScenesChange,
+  youtubeSeo,
   telegramBotToken,
   telegramChatId,
   onOpenConfigModal,
@@ -569,11 +577,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             sc.text_overlay ?? sc.subtitle ?? sc.caption ?? sc.act_title ?? sc.title ?? ''
           );
 
+          const rawSceneTitle = String(sc.title ?? sc.act_title ?? '').trim();
+
           return {
             scene_index: idx + 1,
             scene_id: String(
               sc.scene_id || sc.slot_id || sc.id || `SCENE_${String(idx + 1).padStart(3, '0')}`
             ),
+            ...(rawSceneTitle ? { title: rawSceneTitle } : {}),
             file_name: rawFileName,
             start_time:
               typeof sc.start_time === 'string' && sc.start_time.trim()
@@ -1276,9 +1287,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         diff_sec: driftDiffSec,
         within_tolerance: isDriftWithinTolerance
       },
+      ...(youtubeSeo ? { youtube_seo: youtubeSeo } : {}),
       scenes: narrativeScenes.map((sc, idx) => ({
         scene_index: idx + 1,
         scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
+        title: toEnglishSceneTitle(sc, idx),
         file_name: sc.file_name.trim(),
         start_time: sc.start_time,
         duration: Number(sc.duration) || 6,
@@ -1308,6 +1321,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       telegramChatId,
       driftDiffSec,
       isDriftWithinTolerance,
+      youtubeSeo,
       encodeManifestBase64
     ]
   );
