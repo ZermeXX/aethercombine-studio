@@ -4200,7 +4200,7 @@ export default function App() {
                   AETHER <span className="text-amber-400">COMBINE</span>
                 </h1>
                 <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300 whitespace-nowrap">
-                  PRO 4K • ARGON
+                  PRO 4K • HYDROGEN
                 </span>
               </div>
               <p className="hidden md:block text-xs text-slate-400 truncate">
@@ -6593,7 +6593,7 @@ export default function App() {
         </section>
 
         {/* =========================================
-            ЦЕХ 3: 4K ПРЕВЬЮ И АРТ-ЦЕХ (IMAGEN 3 + A/B ТЕСТЕР + YOUTUBE MOCKUP)
+            ЦЕХ 3: 4K ПРЕВЬЮ И АРТ-ЦЕХ (FLUX.1 AI HORDE + A/B ТЕСТЕР + YOUTUBE MOCKUP)
            ========================================= */}
         <section
           id="view-thumb"

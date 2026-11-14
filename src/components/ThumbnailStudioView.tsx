@@ -138,49 +138,70 @@ async function fetchImageAsBlobObjectUrl(
 }
 
 /**
- * Генерация 4 чистых 16:9 обложек (1344x768) через бесплатный AI Horde API (Flux.1-Schnell)
- * 1) POST /api/v2/generate/async (apikey: 0000000000, Flux.1-Schnell, n: 4, 1344x768)
+ * Генерация 4 чистых 16:9 обложек без водяных знаков через бесплатный AI Horde API (Flux.1-Schnell)
+ * 1) POST /api/v2/generate/async (apikey: 0000000000, Flux.1-Schnell, n: 4, 1344x768; авто-адаптация 704x384 при KudosUpfront)
  * 2) Polling GET /api/v2/generate/check/{id} каждые 3 секунды до done === true
- * 3) GET /api/v2/generate/status/{id} -> generations[].img -> fetch -> blob -> ObjectURL
+ * 3) GET /api/v2/generate/status/{id} -> generations[].img -> fetch -> blob -> URL.createObjectURL
  */
 export async function generateViaAiHordeFlux(
   promptText: string,
   options?: {
-    onProgress?: (statusText: string) => void;
+    onProgress?: (statusText: string, buttonText?: string) => void;
     signal?: AbortSignal;
   }
 ): Promise<{ images: string[]; modelUsed: string }> {
-  const submitRes = await fetch(`${AI_HORDE_BASE_URL}/generate/async`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: AI_HORDE_ANON_KEY,
-      'Client-Agent': 'AetherCombine:1.0:studio'
-    },
-    body: JSON.stringify({
-      prompt: promptText,
-      params: {
-        sampler_name: 'k_euler',
-        cfg_scale: 1,
-        steps: 4,
-        width: 1344,
-        height: 768,
-        n: 4
+  const submitJob = async (width: number, height: number) => {
+    const res = await fetch(`${AI_HORDE_BASE_URL}/generate/async`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: AI_HORDE_ANON_KEY,
+        'Client-Agent': 'AetherCombine:1.0:studio'
       },
-      models: ['Flux.1-Schnell'],
-      nsfw: false,
-      censor_nsfw: true,
-      r2: true,
-      n: 4
-    }),
-    signal: options?.signal
-  });
+      body: JSON.stringify({
+        prompt: promptText,
+        params: {
+          sampler_name: 'k_euler',
+          cfg_scale: 1,
+          steps: 4,
+          width,
+          height,
+          n: 4
+        },
+        models: ['Flux.1-Schnell', 'Flux.1-Schnell fp8 (Compact)'],
+        nsfw: false,
+        censor_nsfw: true,
+        r2: true
+      }),
+      signal: options?.signal
+    });
 
-  const submitData = (await submitRes.json().catch(() => ({}))) as {
-    id?: string;
-    message?: string;
-    rc?: string;
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      message?: string;
+      rc?: string;
+    };
+    return { res, data };
   };
+
+  let requestedWidth = 1344;
+  let requestedHeight = 768;
+  let { res: submitRes, data: submitData } = await submitJob(requestedWidth, requestedHeight);
+
+  if (
+    (!submitRes.ok || !submitData.id) &&
+    (submitRes.status === 403 || submitData.rc === 'KudosUpfront' || /kudos/i.test(submitData.message || ''))
+  ) {
+    requestedWidth = 704;
+    requestedHeight = 384;
+    options?.onProgress?.(
+      'Анонимный лимит AI Horde для 1344×768 — переключаемся на бесплатный 16:9 (704×384 → 1344×768)...',
+      'Запуск AI Horde (16:9)...'
+    );
+    const retry = await submitJob(requestedWidth, requestedHeight);
+    submitRes = retry.res;
+    submitData = retry.data;
+  }
 
   if (!submitRes.ok || !submitData.id) {
     throw new FluxGenerationError(
@@ -190,7 +211,10 @@ export async function generateViaAiHordeFlux(
   }
 
   const jobId = submitData.id;
-  options?.onProgress?.(`AI Horde задача создана (ID ${jobId.slice(0, 8)}), ждём воркера...`);
+  options?.onProgress?.(
+    `AI Horde задача создана (ID ${jobId.slice(0, 8)}), опрос каждые 3с...`,
+    'Очередь AI Horde...'
+  );
 
   const maxWaitMs = 5 * 60 * 1000;
   const startedAt = Date.now();
@@ -251,14 +275,20 @@ export async function generateViaAiHordeFlux(
     const qPos = typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
     const eta = typeof checkData.wait_time === 'number' ? `~${checkData.wait_time}с` : '...';
     const doneCnt = checkData.finished ?? 0;
-    options?.onProgress?.(`AI Horde (Flux.1-Schnell) • Очередь: ${qPos} • Осталось: ${eta} • Готово ${doneCnt}/4`);
+    options?.onProgress?.(
+      `AI Horde (Flux.1-Schnell) • Очередь: ${qPos} • Осталось: ${eta} • Готово ${doneCnt}/4`,
+      `Очередь ${qPos} • ${eta} (${doneCnt}/4)`
+    );
 
     if (checkData.done === true) {
       break;
     }
   }
 
-  options?.onProgress?.('Забираем 4 готовых кадра (1344×768) из AI Horde...');
+  options?.onProgress?.(
+    'Забираем 4 готовых кадра (1344×768) из AI Horde...',
+    'Загрузка 4 кадров...'
+  );
 
   const statusRes = await fetch(`${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`, {
     headers: {
@@ -283,11 +313,14 @@ export async function generateViaAiHordeFlux(
     throw new FluxGenerationError('AI Horde завершился без изображений.', 502);
   }
 
-  const blobUrls = await Promise.all(rawUrls.slice(0, 4).map(url => fetchImageAsBlobObjectUrl(url, false)));
+  const needsUpscaleTo1344 = requestedWidth < 1344;
+  const blobUrls = await Promise.all(
+    rawUrls.slice(0, 4).map(url => fetchImageAsBlobObjectUrl(url, needsUpscaleTo1344))
+  );
 
   return {
     images: blobUrls,
-    modelUsed: 'AI Horde • Flux.1-Schnell (1344×768)'
+    modelUsed: 'Flux.1 AI Horde (2×2) • 16:9'
   };
 }
 
@@ -682,6 +715,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [zoomedVariantIdx, setZoomedVariantIdx] = useState<number | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generationStatusText, setGenerationStatusText] = useState<string>('');
+  const [buttonQueueStatus, setButtonQueueStatus] = useState<string>('');
+  const [generatingTargetSlot, setGeneratingTargetSlot] = useState<'A' | 'B' | null>(null);
   const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
   const [variantLabels, setVariantLabels] = useState<string[]>([...LOCAL_SCENE_LABELS]);
   const [isSlicingLocalMedia, setIsSlicingLocalMedia] = useState<boolean>(false);
@@ -1242,7 +1277,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     generationAbortRef.current = controller;
 
     setIsGeneratingCovers(true);
+    setGeneratingTargetSlot(targetSlot);
     setGenerationError(null);
+    setButtonQueueStatus(isCloudflareConfigured ? 'Генерация Cloudflare...' : 'Запрос в AI Horde...');
     setGenerationStatusText(
       isCloudflareConfigured
         ? 'Мгновенная генерация 4 вариантов через Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)...'
@@ -1259,7 +1296,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           )
         : await generateViaAiHordeFlux(activePromptText, {
             signal: controller.signal,
-            onProgress: msg => setGenerationStatusText(msg)
+            onProgress: (msg, shortText) => {
+              setGenerationStatusText(msg);
+              if (shortText) setButtonQueueStatus(shortText);
+            }
           });
 
       const paddedUrls: string[] = [];
@@ -1285,7 +1325,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           setImgB(generatedImg);
         }
         onNotify(
-          `🎨 4 чистые 16:9 обложки сгенерированы (${result.modelUsed})!`,
+          `🎨 4 чистые 16:9 обложки сгенерированы (${result.modelUsed}) и установлены в Обложку ${targetSlot}!`,
           'success'
         );
       };
@@ -1303,7 +1343,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
     } finally {
       setIsGeneratingCovers(false);
+      setGeneratingTargetSlot(null);
       setGenerationStatusText('');
+      setButtonQueueStatus('');
       if (generationAbortRef.current === controller) {
         generationAbortRef.current = null;
       }
@@ -1506,16 +1548,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех (Flux.1-Schnell • 16:9)
+              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех
             </h2>
             <span
-              className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+              className={`text-[10px] font-mono px-2 py-0.5 rounded border shrink-0 ${
                 isCloudflareConfigured
                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                   : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
               }`}
             >
-              {isCloudflareConfigured ? 'CF Instant • 2×2' : 'AI Horde • 1344×768'}
+              {isCloudflareConfigured ? 'Cloudflare Flux (2×2) • 16:9' : 'Flux.1 AI Horde (2×2) • 16:9'}
             </span>
           </div>
 
@@ -1529,11 +1571,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
                 )}
                 {isCloudflareConfigured
-                  ? 'Cloudflare Workers AI (Flux.1-Schnell):'
-                  : 'AI Horde (Flux.1-Schnell Free):'}
+                  ? 'Cloudflare Flux (2×2) • 16:9:'
+                  : 'Flux.1 AI Horde (2×2) • 16:9:'}
               </span>
               <span className="font-mono text-[10px] text-slate-400">
-                4 кадра • 1344×768 • No Watermark
+                1344×768 • No Watermark
               </span>
             </div>
 
@@ -1542,24 +1584,36 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 type="button"
                 onClick={() => handleGenerateFluxCover('A')}
                 disabled={isGeneratingCovers}
-                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-60"
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-75"
               >
-                {isGeneratingCovers ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                {isGeneratingCovers && generatingTargetSlot === 'A' ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
                 ) : (
-                  <Wand2 className="w-3.5 h-3.5" />
+                  <Wand2 className="w-3.5 h-3.5 shrink-0" />
                 )}
-                <span>Flux 2×2 → A</span>
+                <span className="truncate">
+                  {isGeneratingCovers && generatingTargetSlot === 'A'
+                    ? buttonQueueStatus || 'Ожидание...'
+                    : 'Flux.1 AI Horde (2×2) → A'}
+                </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleGenerateFluxCover('B')}
                 disabled={isGeneratingCovers}
-                className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+                className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-75"
               >
-                <Wand2 className="w-3.5 h-3.5" />
-                <span>Flux 2×2 → B</span>
+                {isGeneratingCovers && generatingTargetSlot === 'B' ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span className="truncate">
+                  {isGeneratingCovers && generatingTargetSlot === 'B'
+                    ? buttonQueueStatus || 'Ожидание...'
+                    : 'Flux.1 AI Horde (2×2) → B'}
+                </span>
               </button>
             </div>
 
@@ -2003,7 +2057,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <Grid className="w-5 h-5 text-cyan-400" />
             <div>
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Сетка 2×2 обложек без водяных знаков (Flux.1-Schnell • 1344×768)
+                Сетка 2×2 обложек: Flux.1 AI Horde (2×2) • 16:9
               </h3>
               <p className="text-xs text-slate-400">
                 Кликните по любой из 4-х карточек для выбора мастер-обложки (`window.selectedMasterThumbnail`)
@@ -2047,7 +2101,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               type="button"
               onClick={() => handleGenerateFluxCover('A')}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
-              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-75"
             >
               {isGeneratingCovers ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -2055,9 +2109,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <Wand2 className="w-4 h-4" />
               )}
               <span>
-                {isCloudflareConfigured
-                  ? 'Сгенерировать 4 обложки (Cloudflare Flux)'
-                  : 'Сгенерировать 4 обложки (AI Horde Flux 1344×768)'}
+                {isGeneratingCovers
+                  ? buttonQueueStatus || 'Ожидание AI Horde...'
+                  : isCloudflareConfigured
+                    ? 'Cloudflare Flux (2×2) • 16:9'
+                    : 'Flux.1 AI Horde (2×2) • 16:9'}
               </span>
             </button>
           </div>
@@ -2122,7 +2178,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         ) : (
           /* Контейнер превью: 2 колонки на 2 строки (grid grid-cols-2 gap-3 w-full my-4) */
-          <div id="imagen-thumbnails-grid-container" className="grid grid-cols-2 gap-3 w-full my-4">
+          <div id="flux-thumbnails-grid-container" className="grid grid-cols-2 gap-3 w-full my-4">
             {batchVariants.map((imgSrc, index) => {
               const isMaster = selectedMasterVariantIdx === index;
               const isAttached = attachedToYoutubeIdx === index;
@@ -2238,7 +2294,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         )}
       </div>
 
-      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА IMAGEN 4 / MIDJOURNEY / LEONARDO */}
+      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА FLUX.1 AI HORDE / MIDJOURNEY / LEONARDO */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 1. АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
         <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
@@ -2427,9 +2483,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             >
               <Wand2 className="w-4 h-4" />
               <span>
-                {isCloudflareConfigured
-                  ? 'Сгенерировать 2×2 (Cloudflare Flux)'
-                  : 'Сгенерировать 2×2 (AI Horde Flux 1344×768)'}
+                {isGeneratingCovers
+                  ? buttonQueueStatus || 'Ожидание AI Horde...'
+                  : isCloudflareConfigured
+                    ? 'Cloudflare Flux (2×2) • 16:9'
+                    : 'Flux.1 AI Horde (2×2) • 16:9'}
               </span>
             </button>
 
