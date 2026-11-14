@@ -3873,42 +3873,55 @@ export default function App() {
       ctx.fillText('Загрузите изображение для предпросмотра', 640, 360);
     }
 
-    // Bottom gradient overlay
-    const grad = ctx.createLinearGradient(0, 400, 0, 720);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.85)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 400, 1280, 320);
+    const trimmedTitle = (thumbTitle || '').trim();
+
+    // Bottom gradient overlay only when title hook exists
+    if (trimmedTitle) {
+      const grad = ctx.createLinearGradient(0, 400, 0, 720);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 400, 1280, 320);
+    }
 
     // Cinematic badge
-    if (thumbBadge !== 'none') {
-      const badgeX = 1280 - 180;
+    if (thumbBadge && thumbBadge !== 'none') {
+      const firstId = thumbBadge.split(',')[0]?.trim();
+      const labelMap: Record<string, string> = {
+        '4k_gold': '4K ULTRA HD • GOLD',
+        '3_hours': '3 HOURS',
+        ambience_asmr: 'AMBIENCE • ASMR',
+        deep_sleep: 'DEEP SLEEP',
+        no_ads_seamless: 'NO ADS • SEAMLESS',
+        binaural_audio: 'BINAURAL AUDIO',
+        cozy_fireplace: 'COZY FIREPLACE',
+        '432_hz': '432 HZ'
+      };
+      const bText = labelMap[firstId || ''] || '4K ULTRA HD • GOLD';
+      const badgeX = 1280 - 210;
       const badgeY = 30;
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
       ctx.strokeStyle = '#f59e0b';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.roundRect(badgeX, badgeY, 150, 42, 8);
+      ctx.roundRect(badgeX, badgeY, 180, 42, 8);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = '#f59e0b';
       ctx.font = 'bold 13px Inter, sans-serif';
       ctx.textAlign = 'center';
-      let bText = '4K ULTRA HD';
-      if (thumbBadge === 'ambience') bText = 'AMBIENCE 60FPS';
-      if (thumbBadge === '10h') bText = '10 HOURS LOOP';
-      ctx.fillText(bText, badgeX + 75, badgeY + 26);
+      ctx.fillText(bText, badgeX + 90, badgeY + 26);
     }
 
     // Title text
-    if (thumbTitle) {
+    if (trimmedTitle) {
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 64px "Bebas Neue", sans-serif';
       ctx.textAlign = 'left';
       ctx.shadowColor = 'rgba(0,0,0,0.9)';
       ctx.shadowBlur = 12;
-      ctx.fillText(thumbTitle.toUpperCase(), 50, 660);
+      ctx.fillText(trimmedTitle.toUpperCase(), 50, 660);
       ctx.shadowBlur = 0;
     }
   }, [thumbImg, thumbBadge, thumbTitle]);

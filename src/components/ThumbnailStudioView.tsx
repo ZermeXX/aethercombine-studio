@@ -26,7 +26,9 @@ import {
   Link2,
   Upload,
   Zap,
-  KeyRound
+  KeyRound,
+  Type,
+  Flame
 } from 'lucide-react';
 
 declare global {
@@ -685,6 +687,270 @@ function renderProcedural16x9ArtworkDataUrl(
   return c.toDataURL('image/jpeg', 0.94);
 }
 
+export type CinematicBadgeId =
+  | '4k_gold'
+  | '3_hours'
+  | 'ambience_asmr'
+  | 'deep_sleep'
+  | 'no_ads_seamless'
+  | 'binaural_audio'
+  | 'cozy_fireplace'
+  | '432_hz';
+
+export interface CinematicBadgeOption {
+  id: CinematicBadgeId;
+  label: string;
+}
+
+const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
+  { id: '4k_gold', label: '4K ULTRA HD • GOLD' },
+  { id: '3_hours', label: '3 HOURS' },
+  { id: 'ambience_asmr', label: 'AMBIENCE • ASMR' },
+  { id: 'deep_sleep', label: 'DEEP SLEEP' },
+  { id: 'no_ads_seamless', label: 'NO ADS • SEAMLESS' },
+  { id: 'binaural_audio', label: 'BINAURAL AUDIO' },
+  { id: 'cozy_fireplace', label: 'COZY FIREPLACE' },
+  { id: '432_hz', label: '432 HZ' }
+];
+
+const BADGE_LABEL_BY_ID: Record<CinematicBadgeId, string> = CINEMATIC_BADGE_OPTIONS.reduce(
+  (acc, item) => {
+    acc[item.id] = item.label;
+    return acc;
+  },
+  {} as Record<CinematicBadgeId, string>
+);
+
+const VALID_BADGE_IDS = new Set<string>(CINEMATIC_BADGE_OPTIONS.map(b => b.id));
+
+function parseBadgeIds(raw: string): CinematicBadgeId[] {
+  if (!raw || raw.trim().toLowerCase() === 'none') return [];
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter((s): s is CinematicBadgeId => VALID_BADGE_IDS.has(s))
+    .slice(0, 3);
+}
+
+export type ThumbnailFontStyleId =
+  | 'cinematic_sans'
+  | 'royal_gold_laurels'
+  | 'medieval_serif'
+  | 'minimal_clean';
+
+interface FontStyleOption {
+  id: ThumbnailFontStyleId;
+  label: string;
+  subtitle: string;
+  previewFontFamily: string;
+}
+
+const FONT_STYLE_OPTIONS: FontStyleOption[] = [
+  {
+    id: 'cinematic_sans',
+    label: 'Cinematic Sans (Montserrat / Impact)',
+    subtitle: 'Современный жирный гротеск',
+    previewFontFamily: '"Montserrat", Impact, sans-serif'
+  },
+  {
+    id: 'royal_gold_laurels',
+    label: 'Royal Gold Serif + Laurels (Cinzel Decorative)',
+    subtitle: 'Золотой градиент #F6D365 → #C59B27 и лавровые ветви',
+    previewFontFamily: '"Cinzel Decorative", "Cinzel", serif'
+  },
+  {
+    id: 'medieval_serif',
+    label: 'Medieval Story Serif (Cormorant Garamond Bold)',
+    subtitle: 'Атмосферный книжный / исторический шрифт с мягким свечением',
+    previewFontFamily: '"Cormorant Garamond", Georgia, serif'
+  },
+  {
+    id: 'minimal_clean',
+    label: 'Minimal Clean (Inter / Bebas Neue)',
+    subtitle: 'Строгий минималистичный стиль',
+    previewFontFamily: '"Bebas Neue", "Inter", sans-serif'
+  }
+];
+
+function drawGoldenLaurelBranch(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  height: number,
+  side: -1 | 1,
+  scale: number
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(side, 1);
+
+  const grad = ctx.createLinearGradient(0, -height * 0.52, 0, height * 0.52);
+  grad.addColorStop(0, '#FFF3B0');
+  grad.addColorStop(0.42, '#F6D365');
+  grad.addColorStop(1, '#C59B27');
+
+  ctx.shadowColor = 'rgba(246, 211, 101, 0.48)';
+  ctx.shadowBlur = 10 * scale;
+
+  // Изогнутый стебель ветви
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = Math.max(1.5, 2.6 * scale);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-height * 0.16, height * 0.48);
+  ctx.quadraticCurveTo(height * 0.22, height * 0.04, -height * 0.06, -height * 0.48);
+  ctx.stroke();
+
+  // Листья лавра вдоль дуги (внешние и внутренние)
+  const leafCount = 6;
+  for (let i = 0; i < leafCount; i++) {
+    const t = i / (leafCount - 1);
+    const inv = 1 - t;
+    const p0x = -height * 0.16;
+    const p0y = height * 0.48;
+    const p1x = height * 0.22;
+    const p1y = height * 0.04;
+    const p2x = -height * 0.06;
+    const p2y = -height * 0.48;
+
+    const sx = inv * inv * p0x + 2 * inv * t * p1x + t * t * p2x;
+    const sy = inv * inv * p0y + 2 * inv * t * p1y + t * t * p2y;
+
+    const leafLen = height * (0.18 - t * 0.04);
+    const leafW = leafLen * 0.42;
+
+    for (const dir of [-1, 1]) {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(dir === 1 ? -0.58 + t * 0.22 : -2.18 + t * 0.18);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(leafLen * 0.52, -leafW, leafLen, 0);
+      ctx.quadraticCurveTo(leafLen * 0.52, leafW, 0, 0);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.strokeStyle = 'rgba(15, 10, 4, 0.85)';
+      ctx.lineWidth = Math.max(1, 1.4 * scale);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawGoldenCandle(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  bottomY: number,
+  height: number,
+  scale: number
+): void {
+  ctx.save();
+  const flameCenterY = bottomY - height * 0.72;
+
+  // Тёплое свечение пламени свечи
+  const halo = ctx.createRadialGradient(
+    cx,
+    flameCenterY,
+    2 * scale,
+    cx,
+    flameCenterY,
+    height * 0.95
+  );
+  halo.addColorStop(0, 'rgba(254, 240, 138, 0.75)');
+  halo.addColorStop(0.35, 'rgba(246, 211, 101, 0.34)');
+  halo.addColorStop(0.7, 'rgba(197, 155, 39, 0.12)');
+  halo.addColorStop(1, 'transparent');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(cx, flameCenterY, height * 0.95, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Основание свечи (блюдце / подсвечник)
+  const plateW = height * 0.44;
+  const plateGrad = ctx.createLinearGradient(cx - plateW, bottomY, cx + plateW, bottomY);
+  plateGrad.addColorStop(0, '#92400E');
+  plateGrad.addColorStop(0.5, '#F6D365');
+  plateGrad.addColorStop(1, '#92400E');
+  ctx.fillStyle = plateGrad;
+  ctx.strokeStyle = 'rgba(12, 8, 3, 0.9)';
+  ctx.lineWidth = Math.max(1, 1.6 * scale);
+  ctx.beginPath();
+  ctx.roundRect(cx - plateW, bottomY - 4 * scale, plateW * 2, 5 * scale, 2.5 * scale);
+  ctx.fill();
+  ctx.stroke();
+
+  // Восковой цилиндр свечи
+  const bodyW = height * 0.24;
+  const bodyH = height * 0.48;
+  const bodyTop = bottomY - 4 * scale - bodyH;
+  const bodyGrad = ctx.createLinearGradient(cx - bodyW / 2, bodyTop, cx + bodyW / 2, bottomY);
+  bodyGrad.addColorStop(0, '#FFFBEB');
+  bodyGrad.addColorStop(0.45, '#F6D365');
+  bodyGrad.addColorStop(1, '#B45309');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.roundRect(cx - bodyW / 2, bodyTop, bodyW, bodyH, 3 * scale);
+  ctx.fill();
+  ctx.stroke();
+
+  // Фитиль
+  ctx.strokeStyle = '#1c1917';
+  ctx.lineWidth = Math.max(1, 1.5 * scale);
+  ctx.beginPath();
+  ctx.moveTo(cx, bodyTop);
+  ctx.lineTo(cx, bodyTop - height * 0.09);
+  ctx.stroke();
+
+  // Внешнее пламя
+  const flameBottom = bodyTop - height * 0.06;
+  const flameTop = flameBottom - height * 0.36;
+  const flameW = height * 0.14;
+  const flameGrad = ctx.createLinearGradient(cx, flameTop, cx, flameBottom);
+  flameGrad.addColorStop(0, '#FEF08A');
+  flameGrad.addColorStop(0.55, '#F59E0B');
+  flameGrad.addColorStop(1, '#D97706');
+  ctx.fillStyle = flameGrad;
+  ctx.beginPath();
+  ctx.moveTo(cx, flameTop);
+  ctx.bezierCurveTo(
+    cx + flameW,
+    flameBottom - height * 0.14,
+    cx + flameW * 0.85,
+    flameBottom,
+    cx,
+    flameBottom
+  );
+  ctx.bezierCurveTo(
+    cx - flameW * 0.85,
+    flameBottom,
+    cx - flameW,
+    flameBottom - height * 0.14,
+    cx,
+    flameTop
+  );
+  ctx.closePath();
+  ctx.fill();
+
+  // Ядро пламени
+  ctx.fillStyle = '#FFFBEB';
+  ctx.beginPath();
+  ctx.ellipse(
+    cx,
+    flameBottom - height * 0.1,
+    flameW * 0.36,
+    height * 0.09,
+    0,
+    0,
+    Math.PI * 2
+  );
+  ctx.fill();
+
+  ctx.restore();
+}
+
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   thumbTitle,
   onThumbTitleChange,
@@ -701,7 +967,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [imgA, setImgA] = useState<HTMLImageElement | null>(null);
   const [imgB, setImgB] = useState<HTMLImageElement | null>(null);
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
-  const [badgeB] = useState<string>('ambience');
+  const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>(['3_hours', 'deep_sleep']);
+  const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
+  const [royalDecorEnabled, setRoyalDecorEnabled] = useState<boolean>(true);
+  const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
+
+  const selectedBadgesA = parseBadgeIds(thumbBadge);
 
   // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
@@ -824,6 +1095,61 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [isGeneratingCovers, setIsGeneratingCovers] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof document !== 'undefined' && 'fonts' in document) {
+      Promise.allSettled([
+        document.fonts.load('900 64px "Montserrat"'),
+        document.fonts.load('900 64px "Cinzel Decorative"'),
+        document.fonts.load('700 64px "Cinzel"'),
+        document.fonts.load('700 64px "Cormorant Garamond"'),
+        document.fonts.load('700 64px "Bebas Neue"'),
+        document.fonts.load('700 24px "Inter"')
+      ]).then(() => {
+        if (!cancelled) {
+          setFontsReadyTick(t => t + 1);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleBadgeA = (badgeId: CinematicBadgeId) => {
+    const exists = selectedBadgesA.includes(badgeId);
+    let next: CinematicBadgeId[];
+    if (exists) {
+      next = selectedBadgesA.filter(id => id !== badgeId);
+    } else {
+      if (selectedBadgesA.length >= 3) {
+        onNotify(
+          'Можно включить максимум 3 бейджа одновременно — отключите один из выбранных.',
+          'info'
+        );
+        return;
+      }
+      next = [...selectedBadgesA, badgeId];
+    }
+    onThumbBadgeChange(next.length > 0 ? next.join(',') : 'none');
+  };
+
+  const toggleBadgeB = (badgeId: CinematicBadgeId) => {
+    setBadgesB(prev => {
+      if (prev.includes(badgeId)) {
+        return prev.filter(id => id !== badgeId);
+      }
+      if (prev.length >= 3) {
+        onNotify(
+          'Для Варианта B можно включить максимум 3 бейджа одновременно.',
+          'info'
+        );
+        return prev;
+      }
+      return [...prev, badgeId];
+    });
+  };
+
   // Автогенератор визуального промпта на английском языке
   const generatedCoverPrompt = (() => {
     const rawContext = (scriptContext || thumbTitle || 'abandoned alpine weather station mystery')
@@ -846,20 +1172,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         'Anomalous signal documentary thumbnail, glowing green oscilloscope waveform spiking in dark bunker, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k octane render realism'
     };
 
-    const hookWords = (thumbTitle || 'DO NOT PLAY!')
-      .trim()
-      .split(/\s+/)
-      .slice(0, 3)
-      .join(' ');
+    const trimmedTitle = (thumbTitle || '').trim();
+    const hookWords = trimmedTitle
+      ? trimmedTitle.split(/\s+/).slice(0, 3).join(' ')
+      : '';
 
-    return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | Thumbnail Hook (max 3 words): "${hookWords.toUpperCase()}" | Clean 16:9 composition without watermarks, clear silhouette readability on mobile 160x90px`;
+    const hookClause = hookWords
+      ? `Thumbnail Hook (max 3 words): "${hookWords.toUpperCase()}" | `
+      : 'Pure clean artwork without embedded text overlays | ';
+
+    return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | ${hookClause}Clean 16:9 composition without watermarks, clear silhouette readability on mobile 160x90px`;
   })();
 
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
   // Ограничение короткого текст-хука на обложку (до 3 слов)
   const handleThumbHookChange = (val: string) => {
-    const words = val.trimStart().split(/\s+/);
+    const words = val.trimStart().split(/\s+/).filter(Boolean);
     if (words.length > 3) {
       onThumbTitleChange(words.slice(0, 3).join(' '));
       onNotify('Thumbnail Hook ограничен максимум 3 словами для максимального CTR!', 'info');
@@ -868,13 +1197,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // Отрисовка обложки на выбранном Canvas (1280x720 или 3840x2160) без водяных знаков
+  // Отрисовка обложки на выбранном Canvas (320x180, 1280x720 или 3840x2160) без водяных знаков
   const drawCoverOnCanvas = useCallback(
     (
       canvas: HTMLCanvasElement | null,
       image: HTMLImageElement | null,
       titleText: string,
-      badgeType: string,
+      activeBadges: CinematicBadgeId[],
+      activeFontStyle: ThumbnailFontStyleId,
+      showRoyalDecor: boolean,
       variantLabel?: string
     ) => {
       if (!canvas) return;
@@ -924,68 +1255,321 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.textAlign = 'center';
         ctx.fillText(
           variantLabel
-            ? `${variantLabel} — нажмите «Сгенерировать 4 варианта (Flux.1-Schnell 16:9)»`
-            : 'Нажмите «Сгенерировать 4 варианта (Flux.1-Schnell 16:9)» или выберите кадр ниже',
+            ? `${variantLabel} — нажмите «Flux.1 AI Horde (2×2)»`
+            : 'Нажмите «Flux.1 AI Horde (2×2)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
       }
 
-      const grad = ctx.createLinearGradient(0, h * 0.5, 0, h);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.86)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, h * 0.5, w, h * 0.5);
+      const trimmedHook = (titleText || '').trim();
+      const shortHook = trimmedHook
+        ? trimmedHook.split(/\s+/).slice(0, 3).join(' ').toUpperCase()
+        : '';
 
-      if (badgeType !== 'none') {
-        const bw = 200 * scale;
-        const bh = 44 * scale;
-        const bx = w - bw - 32 * scale;
-        const by = 28 * scale;
-
-        ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 2 * scale;
-        ctx.beginPath();
-        ctx.roundRect(bx, by, bw, bh, 9 * scale);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#fbbf24';
-        ctx.font = `bold ${Math.round(14 * scale)}px Inter, sans-serif`;
-        ctx.textAlign = 'center';
-        let bText = '4K ULTRA HD';
-        if (badgeType === 'ambience') bText = 'AMBIENCE 60FPS';
-        if (badgeType === '10h') bText = '10 HOURS LOOP';
-        ctx.fillText(bText, bx + bw / 2, by + bh * 0.63);
+      // Нижний градиент/тень под текст рисуем ТОЛЬКО если текст-хук не пустой
+      if (shortHook) {
+        const grad = ctx.createLinearGradient(0, h * 0.5, 0, h);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.86)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, h * 0.5, w, h * 0.5);
       }
 
-      const shortHook = (titleText || 'DO NOT PLAY!')
-        .trim()
-        .split(/\s+/)
-        .slice(0, 3)
-        .join(' ')
-        .toUpperCase();
+      // Мультивыбор кинематографичных бейджей (1..3 шт.) в верхней безопасной зоне (не перекрывает нижний правый таймкод YouTube)
+      const badgesToDraw = activeBadges
+        .map(id => BADGE_LABEL_BY_ID[id])
+        .filter((lbl): lbl is string => Boolean(lbl))
+        .slice(0, 3);
 
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `900 ${Math.round(72 * scale)}px Inter, "Bebas Neue", sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.shadowColor = 'rgba(0,0,0,0.95)';
-      ctx.shadowBlur = 16 * scale;
-      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-      ctx.lineWidth = 6 * scale;
-      ctx.strokeText(shortHook, 48 * scale, h - 58 * scale);
-      ctx.fillText(shortHook, 48 * scale, h - 58 * scale);
-      ctx.shadowBlur = 0;
+      if (badgesToDraw.length > 0) {
+        const badgeFontPx =
+          activeFontStyle === 'royal_gold_laurels'
+            ? 13 * scale
+            : activeFontStyle === 'medieval_serif'
+            ? 15 * scale
+            : activeFontStyle === 'minimal_clean'
+            ? 16 * scale
+            : 14 * scale;
+
+        const badgeFontFamily =
+          activeFontStyle === 'royal_gold_laurels'
+            ? '"Cinzel Decorative", "Cinzel", Georgia, serif'
+            : activeFontStyle === 'medieval_serif'
+            ? '"Cormorant Garamond", Georgia, serif'
+            : activeFontStyle === 'minimal_clean'
+            ? '"Bebas Neue", "Inter", sans-serif'
+            : '"Montserrat", "Inter", sans-serif';
+
+        const badgeFontWeight = activeFontStyle === 'minimal_clean' ? '700' : '800';
+        ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
+
+        const horizontalPad = 36 * scale;
+        const badgeGap = 12 * scale;
+        const badgeH = 42 * scale;
+        const rawWidths = badgesToDraw.map(lbl =>
+          Math.max(108 * scale, ctx.measureText(lbl).width + horizontalPad)
+        );
+        const totalRawW =
+          rawWidths.reduce((sum, bw) => sum + bw, 0) +
+          badgeGap * Math.max(0, badgesToDraw.length - 1);
+        const maxAvailableW = w - 64 * scale;
+        const fitFactor = totalRawW > maxAvailableW ? maxAvailableW / totalRawW : 1;
+
+        if (fitFactor < 1) {
+          ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx * fitFactor))}px ${badgeFontFamily}`;
+        }
+
+        const effectiveH = badgeH * fitFactor;
+        const effectiveGap = badgeGap * fitFactor;
+        const widths = rawWidths.map(bw => bw * fitFactor);
+        const topY = 28 * scale;
+
+        let cursorX = w - 32 * scale;
+        for (let i = badgesToDraw.length - 1; i >= 0; i--) {
+          const bw = widths[i];
+          const bx = cursorX - bw;
+          const label = badgesToDraw[i];
+
+          ctx.save();
+          ctx.fillStyle =
+            activeFontStyle === 'minimal_clean'
+              ? 'rgba(10, 14, 23, 0.82)'
+              : 'rgba(9, 13, 22, 0.88)';
+
+          if (activeFontStyle === 'royal_gold_laurels') {
+            const borderGrad = ctx.createLinearGradient(bx, topY, bx, topY + effectiveH);
+            borderGrad.addColorStop(0, '#F6D365');
+            borderGrad.addColorStop(1, '#C59B27');
+            ctx.strokeStyle = borderGrad;
+          } else if (activeFontStyle === 'medieval_serif') {
+            ctx.strokeStyle = '#d97706';
+          } else if (activeFontStyle === 'minimal_clean') {
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.72)';
+          } else {
+            ctx.strokeStyle = '#f59e0b';
+          }
+
+          ctx.lineWidth = Math.max(1, (activeFontStyle === 'minimal_clean' ? 1.5 : 2) * scale);
+          ctx.beginPath();
+          ctx.roundRect(
+            bx,
+            topY,
+            bw,
+            effectiveH,
+            (activeFontStyle === 'minimal_clean' ? 5 : 9) * scale
+          );
+          ctx.fill();
+          ctx.stroke();
+
+          if (activeFontStyle === 'royal_gold_laurels') {
+            const txtGrad = ctx.createLinearGradient(bx, topY + 6 * scale, bx, topY + effectiveH - 6 * scale);
+            txtGrad.addColorStop(0, '#FFF3B0');
+            txtGrad.addColorStop(0.5, '#F6D365');
+            txtGrad.addColorStop(1, '#C59B27');
+            ctx.fillStyle = txtGrad;
+          } else if (activeFontStyle === 'medieval_serif') {
+            ctx.fillStyle = '#FDE68A';
+          } else if (activeFontStyle === 'minimal_clean') {
+            ctx.fillStyle = '#F8FAFC';
+          } else {
+            ctx.fillStyle = '#fbbf24';
+          }
+
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, bx + bw / 2, topY + effectiveH * 0.53);
+          ctx.restore();
+
+          cursorX = bx - effectiveGap;
+        }
+      }
+
+      // Отрисовка короткого текст-хука (ТОЛЬКО если не пусто)
+      if (shortHook) {
+        ctx.save();
+        ctx.textBaseline = 'alphabetic';
+
+        if (activeFontStyle === 'royal_gold_laurels') {
+          let fontSize = 68 * scale;
+          const decorReserve = showRoyalDecor ? 190 * scale : 32 * scale;
+          const maxTextW = Math.max(160 * scale, w - 250 * scale - decorReserve);
+          ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
+          let measuredW = ctx.measureText(shortHook).width;
+          if (measuredW > maxTextW) {
+            fontSize = fontSize * (maxTextW / measuredW);
+            ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
+            measuredW = ctx.measureText(shortHook).width;
+          }
+
+          const centerX = w / 2;
+          const textY = h - 60 * scale;
+
+          // Свеча сверху и лавровые ветви по бокам
+          if (showRoyalDecor) {
+            drawGoldenLaurelBranch(
+              ctx,
+              centerX - measuredW / 2 - 42 * scale,
+              textY - fontSize * 0.36,
+              fontSize * 1.16,
+              -1,
+              scale
+            );
+            drawGoldenLaurelBranch(
+              ctx,
+              centerX + measuredW / 2 + 42 * scale,
+              textY - fontSize * 0.36,
+              fontSize * 1.16,
+              1,
+              scale
+            );
+            drawGoldenCandle(
+              ctx,
+              centerX,
+              textY - fontSize * 0.96,
+              fontSize * 0.88,
+              scale
+            );
+          }
+
+          ctx.textAlign = 'center';
+          ctx.lineJoin = 'round';
+          // Объёмная тёмная тень и обводка
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.96)';
+          ctx.shadowBlur = 20 * scale;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 5 * scale;
+          ctx.strokeStyle = 'rgba(10, 6, 2, 0.96)';
+          ctx.lineWidth = Math.max(2, 10 * scale);
+          ctx.strokeText(shortHook, centerX, textY);
+
+          // Золотистый градиент (#F6D365 -> #C59B27)
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetY = 0;
+          const goldGrad = ctx.createLinearGradient(0, textY - fontSize * 0.88, 0, textY + 6 * scale);
+          goldGrad.addColorStop(0, '#FFF5B8');
+          goldGrad.addColorStop(0.45, '#F6D365');
+          goldGrad.addColorStop(0.78, '#D4AF37');
+          goldGrad.addColorStop(1, '#C59B27');
+          ctx.fillStyle = goldGrad;
+          ctx.fillText(shortHook, centerX, textY);
+        } else if (activeFontStyle === 'medieval_serif') {
+          let fontSize = 76 * scale;
+          const maxTextW = w - 260 * scale;
+          ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
+          const measuredW = ctx.measureText(shortHook).width;
+          if (measuredW > maxTextW) {
+            fontSize = fontSize * (maxTextW / measuredW);
+            ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
+          }
+
+          const textX = 48 * scale;
+          const textY = h - 56 * scale;
+          ctx.textAlign = 'left';
+          ctx.lineJoin = 'round';
+          ctx.shadowColor = 'rgba(245, 158, 11, 0.65)';
+          ctx.shadowBlur = 24 * scale;
+          ctx.strokeStyle = 'rgba(10, 7, 4, 0.94)';
+          ctx.lineWidth = Math.max(2, 6 * scale);
+          ctx.strokeText(shortHook, textX, textY);
+
+          const parchmentGrad = ctx.createLinearGradient(0, textY - fontSize * 0.85, 0, textY);
+          parchmentGrad.addColorStop(0, '#FFFBEB');
+          parchmentGrad.addColorStop(1, '#FDE68A');
+          ctx.fillStyle = parchmentGrad;
+          ctx.fillText(shortHook, textX, textY);
+        } else if (activeFontStyle === 'minimal_clean') {
+          let fontSize = 78 * scale;
+          const maxTextW = w - 260 * scale;
+          ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Bebas Neue", "Inter", sans-serif`;
+          const measuredW = ctx.measureText(shortHook).width;
+          if (measuredW > maxTextW) {
+            fontSize = fontSize * (maxTextW / measuredW);
+            ctx.font = `700 ${Math.max(1, Math.round(fontSize))}px "Bebas Neue", "Inter", sans-serif`;
+          }
+
+          const textX = 48 * scale;
+          const textY = h - 54 * scale;
+          ctx.textAlign = 'left';
+          ctx.lineJoin = 'round';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.88)';
+          ctx.shadowBlur = 12 * scale;
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.82)';
+          ctx.lineWidth = Math.max(1.5, 4.5 * scale);
+          ctx.strokeText(shortHook, textX, textY);
+
+          ctx.fillStyle = '#F8FAFC';
+          ctx.fillText(shortHook, textX, textY);
+        } else {
+          // Cinematic Sans (Montserrat / Impact)
+          let fontSize = 72 * scale;
+          const maxTextW = w - 260 * scale;
+          ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Montserrat", Impact, "Arial Black", sans-serif`;
+          const measuredW = ctx.measureText(shortHook).width;
+          if (measuredW > maxTextW) {
+            fontSize = fontSize * (maxTextW / measuredW);
+            ctx.font = `900 ${Math.max(1, Math.round(fontSize))}px "Montserrat", Impact, "Arial Black", sans-serif`;
+          }
+
+          const textX = 48 * scale;
+          const textY = h - 58 * scale;
+          ctx.textAlign = 'left';
+          ctx.lineJoin = 'round';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+          ctx.shadowBlur = 18 * scale;
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.88)';
+          ctx.lineWidth = Math.max(2, 7 * scale);
+          ctx.strokeText(shortHook, textX, textY);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(shortHook, textX, textY);
+        }
+
+        ctx.restore();
+      }
     },
     []
   );
 
   const renderAllCanvases = useCallback(() => {
-    drawCoverOnCanvas(canvasARef.current, imgA, thumbTitle, thumbBadge, 'Обложка A');
-    drawCoverOnCanvas(canvasBRef.current, imgB || imgA, titleB, badgeB, 'Обложка B');
-    drawCoverOnCanvas(mobileCanvasRef.current, imgA, thumbTitle, thumbBadge);
-  }, [drawCoverOnCanvas, imgA, imgB, thumbTitle, thumbBadge, titleB, badgeB]);
+    drawCoverOnCanvas(
+      canvasARef.current,
+      imgA,
+      thumbTitle,
+      selectedBadgesA,
+      fontStyle,
+      royalDecorEnabled,
+      'Обложка A'
+    );
+    drawCoverOnCanvas(
+      canvasBRef.current,
+      imgB || imgA,
+      titleB,
+      badgesB,
+      fontStyle,
+      royalDecorEnabled,
+      'Обложка B'
+    );
+    drawCoverOnCanvas(
+      mobileCanvasRef.current,
+      imgA,
+      thumbTitle,
+      selectedBadgesA,
+      fontStyle,
+      royalDecorEnabled
+    );
+  }, [
+    drawCoverOnCanvas,
+    imgA,
+    imgB,
+    thumbTitle,
+    selectedBadgesA,
+    titleB,
+    badgesB,
+    fontStyle,
+    royalDecorEnabled,
+    fontsReadyTick
+  ]);
 
   useEffect(() => {
     renderAllCanvases();
@@ -1033,7 +1617,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const offscreen = document.createElement('canvas');
       offscreen.width = 3840;
       offscreen.height = 2160;
-      drawCoverOnCanvas(offscreen, tempImg, thumbTitle, thumbBadge);
+      drawCoverOnCanvas(
+        offscreen,
+        tempImg,
+        thumbTitle,
+        selectedBadgesA,
+        fontStyle,
+        royalDecorEnabled
+      );
       const link = document.createElement('a');
       link.download = `thumbnail_${idx + 1}.jpg`;
       link.href = offscreen.toDataURL('image/jpeg', 0.96);
@@ -1452,9 +2043,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     offscreen.width = 3840;
     offscreen.height = 2160;
     if (slot === 'A') {
-      drawCoverOnCanvas(offscreen, imgA, thumbTitle, thumbBadge);
+      drawCoverOnCanvas(
+        offscreen,
+        imgA,
+        thumbTitle,
+        selectedBadgesA,
+        fontStyle,
+        royalDecorEnabled
+      );
     } else {
-      drawCoverOnCanvas(offscreen, imgB || imgA, titleB, badgeB);
+      drawCoverOnCanvas(
+        offscreen,
+        imgB || imgA,
+        titleB,
+        badgesB,
+        fontStyle,
+        royalDecorEnabled
+      );
     }
     const link = document.createElement('a');
     link.download = `thumbnail_4k_3840x2160_${slot}.jpg`;
@@ -1474,7 +2079,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
-  const wordCountHookA = (thumbTitle || 'DO NOT PLAY!').trim().split(/\s+/).filter(Boolean).length;
+  const wordCountHookA = thumbTitle.trim()
+    ? thumbTitle.trim().split(/\s+/).filter(Boolean).length
+    : 0;
+  const wordCountHookB = titleB.trim()
+    ? titleB.trim().split(/\s+/).filter(Boolean).length
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -1779,6 +2389,57 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </button>
           </div>
 
+          {/* Стиль шрифта и декоративная рамка (для Обложек A и B + экспорт 4K) */}
+          <div className="bg-[#0b0f17] border border-amber-500/25 rounded-xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="thumb-font-style-select"
+                className="text-[11px] font-bold uppercase text-amber-300 flex items-center gap-1.5"
+              >
+                <Type className="w-3.5 h-3.5 text-amber-400" />
+                Шрифт и декор (Обложка A &amp; B):
+              </label>
+              <span className="text-[10px] font-mono text-slate-400">Google Fonts • 4K</span>
+            </div>
+
+            <select
+              id="thumb-font-style-select"
+              value={fontStyle}
+              onChange={e => setFontStyle(e.target.value as ThumbnailFontStyleId)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-semibold outline-none focus:border-amber-500 cursor-pointer"
+            >
+              {FONT_STYLE_OPTIONS.map(opt => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+
+            <p className="text-[11px] text-slate-400">
+              {FONT_STYLE_OPTIONS.find(o => o.id === fontStyle)?.subtitle}
+            </p>
+
+            {fontStyle === 'royal_gold_laurels' && (
+              <button
+                type="button"
+                onClick={() => setRoyalDecorEnabled(prev => !prev)}
+                className={`w-full px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center justify-between gap-2 cursor-pointer transition ${
+                  royalDecorEnabled
+                    ? 'bg-amber-500/15 border-amber-400/60 text-amber-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 text-left">
+                  <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Декор: свеча сверху + золотые лавры по бокам</span>
+                </span>
+                <span className="font-mono text-[10px] shrink-0">
+                  {royalDecorEnabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            )}
+          </div>
+
           {/* Настройки Обложки A */}
           <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3.5 space-y-3">
             <span className="text-[11px] font-bold uppercase text-amber-400 block">
@@ -1799,35 +2460,73 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] text-slate-400 uppercase">
-                  Короткий текст-хук на обложку (Thumbnail Hook: до 3 слов):
+                  Короткий текст-хук на обложку (до 3 слов):
                 </label>
-                <span className="text-[10px] font-mono text-amber-300">
-                  {wordCountHookA}/3 слов
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-amber-300 tabular-nums">
+                    {wordCountHookA}/3 слов
+                  </span>
+                  {thumbTitle.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onThumbTitleChange('')}
+                      className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                      title="Очистить текст-хук (оставить чистый арт)"
+                    >
+                      Очистить
+                    </button>
+                  )}
+                </div>
               </div>
               <input
                 type="text"
                 value={thumbTitle}
                 onChange={e => handleThumbHookChange(e.target.value)}
-                placeholder="DO NOT PLAY!"
+                placeholder="Пусто = чистый арт без текста и тени"
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-amber-500"
               />
             </div>
 
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                Кинематографичный бейдж A:
-              </label>
-              <select
-                value={thumbBadge}
-                onChange={e => onThumbBadgeChange(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-amber-500"
-              >
-                <option value="4k_gold">4K ULTRA HD • GOLD</option>
-                <option value="ambience">AMBIENCE • 60FPS</option>
-                <option value="10h">10 HOURS LOOP</option>
-                <option value="none">Без бейджа (Clean)</option>
-              </select>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] text-slate-400 uppercase">
+                  Кинематографичные бейджи A (до 3):
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-amber-300 tabular-nums">
+                    {selectedBadgesA.length}/3
+                  </span>
+                  {selectedBadgesA.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onThumbBadgeChange('none')}
+                      className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                    >
+                      Сброс
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {CINEMATIC_BADGE_OPTIONS.map(badge => {
+                  const isActive = selectedBadgesA.includes(badge.id);
+                  return (
+                    <button
+                      key={`badge-a-${badge.id}`}
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => toggleBadgeA(badge.id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold tracking-wide border transition cursor-pointer whitespace-nowrap ${
+                        isActive
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                          : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                      }`}
+                    >
+                      {badge.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -1850,19 +2549,83 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Thumbnail Hook B (до 3 слов):
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] text-slate-400 uppercase">
+                    Thumbnail Hook B (до 3 слов):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
+                      {wordCountHookB}/3 слов
+                    </span>
+                    {titleB.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTitleB('')}
+                        className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                        title="Очистить текст-хук B (оставить чистый арт)"
+                      >
+                        Очистить
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <input
                   type="text"
                   value={titleB}
                   onChange={e => {
-                    const words = e.target.value.trimStart().split(/\s+/);
-                    setTitleB(words.length > 3 ? words.slice(0, 3).join(' ') : e.target.value);
+                    const words = e.target.value.trimStart().split(/\s+/).filter(Boolean);
+                    if (words.length > 3) {
+                      setTitleB(words.slice(0, 3).join(' '));
+                      onNotify('Thumbnail Hook B ограничен максимум 3 словами!', 'info');
+                    } else {
+                      setTitleB(e.target.value);
+                    }
                   }}
-                  placeholder="SEALED 50 YEARS"
+                  placeholder="Пусто = чистый арт без текста и тени"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-emerald-500"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-slate-400 uppercase">
+                    Кинематографичные бейджи B (до 3):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
+                      {badgesB.length}/3
+                    </span>
+                    {badgesB.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setBadgesB([])}
+                        className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                      >
+                        Сброс
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {CINEMATIC_BADGE_OPTIONS.map(badge => {
+                    const isActive = badgesB.includes(badge.id);
+                    return (
+                      <button
+                        key={`badge-b-${badge.id}`}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => toggleBadgeB(badge.id)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold tracking-wide border transition cursor-pointer whitespace-nowrap ${
+                          isActive
+                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.25)]'
+                            : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                        }`}
+                      >
+                        {badge.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -2015,8 +2778,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="relative w-[160px] h-[90px] rounded-lg overflow-hidden border border-amber-500/50 bg-black shrink-0 shadow-lg">
                 <canvas
                   ref={mobileCanvasRef}
-                  width={160}
-                  height={90}
+                  width={320}
+                  height={180}
                   className={`w-[160px] h-[90px] block ${
                     bwContrastFilter ? 'grayscale contrast-125' : ''
                   }`}
