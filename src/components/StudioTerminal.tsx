@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Trash2, Check, Terminal, ExternalLink } from 'lucide-react';
 
-export type TerminalRunnerState = 'idle' | 'running' | 'success' | 'failed';
+export type TerminalRunnerState = 'idle' | 'queued' | 'running' | 'success' | 'failed';
 
 export interface TerminalLogEntry {
   id: string;
@@ -42,6 +42,7 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const isActive = status === 'running' || status === 'queued';
 
   // Автоматическая прокрутка к последней строке (auto-scroll down)
   useEffect(() => {
@@ -69,10 +70,15 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
             💻 ТЕРМИНАЛ ОБЛАЧНОГО РАННЕРА
           </span>
 
-          {/* Индикатор состояния: ● IDLE / ● RUNNING / ● SUCCESS / ● FAILED */}
+          {/* Индикатор состояния: ● IDLE / ● QUEUED / ● RUNNING / ● SUCCESS / ● FAILED */}
           {status === 'idle' && (
             <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-400">
               ● IDLE
+            </span>
+          )}
+          {status === 'queued' && (
+            <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-md bg-sky-500/15 border border-sky-400/50 text-sky-300 animate-pulse shadow-[0_0_12px_rgba(56,189,248,0.3)]">
+              ● QUEUED
             </span>
           )}
           {status === 'running' && (
@@ -91,14 +97,14 @@ export const StudioTerminal: React.FC<StudioTerminalProps> = ({
             </span>
           )}
 
-          {/* Кнопка отмены сборки в шапке рядом с бейджем статуса (активна только при RUNNING) */}
+          {/* Кнопка отмены сборки в шапке рядом с бейджем статуса (активна при RUNNING или QUEUED) */}
           {onCancelRun && (
             <button
               type="button"
               onClick={onCancelRun}
-              disabled={status !== 'running'}
+              disabled={!isActive}
               className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
-                status === 'running'
+                isActive
                   ? 'bg-rose-500/15 hover:bg-rose-500/25 border-rose-500/50 text-rose-300 cursor-pointer shadow-[0_0_10px_rgba(244,63,94,0.2)]'
                   : 'bg-slate-900/60 border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
               }`}

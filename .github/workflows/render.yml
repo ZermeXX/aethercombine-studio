@@ -6,6 +6,11 @@ on:
       manifest_payload:
         description: 'Base64-encoded JSON Build Manifest (Universal N-Slots + Narrative Montage)'
         required: true
+      preflight_only:
+        description: 'Run fast 15s Google Drive file verification without rendering video'
+        required: false
+        default: 'false'
+        type: string
 
 jobs:
   render_and_upload:
@@ -30,6 +35,7 @@ jobs:
           EOF
 
       - name: Cache Rendered Video Slots
+        if: github.event.inputs.preflight_only != 'true'
         uses: actions/cache@v4
         with:
           path: ./temp_render/
@@ -40,7 +46,11 @@ jobs:
       - name: Install FFmpeg, Python3, jq & Rclone
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg rclone python3 jq curl
+          if [ "${{ github.event.inputs.preflight_only }}" == "true" ]; then
+            sudo apt-get install -y rclone python3 jq curl
+          else
+            sudo apt-get install -y ffmpeg rclone python3 jq curl
+          fi
 
       # 1. Развертывание персонального OAuth-конфига Rclone
       - name: Setup Personal Rclone Config
@@ -51,7 +61,67 @@ jobs:
           # Проверка доступности удаленного диска без вывода секретных токенов
           rclone listremotes
 
+      # 1.5. Быстрая Preflight-проверка наличия всех исходных файлов на Google Drive
+      - name: Preflight Check Google Drive Source Files
+        run: |
+          python3 - << 'EOF'
+          import json, os, subprocess, sys
+
+          with open("manifest.json", "r", encoding="utf-8") as f:
+              cfg = json.load(f)
+
+          folder_id = ((cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id") or "").strip()
+          required_files = []
+
+          for idx, sl in enumerate(cfg.get("timeline_slots") or cfg.get("slots") or []):
+              bc = sl.get("base_content") if isinstance(sl.get("base_content"), dict) else {}
+              fn = str(bc.get("file_name") or sl.get("file_name") or sl.get("filename") or "").strip()
+              if fn:
+                  required_files.append((f"SLOT_{idx+1}", fn))
+              for ins_idx, ins in enumerate(sl.get("inserts") or []):
+                  ins_fn = str(ins.get("file_name") or ins.get("filename") or "").strip()
+                  if ins_fn:
+                      required_files.append((f"SLOT_{idx+1}:INSERT_{ins_idx+1}", ins_fn))
+
+          bed = cfg.get("continuous_bed") or {}
+          if bed.get("enabled") and str(bed.get("file_name") or "").strip():
+              required_files.append(("CONTINUOUS_BED", str(bed["file_name"]).strip()))
+
+          ma = cfg.get("master_audio") or {}
+          if ma.get("enabled") and str(ma.get("file_name") or "").strip():
+              required_files.append(("MASTER_AUDIO", str(ma["file_name"]).strip()))
+
+          if not required_files:
+              print("⚠️ В манифесте не задано ни одного имени файла (file_name) для проверки.")
+              sys.exit(0)
+
+          remote_cmd = ["rclone", "lsf", "gdrive:", "--recursive"]
+          if folder_id:
+              remote_cmd += ["--drive-root-folder-id", folder_id]
+
+          res = subprocess.run(remote_cmd, capture_output=True, text=True)
+          if res.returncode != 0:
+              print("❌ Ошибка чтения Google Drive через rclone:", res.stderr)
+              sys.exit(1)
+
+          remote_entries = {os.path.basename(line.strip()): line.strip() for line in res.stdout.splitlines() if line.strip()}
+          missing = []
+          for label, fn in required_files:
+              base = os.path.basename(fn)
+              if base in remote_entries or os.path.exists(fn):
+                  print(f"✅ [{label}] Найден на GDrive: {base}")
+              else:
+                  print(f"❌ [{label}] ОТСУТСТВУЕТ на GDrive: {fn}")
+                  missing.append(f"{label}: {fn}")
+
+          if missing:
+              print(f"\n❌ Preflight FAILED: не найдено файлов: {len(missing)}")
+              sys.exit(1)
+          print(f"\n🎉 Preflight PASSED: все {len(required_files)} файлов подтверждены на Google Drive!")
+          EOF
+
       - name: Run Assembly Pipeline with Slot Cache Support
+        if: github.event.inputs.preflight_only != 'true'
         env:
           MANIFEST_B64: ${{ github.event.inputs.manifest_payload }}
         run: |
@@ -59,6 +129,7 @@ jobs:
 
       # 2. Выгрузка готового видео на Google Диск
       - name: Upload Output Video to Google Drive
+        if: github.event.inputs.preflight_only != 'true'
         run: |
           echo "Начинаем выгрузку финального видео в Google Drive..."
           # Выгрузка с расширенным логированием, чанками по 64МБ и защитой от обрывов
@@ -72,7 +143,7 @@ jobs:
             -v
 
       - name: Upload Emergency & Render Logs Artifact
-        if: always()
+        if: always() && github.event.inputs.preflight_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-emergency-logs
@@ -86,7 +157,13 @@ jobs:
       - name: Send Telegram Notification
         if: always()
         run: |
-          if [ "${{ job.status }}" == "success" ]; then
+          if [ "${{ github.event.inputs.preflight_only }}" == "true" ]; then
+            if [ "${{ job.status }}" == "success" ]; then
+              MSG="🔍 *Preflight-проверка GDrive пройдена!* Все исходные файлы найдены."
+            else
+              MSG="❌ *Preflight FAILED!* На Google Диске отсутствуют файлы из манифеста."
+            fi
+          elif [ "${{ job.status }}" == "success" ]; then
             MSG="✅ *Рендеринг и выгрузка завершены успешно!*%0A%0A📁 *Файл:* output.mp4%0A☁️ *Локация:* Google Drive / AetherFlow_Output%0A⏱️ *Статус:* Готово к публикации"
           else
             MSG="❌ *Ошибка в процессе пайплайна!*%0A%0A⚠️ *Статус:* ${{ job.status }}%0A🔍 Проверьте логи шага выгрузки или сборки FFmpeg."

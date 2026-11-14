@@ -229,6 +229,15 @@ interface ToastMessage {
   type: 'info' | 'error' | 'success';
 }
 
+interface SavedManifestPreset {
+  id: string;
+  name: string;
+  savedAt: string;
+  manifest: LoopBuildManifest;
+}
+
+const MANIFEST_PRESETS_STORAGE_KEY = 'ac_manifest_presets_v1';
+
 // Универсальная начальная структура слотов (без захардкоженных имен видеофайлов)
 const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
   {
@@ -453,6 +462,11 @@ on:
       manifest_payload:
         description: 'Base64-encoded JSON Build Manifest (Universal N-Slots + 2-Layer Audio Mixer + Loudnorm)'
         required: true
+      preflight_only:
+        description: 'Run fast 15s Google Drive file verification without rendering video'
+        required: false
+        default: 'false'
+        type: string
 
 jobs:
   render_and_upload:
@@ -475,6 +489,7 @@ jobs:
           EOF
 
       - name: Cache Rendered Video Slots
+        if: github.event.inputs.preflight_only != 'true'
         uses: actions/cache@v4
         with:
           path: ./temp_render/
@@ -485,7 +500,11 @@ jobs:
       - name: Install FFmpeg, Python3, jq & Rclone
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg rclone python3 jq curl
+          if [ "\${{ github.event.inputs.preflight_only }}" == "true" ]; then
+            sudo apt-get install -y rclone python3 jq curl
+          else
+            sudo apt-get install -y ffmpeg rclone python3 jq curl
+          fi
 
       # 1. Развертывание персонального OAuth-конфига Rclone
       - name: Setup Personal Rclone Config
@@ -496,7 +515,45 @@ jobs:
           # Проверка доступности удаленного диска без вывода секретных токенов
           rclone listremotes
 
+      # 1.5. Быстрая Preflight-проверка исходных файлов на Google Drive
+      - name: Preflight Check Google Drive Source Files
+        run: |
+          python3 - << 'EOF'
+          import json, os, subprocess, sys
+          with open("manifest.json", "r", encoding="utf-8") as f:
+              cfg = json.load(f)
+          folder_id = ((cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id") or "").strip()
+          req_files = []
+          for idx, sl in enumerate(cfg.get("timeline_slots") or cfg.get("slots") or []):
+              bc = sl.get("base_content") if isinstance(sl.get("base_content"), dict) else {}
+              fn = str(bc.get("file_name") or sl.get("file_name") or sl.get("filename") or "").strip()
+              if fn: req_files.append((f"SLOT_{idx+1}", fn))
+              for ii, ins in enumerate(sl.get("inserts") or []):
+                  ifn = str(ins.get("file_name") or ins.get("filename") or "").strip()
+                  if ifn: req_files.append((f"SLOT_{idx+1}:E{ii+1}", ifn))
+          bed = cfg.get("continuous_bed") or {}
+          if bed.get("enabled") and str(bed.get("file_name") or "").strip():
+              req_files.append(("BED", str(bed["file_name"]).strip()))
+          ma = cfg.get("master_audio") or {}
+          if ma.get("enabled") and str(ma.get("file_name") or "").strip():
+              req_files.append(("MASTER_AUDIO", str(ma["file_name"]).strip()))
+          if not req_files:
+              print("No filenames specified in manifest.")
+              sys.exit(0)
+          cmd = ["rclone", "lsf", "gdrive:", "--recursive"]
+          if folder_id: cmd += ["--drive-root-folder-id", folder_id]
+          res = subprocess.run(cmd, capture_output=True, text=True)
+          if res.returncode != 0:
+              print(res.stderr); sys.exit(1)
+          remote_set = {os.path.basename(l.strip()) for l in res.stdout.splitlines() if l.strip()}
+          missing = [f"{lbl}: {fn}" for lbl, fn in req_files if os.path.basename(fn) not in remote_set and not os.path.exists(fn)]
+          if missing:
+              print("❌ Missing on GDrive:", missing); sys.exit(1)
+          print(f"✅ Preflight PASSED: {len(req_files)} files found on Google Drive!")
+          EOF
+
       - name: Parse Universal Loop Manifest & Run FFmpeg Pipeline
+        if: github.event.inputs.preflight_only != 'true'
         env:
           MANIFEST_B64: \${{ github.event.inputs.manifest_payload }}
         run: |
@@ -820,6 +877,7 @@ jobs:
 
       # 2. Выгрузка готового видео на Google Диск
       - name: Upload Output Video to Google Drive
+        if: github.event.inputs.preflight_only != 'true'
         run: |
           echo "Начинаем выгрузку финального видео в Google Drive..."
           # Выгрузка с расширенным логированием, чанками по 64МБ и защитой от обрывов
@@ -833,7 +891,7 @@ jobs:
             -v
 
       - name: Upload Emergency FFmpeg Logs
-        if: always()
+        if: always() && github.event.inputs.preflight_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-emergency-logs
@@ -847,7 +905,13 @@ jobs:
       - name: Send Telegram Notification
         if: always()
         run: |
-          if [ "\${{ job.status }}" == "success" ]; then
+          if [ "\${{ github.event.inputs.preflight_only }}" == "true" ]; then
+            if [ "\${{ job.status }}" == "success" ]; then
+              MSG="🔍 *Preflight-проверка GDrive пройдена!* Все исходные файлы найдены."
+            else
+              MSG="❌ *Preflight FAILED!* На Google Диске отсутствуют файлы из манифеста."
+            fi
+          elif [ "\${{ job.status }}" == "success" ]; then
             MSG="✅ *Рендеринг и выгрузка завершены успешно!*%0A%0A📁 *Файл:* output.mp4%0A☁️ *Локация:* Google Drive / AetherFlow_Output%0A⏱️ *Статус:* Готово к публикации"
           else
             MSG="❌ *Ошибка в процессе пайплайна!*%0A%0A⚠️ *Статус:* \${{ job.status }}%0A🔍 Проверьте логи шага выгрузки или сборки FFmpeg."
@@ -944,6 +1008,29 @@ export default function App() {
   const [expectedAudioFilename, setExpectedAudioFilename] = useState<string>('');
   const [importedManifestName, setImportedManifestName] = useState<string>('');
   const [showFilterComplexPreview, setShowFilterComplexPreview] = useState<boolean>(true);
+  const [isLoopDispatching, setIsLoopDispatching] = useState<boolean>(false);
+
+  // Локальные пресеты манифеста (localStorage)
+  const [savedManifestPresets, setSavedManifestPresets] = useState<SavedManifestPreset[]>(() => {
+    try {
+      const raw = localStorage.getItem(MANIFEST_PRESETS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as SavedManifestPreset[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(MANIFEST_PRESETS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) && parsed[0]?.id ? String(parsed[0].id) : '';
+    } catch {
+      return '';
+    }
+  });
+  const [presetNameInput, setPresetNameInput] = useState<string>('');
 
   // Гибкая система субтитров для текущего манифеста (Hardsub / Softsub / Скачивание .SRT)
   const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
@@ -1026,6 +1113,7 @@ export default function App() {
   const [renderStatus, setRenderStatus] = useState<{
     visible: boolean;
     status: 'idle' | 'running' | 'success' | 'failure';
+    runnerPhase?: 'queued' | 'running';
     title: string;
     desc: string;
     stepLabel: string;
@@ -1035,6 +1123,7 @@ export default function App() {
   }>({
     visible: false,
     status: 'idle',
+    runnerPhase: undefined,
     title: 'Облачный рендер запущен...',
     desc: 'GitHub Actions FFmpeg выполняет компиляцию кадров',
     stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
@@ -1063,12 +1152,17 @@ export default function App() {
 
   const terminalRunnerStatus: TerminalRunnerState =
     renderStatus.status === 'running'
-      ? 'running'
+      ? renderStatus.runnerPhase === 'queued'
+        ? 'queued'
+        : 'running'
       : renderStatus.status === 'success'
       ? 'success'
       : renderStatus.status === 'failure'
       ? 'failed'
       : 'idle';
+
+  const isRunnerActive =
+    terminalRunnerStatus === 'running' || terminalRunnerStatus === 'queued';
 
   // Toast notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -1563,6 +1657,7 @@ export default function App() {
           setRenderStatus(prev => ({
             ...prev,
             status: 'running',
+            runnerPhase: latestRun.status === 'queued' ? 'queued' : 'running',
             runId,
             runUrl,
             stepLabel: activeStepText
@@ -1766,9 +1861,10 @@ export default function App() {
     setRenderStatus({
       visible: true,
       status: 'running',
+      runnerPhase: 'queued',
       title,
       desc,
-      stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
+      stepLabel: 'Шаг: Очередь и скачивание клипов из Google Drive...',
       seconds: 0,
       runUrl: `https://github.com/${cleanRepo}/actions`
     });
@@ -3346,28 +3442,91 @@ export default function App() {
     );
   };
 
-  // Прямой и чистый запуск облачной сборки (отправка только manifest_payload в Base64 через dispatch)
-  const startLoopRender = async () => {
+  // Сохранение / загрузка / удаление локальных пресетов манифеста (localStorage)
+  const saveManifestPreset = () => {
+    const cleanName =
+      presetNameInput.trim() ||
+      `${loopProjectName.trim() || 'Ambient Loop 4K'} (${timelineSlots.length} сл. • ${videoCodec})`;
+    const newPreset: SavedManifestPreset = {
+      id: `preset-${Date.now()}`,
+      name: cleanName,
+      savedAt: new Date().toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+      manifest: JSON.parse(JSON.stringify(currentManifest)) as LoopBuildManifest
+    };
+    setSavedManifestPresets(prev => {
+      const updated = [newPreset, ...prev.filter(p => p.name !== cleanName)].slice(0, 30);
+      localStorage.setItem(MANIFEST_PRESETS_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+    setSelectedPresetId(newPreset.id);
+    setPresetNameInput('');
+    showToast(`💾 Пресет «${cleanName}» сохранён в браузере!`, 'success');
+  };
+
+  const loadSelectedManifestPreset = () => {
+    const preset = savedManifestPresets.find(p => p.id === selectedPresetId);
+    if (!preset) {
+      showToast('Выберите сохранённый пресет из списка для загрузки.', 'info');
+      return;
+    }
+    applyManifestObject(
+      preset.manifest as unknown as Record<string, unknown>,
+      `preset:${preset.name}`
+    );
+    showToast(`📂 Загружен пресет «${preset.name}» (${preset.manifest.timeline_slots.length} сл.)`, 'success');
+  };
+
+  const deleteSelectedManifestPreset = () => {
+    if (!selectedPresetId) return;
+    const target = savedManifestPresets.find(p => p.id === selectedPresetId);
+    setSavedManifestPresets(prev => {
+      const updated = prev.filter(p => p.id !== selectedPresetId);
+      localStorage.setItem(MANIFEST_PRESETS_STORAGE_KEY, JSON.stringify(updated));
+      setSelectedPresetId(updated[0]?.id || '');
+      return updated;
+    });
+    if (target) {
+      showToast(`🗑 Пресет «${target.name}» удалён`, 'info');
+    }
+  };
+
+  // Единая функция запуска workflow_dispatch (полная сборка или Preflight-проверка файлов на GDrive)
+  const dispatchLoopWorkflow = async (preflightOnly: boolean) => {
+    if (isRunnerActive || isLoopDispatching) {
+      showToast(
+        'Раннер уже выполняет задачу (RUNNING/QUEUED). Дождитесь завершения или отмените текущий run.',
+        'info'
+      );
+      return;
+    }
+
     const githubToken = ghToken.trim();
     if (!githubToken) {
       showToast('Настройте подключение к GitHub (Personal Access Token)!', 'error');
       openConfigModal();
       return;
     }
-    if (loopHours < 3 || loopHours > 10) {
+    if (!preflightOnly && (loopHours < 3 || loopHours > 10)) {
       showToast('Длительность лупа должна быть строго от 3 до 10 часов!', 'error');
       return;
     }
 
-    // 1. Фиксация времени запуска
+    const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
+    const targetBranch = (ghBranch || 'main').trim();
     const startTime = Date.now();
     const scaleFlag = getScaleFilter(loopResolution);
     const crfVal = videoCrf;
-    const manifestBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(currentManifest))));
+    const manifestBase64 = encodeManifestBase64(currentManifest);
 
+    setIsLoopDispatching(true);
     try {
       const response = await fetch(
-        'https://api.github.com/repos/ZermeXX/aetherflow-render/actions/workflows/render_loop.yml/dispatches',
+        `https://api.github.com/repos/${targetRepo}/actions/workflows/render_loop.yml/dispatches`,
         {
           method: 'POST',
           headers: {
@@ -3377,26 +3536,36 @@ export default function App() {
             'X-GitHub-Api-Version': '2022-11-28'
           },
           body: JSON.stringify({
-            ref: 'main',
-            inputs: {
-              manifest_payload: manifestBase64
-            }
+            ref: targetBranch,
+            inputs: preflightOnly
+              ? {
+                  manifest_payload: manifestBase64,
+                  preflight_only: 'true'
+                }
+              : {
+                  manifest_payload: manifestBase64,
+                  preflight_only: 'false'
+                }
           })
         }
       );
 
       if (response.status === 204) {
-        showStatusBar(
-          'Сборка успешно запущена в GitHub Actions!',
-          `Проект: ${loopProjectName} | Кодек: ${videoCodec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | ${scaleFlag}`,
-          'ZermeXX/aetherflow-render',
-          startTime
-        );
+        const statusTitle = preflightOnly
+          ? '🔍 Preflight-проверка файлов на GDrive запущена...'
+          : 'Сборка успешно запущена в GitHub Actions!';
+        const statusDesc = preflightOnly
+          ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${gdriveFolderId || 'GDrive'}`
+          : `Проект: ${loopProjectName} | Кодек: ${videoCodec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${calculatedProjectDurationSec}s | ${scaleFlag}`;
+
+        showStatusBar(statusTitle, statusDesc, targetRepo, startTime);
         appendTerminalLog(
-          '[00:00] ✅ Сборка успешно запущена в GitHub Actions! Ожидание регистрации нового workflow run (4 сек)...',
+          preflightOnly
+            ? '[00:00] 🔍 Запущена быстрая Preflight-проверка наличия файлов на Google Drive (preflight_only: "true")...'
+            : '[00:00] ✅ Сборка успешно запущена в GitHub Actions! Ожидание регистрации нового workflow run (4 сек)...',
           'success'
         );
-        showToast('Сборка успешно запущена в GitHub Actions!', 'success');
+        showToast(statusTitle, 'success');
       } else {
         const errText = await response.text().catch(() => '');
         const exactError = errText.trim() || response.statusText || `HTTP ${response.status}`;
@@ -3404,6 +3573,7 @@ export default function App() {
           ...prev,
           visible: true,
           status: 'failure',
+          runnerPhase: undefined,
           title: `❌ Ошибка запуска GitHub Actions (${response.status})`,
           stepLabel: exactError
         }));
@@ -3419,13 +3589,19 @@ export default function App() {
         ...prev,
         visible: true,
         status: 'failure',
+        runnerPhase: undefined,
         title: '❌ Сетевой сбой при вызове GitHub API',
         stepLabel: msg
       }));
       appendTerminalLog(`[00:00] ❌ Сбой запуска сборки: ${msg}`, 'error');
       showToast('Сбой запуска облачной сборки: ' + msg, 'error');
+    } finally {
+      setIsLoopDispatching(false);
     }
   };
+
+  const startLoopRender = () => dispatchLoopWorkflow(false);
+  const startPreflightCheck = () => dispatchLoopWorkflow(true);
 
   // Thumbnail Canvas Rendering
   const renderThumbnailCanvas = useCallback(() => {
@@ -3809,224 +3985,215 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#0b0f17] text-[#e2e8f0]">
-      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar: свободный скролл со страницей без sticky/fixed) */}
-      <header className="relative w-full bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 shadow-lg shadow-black/40">
-        <div className="flex flex-wrap items-center justify-between gap-3 w-full xl:w-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20 shrink-0">
+      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar: двухрядная без перекрытий, скролл на мобильных <768px и wrap на десктопе) */}
+      <header className="relative w-full border-b border-slate-800/80 bg-[#0B0F19]/95 backdrop-blur-md px-4 py-3 shadow-lg shadow-black/40">
+        {/* Верхний ряд: Логотип и статус подключения */}
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Иконка и заголовок AETHER COMBINE */}
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20">
               <Layers className="w-6 h-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-wider text-slate-100 flex items-center gap-2">
-                AETHER<span className="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]">COMBINE</span>
-                <span className="text-[10px] bg-amber-500/15 border border-amber-400/40 text-amber-300 font-semibold px-2 py-0.5 rounded shadow-sm shadow-amber-500/10">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-lg font-bold tracking-wide text-white whitespace-nowrap">
+                  AETHER <span className="text-amber-400">COMBINE</span>
+                </h1>
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300 whitespace-nowrap">
                   PRO 4K • ARGON
                 </span>
-              </h1>
-              <p className="text-xs text-slate-400">
+              </div>
+              <p className="hidden md:block text-xs text-slate-400 truncate">
                 Автономный облачный видеокомбайн &amp; универсальный парсер N-слотов (GitHub Actions → Google Drive)
               </p>
             </div>
           </div>
-        </div>
 
-        {/* Горизонтальный скролл навигации без переноса строк (.main-navigation-container) */}
-        <div className="main-navigation-container nav-container xl:w-auto xl:mb-0">
-          <nav
-            role="tablist"
-            aria-label="Цехи продакшна AetherCombine"
-            className="inline-flex flex-nowrap items-center gap-1.5 bg-[#0f172a] p-1.5 rounded-xl border border-slate-800/90 shadow-inner whitespace-nowrap min-w-max"
-          >
-            {/* 1. 🎬 Повествовательный монтаж */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'combine'}
-              onClick={() => handleSelectTab('combine')}
-              id="tab-combine"
-              className={`group tab-btn nav-tab nav-tab-combine shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'combine'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-purple-500/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
-                className="icon-container nav-icon-box nav-icon-combine"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
-                  🎬
-                </span>
-              </span>
-              <span className="text-white tracking-wide">Повествовательный монтаж</span>
-            </button>
-
-            {/* 2. 🔄 Многочасовой Луп (N-Слотов) */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'loop'}
-              onClick={() => handleSelectTab('loop')}
-              id="tab-loop"
-              className={`group tab-btn nav-tab nav-tab-loop shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'loop'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-amber-500/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
-                className="icon-container nav-icon-box nav-icon-loop"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
-                  🔁
-                </span>
-              </span>
-              <span className="text-white tracking-wide">Многочасовой Луп (N-Слотов)</span>
-            </button>
-
-            {/* 3. ⚡ Сценарий и Хуки */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'hooks'}
-              onClick={() => handleSelectTab('hooks')}
-              id="tab-hooks"
-              className={`group tab-btn nav-tab nav-tab-hooks shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'hooks'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-yellow-400/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
-                className="icon-container nav-icon-box nav-icon-hooks"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
-                  ⚡
-                </span>
-              </span>
-              <span className="text-white tracking-wide">Сценарий и Хуки</span>
-            </button>
-
-            {/* 4. 🎙️ Дикторский цех */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'voice'}
-              onClick={() => handleSelectTab('voice')}
-              id="tab-voice"
-              className={`group tab-btn nav-tab nav-tab-voice shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'voice'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-pink-500/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
-                className="icon-container nav-icon-box nav-icon-voice"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
-                  🎙️
-                </span>
-              </span>
-              <span className="text-white tracking-wide">Дикторский цех</span>
-            </button>
-
-            {/* 5. 📦 YouTube SEO */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'seo'}
-              onClick={() => handleSelectTab('seo')}
-              id="tab-seo"
-              className={`group tab-btn nav-tab nav-tab-seo shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'seo'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-sky-400/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
-                className="icon-container nav-icon-box nav-icon-seo"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
-                  📦
-                </span>
-              </span>
-              <span className="text-white tracking-wide">YouTube SEO</span>
-            </button>
-
-            {/* 6. 🎨 4K Превью и Арт-цех */}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'thumb'}
-              onClick={() => handleSelectTab('thumb')}
-              id="tab-thumb"
-              className={`group tab-btn nav-tab nav-tab-thumb shrink-0 flex items-center gap-[10px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-all duration-200 cursor-pointer ${
-                activeTab === 'thumb'
-                  ? 'active tab-btn-active'
-                  : 'border border-transparent hover:bg-slate-800/75 hover:border-emerald-400/30'
-              }`}
-            >
-              <span
-                key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
-                className="icon-container nav-icon-box nav-icon-thumb"
-                aria-hidden="true"
-              >
-                <span className="text-[17px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
-                  🎨
-                </span>
-              </span>
-              <span className="text-white tracking-wide">4K Превью и Арт-цех</span>
-            </button>
-          </nav>
-        </div>
-
-        {/* Информационная строка статуса GitHub («ZermeXX/aetherflow-render») и «GDrive Ready» */}
-        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Правый бейдж статуса (больше не наезжает на вкладки) */}
           <button
+            type="button"
             onClick={openConfigModal}
-            className="group flex items-center gap-2.5 bg-[#0f172a] hover:bg-slate-800/90 border border-slate-700/90 hover:border-purple-400/50 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-200 transition-all duration-200 cursor-pointer shadow-md"
+            className="flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800/90 hover:border-amber-500/40 px-2.5 sm:px-3.5 py-2 text-xs transition cursor-pointer"
           >
-            <span className="relative flex items-center justify-center w-5 h-5 rounded-md bg-gradient-to-br from-amber-400/20 via-orange-500/20 to-purple-500/25 border border-amber-400/40 shadow-[0_0_10px_rgba(245,158,11,0.25)]">
-              <Github className="w-3.5 h-3.5 text-amber-400 group-hover:text-purple-300 transition-colors drop-shadow-[0_0_6px_rgba(251,191,36,0.75)]" />
-            </span>
             <span
               id="gh-status-indicator"
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 rounded-full shrink-0 ${
                 isGhConnected
                   ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
                   : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
               }`}
             />
-            <span
-              id="gh-status-text"
-              className="font-mono text-[11px] bg-gradient-to-r from-amber-300 via-orange-200 to-purple-300 bg-clip-text text-transparent font-semibold"
-            >
+            <span id="gh-status-text" className="font-mono text-amber-400 truncate max-w-[130px] sm:max-w-none">
               {ghRepo || 'ZermeXX/aetherflow-render'}
             </span>
-            <span className="text-slate-700">|</span>
-            <span className="flex items-center gap-1.5">
+            <span className="h-4 w-px bg-slate-800 hidden sm:inline-block" />
+            <span className="hidden sm:flex items-center gap-1.5 font-medium text-emerald-400">
               <HardDrive
-                className={`w-4 h-4 ${
-                  isGdriveConfigured
-                    ? 'text-emerald-400 drop-shadow-[0_0_7px_rgba(52,211,153,0.8)]'
-                    : 'text-emerald-400/75 drop-shadow-[0_0_4px_rgba(52,211,153,0.4)]'
+                className={`w-3.5 h-3.5 ${
+                  isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
                 }`}
               />
-              <span className="text-[11px] font-semibold text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.35)]">
-                GDrive Ready
-              </span>
+              <span>GDrive Ready</span>
             </span>
           </button>
         </div>
+
+        {/* Нижний ряд: Все 6 вкладок — flex-wrap gap-2 на десктопе (md+) и overflow-x-auto на мобильных (<768px) */}
+        <nav
+          role="tablist"
+          aria-label="Цехи продакшна AetherCombine"
+          className="mx-auto mt-3 flex max-w-[1600px] flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto md:overflow-visible custom-scroll rounded-2xl border border-slate-800/80 bg-slate-900/60 p-1.5"
+        >
+          {/* 1. 🎬 Повествовательный монтаж */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'combine'}
+            onClick={() => handleSelectTab('combine')}
+            id="tab-combine"
+            className={`group nav-tab nav-tab-combine flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'combine'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
+              className="icon-container nav-icon-box nav-icon-combine"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
+                🎬
+              </span>
+            </span>
+            <span>Повествовательный монтаж</span>
+          </button>
+
+          {/* 2. 🔁 Многочасовой Луп (N-Слотов) */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'loop'}
+            onClick={() => handleSelectTab('loop')}
+            id="tab-loop"
+            className={`group nav-tab nav-tab-loop flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'loop'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
+              className="icon-container nav-icon-box nav-icon-loop"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
+                🔁
+              </span>
+            </span>
+            <span>Многочасовой Луп (N-Слотов)</span>
+          </button>
+
+          {/* 3. ⚡ Сценарий и Хуки */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'hooks'}
+            onClick={() => handleSelectTab('hooks')}
+            id="tab-hooks"
+            className={`group nav-tab nav-tab-hooks flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'hooks'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
+              className="icon-container nav-icon-box nav-icon-hooks"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
+                ⚡
+              </span>
+            </span>
+            <span>Сценарий и Хуки</span>
+          </button>
+
+          {/* 4. 🎙️ Дикторский цех */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'voice'}
+            onClick={() => handleSelectTab('voice')}
+            id="tab-voice"
+            className={`group nav-tab nav-tab-voice flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'voice'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
+              className="icon-container nav-icon-box nav-icon-voice"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
+                🎙️
+              </span>
+            </span>
+            <span>Дикторский цех</span>
+          </button>
+
+          {/* 5. 📦 YouTube SEO */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'seo'}
+            onClick={() => handleSelectTab('seo')}
+            id="tab-seo"
+            className={`group nav-tab nav-tab-seo flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'seo'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
+              className="icon-container nav-icon-box nav-icon-seo"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
+                📦
+              </span>
+            </span>
+            <span>YouTube SEO</span>
+          </button>
+
+          {/* 6. 🎨 4K Превью и Арт-цех */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'thumb'}
+            onClick={() => handleSelectTab('thumb')}
+            id="tab-thumb"
+            className={`group nav-tab nav-tab-thumb flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'thumb'
+                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
+                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+            }`}
+          >
+            <span
+              key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
+              className="icon-container nav-icon-box nav-icon-thumb"
+              aria-hidden="true"
+            >
+              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
+                🎨
+              </span>
+            </span>
+            <span>4K Превью и Арт-цех</span>
+          </button>
+        </nav>
       </header>
 
       {/* ОСНОВНОЙ КОНТЕНТ */}
@@ -4729,6 +4896,60 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Локальные пресеты манифеста (localStorage) */}
+                  <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 rounded-xl px-2.5 py-1.5">
+                    <input
+                      type="text"
+                      value={presetNameInput}
+                      onChange={e => setPresetNameInput(e.target.value)}
+                      placeholder={loopProjectName ? `Имя (${loopProjectName})` : 'Имя пресета...'}
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 w-32 sm:w-36 outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveManifestPreset}
+                      className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
+                      title="Сохранить слоты, врезки, кодек и папку GDrive в браузер (localStorage)"
+                    >
+                      💾 Сохранить пресет
+                    </button>
+                    <select
+                      aria-label="Выбор локального пресета манифеста"
+                      value={selectedPresetId}
+                      onChange={e => setSelectedPresetId(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 max-w-[170px] outline-none focus:border-sky-500"
+                    >
+                      {savedManifestPresets.length === 0 ? (
+                        <option value="">Нет сохранённых пресетов</option>
+                      ) : (
+                        savedManifestPresets.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.savedAt})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={loadSelectedManifestPreset}
+                      disabled={savedManifestPresets.length === 0}
+                      className="bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed border border-sky-500/40 text-sky-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
+                      title="Загрузить выбранный пресет манифеста в редактор"
+                    >
+                      📂 Загрузить пресет
+                    </button>
+                    {savedManifestPresets.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={deleteSelectedManifestPreset}
+                        className="text-slate-500 hover:text-rose-400 px-1.5 py-1 rounded-lg text-[11px] transition cursor-pointer"
+                        title="Удалить выбранный пресет"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
                   <button
                     type="button"
                     onClick={addTimelineSlot}
@@ -5607,15 +5828,64 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-2">
+                <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-2.5">
+                  <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                    {/* Основная кнопка запуска облачной сборки с защитой от двойного запуска */}
+                    <button
+                      type="button"
+                      onClick={startLoopRender}
+                      disabled={isRunnerActive || isLoopDispatching}
+                      className={`flex-1 flex items-center justify-center gap-2 font-bold px-5 py-3.5 rounded-xl transition text-xs ${
+                        isRunnerActive || isLoopDispatching
+                          ? 'bg-slate-800/90 border border-amber-500/40 text-amber-300 cursor-not-allowed opacity-90 shadow-none'
+                          : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 cursor-pointer'
+                      }`}
+                    >
+                      <InfinityIcon className="w-4 h-4 shrink-0" />
+                      <span>
+                        {isLoopDispatching
+                          ? 'Отправка манифеста в GitHub Actions...'
+                          : isRunnerActive
+                          ? `⏳ Сборка ${
+                              terminalRunnerStatus === 'queued' ? 'QUEUED' : 'RUNNING'
+                            } • Таймер: ${formatTerminalTime(renderStatus.seconds)}`
+                          : `🚀 Запустить облачную сборку (${
+                              videoCodec === 'libx264' ? 'H.264' : 'H.265'
+                            } CRF ${videoCrf} • ${videoFps}fps • ${getResolutionLabel(
+                              loopResolution
+                            )} ~ ${estimatedGb} ГБ)`}
+                      </span>
+                    </button>
+
+                    {/* Прямая ссылка на активный Run в GitHub Actions во время RUNNING/QUEUED */}
+                    {isRunnerActive && renderStatus.runUrl && (
+                      <a
+                        href={renderStatus.runUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1.5 rounded-xl border border-indigo-400/50 bg-indigo-500/15 hover:bg-indigo-500/25 px-4 py-3.5 text-xs font-mono font-semibold text-indigo-200 transition whitespace-nowrap"
+                      >
+                        <span>Открыть Run в GitHub Actions</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Вторичная кнопка Preflight-проверки файлов на Google Диске (~15 сек) */}
                   <button
-                    onClick={startLoopRender}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer text-xs"
+                    type="button"
+                    onClick={startPreflightCheck}
+                    disabled={isRunnerActive || isLoopDispatching}
+                    className={`w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
+                      isRunnerActive || isLoopDispatching
+                        ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                        : 'bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/40 text-sky-300 cursor-pointer'
+                    }`}
                   >
-                    <InfinityIcon className="w-4 h-4" />{' '}
-                    {`🚀 Запустить облачную сборку (${videoCodec === 'libx264' ? 'H.264' : 'H.265'} CRF ${videoCrf} • ${videoFps}fps • ${getResolutionLabel(
-                      loopResolution
-                    )} ~ ${estimatedGb} ГБ)`}
+                    <span>🔍 Проверить файлы на GDrive (Preflight)</span>
+                    <span className="text-[10px] font-mono text-sky-400/80 hidden sm:inline">
+                      preflight_only: &quot;true&quot; (~15 сек)
+                    </span>
                   </button>
                 </div>
               </div>

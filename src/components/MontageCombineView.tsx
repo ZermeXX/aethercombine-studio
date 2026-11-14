@@ -21,14 +21,16 @@ import {
   Search,
   AlertTriangle,
   Subtitles,
-  RefreshCw
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
 import {
   LiveTerminal,
   TerminalLogEntry,
-  TerminalRunnerState
+  TerminalRunnerState,
+  formatTerminalTime
 } from './StudioTerminal';
 import {
   googleDriveSignIn,
@@ -1324,8 +1326,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     onNotify(`JSON-манифест (${narrativeScenes.length} сцен) экспортирован!`, 'success');
   };
 
+  const isRunnerBusy = terminalStatus === 'running' || terminalStatus === 'queued';
+
   // Прямой и чистый запуск облачной сборки N-сцен: ровно один POST workflow_dispatch
   const startNarrativeScenesRender = async () => {
+    if (isRunnerBusy || isDispatching) {
+      onNotify('Сборка уже выполняется в GitHub Actions! Дождитесь завершения или отмените текущий run.', 'info');
+      return;
+    }
     const githubToken = ghToken.trim();
     if (!githubToken) {
       onNotify('Настройте GitHub Personal Access Token (PAT) в параметрах раннера!', 'error');
@@ -2440,17 +2448,36 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={startNarrativeScenesRender}
-            disabled={isDispatching}
-            className="flex items-center gap-2.5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-indigo-500/25 transition cursor-pointer disabled:opacity-60 text-xs"
-          >
-            <Play className="w-4 h-4 fill-current" />
-            {isDispatching
-              ? 'Отправка задачи в GitHub Actions...'
-              : '🚀 Запустить облачную сборку'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={startNarrativeScenesRender}
+              disabled={isDispatching || isRunnerBusy}
+              className={`flex items-center gap-2.5 font-bold px-6 py-3.5 rounded-xl shadow-lg transition text-xs ${
+                isRunnerBusy || isDispatching
+                  ? 'bg-slate-800 border border-amber-500/40 text-amber-300 cursor-not-allowed opacity-85 shadow-none'
+                  : 'bg-gradient-to-r from-indigo-500 via-indigo-600 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 shadow-indigo-500/25 cursor-pointer'
+              }`}
+            >
+              <Play className="w-4 h-4 fill-current" />
+              {isDispatching
+                ? 'Отправка задачи в GitHub Actions...'
+                : isRunnerBusy
+                ? `⏳ Сборка ${terminalStatus === 'queued' ? 'QUEUED' : 'RUNNING'} • ${formatTerminalTime(terminalSeconds)}`
+                : '🚀 Запустить облачную сборку'}
+            </button>
+            {isRunnerBusy && terminalRunUrl && terminalRunUrl !== '#' && (
+              <a
+                href={terminalRunUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-xl border border-indigo-400/40 bg-indigo-500/15 hover:bg-indigo-500/25 px-3.5 py-3.5 text-xs font-mono font-semibold text-indigo-200 transition"
+              >
+                <span>GitHub Run</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Интерактивный студийный терминал (LiveTerminal) на месте бывшего JSON-манифеста */}
