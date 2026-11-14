@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/aethercombine-studio/',
+    base: process.env.GITHUB_ACTIONS ? '/aethercombine-studio/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
