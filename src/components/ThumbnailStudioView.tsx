@@ -46,6 +46,8 @@ interface ThumbnailStudioViewProps {
   onThumbTitleChange: (title: string) => void;
   thumbBadge: string;
   onThumbBadgeChange: (badge: string) => void;
+  externalFontStyle?: ThumbnailFontStyleId | null;
+  onConsumeExternalFontStyle?: () => void;
   youtubeMockTitle?: string;
   scriptContext?: string;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
@@ -699,7 +701,10 @@ export type CinematicBadgeId =
   | 'no_ads_seamless'
   | 'binaural_audio'
   | 'cozy_fireplace'
-  | '432_hz';
+  | '432_hz'
+  | 'archive_file'
+  | 'classified_doc'
+  | 'documentary';
 
 export interface CinematicBadgeOption {
   id: CinematicBadgeId;
@@ -709,9 +714,12 @@ export interface CinematicBadgeOption {
 const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
   { id: '4k_ultra_hd', label: '4K ULTRA HD' },
   { id: '3_hours', label: '3 HOURS' },
+  { id: 'no_ads_seamless', label: 'NO ADS • SEAMLESS' },
+  { id: 'archive_file', label: 'ARCHIVE FILE' },
+  { id: 'classified_doc', label: 'CLASSIFIED' },
+  { id: 'documentary', label: 'DOCUMENTARY' },
   { id: 'ambience_asmr', label: 'AMBIENCE • ASMR' },
   { id: 'deep_sleep', label: 'DEEP SLEEP' },
-  { id: 'no_ads_seamless', label: 'NO ADS • SEAMLESS' },
   { id: 'binaural_audio', label: 'BINAURAL AUDIO' },
   { id: 'cozy_fireplace', label: 'COZY FIREPLACE' },
   { id: '432_hz', label: '432 HZ' }
@@ -1264,6 +1272,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   onThumbTitleChange,
   thumbBadge,
   onThumbBadgeChange,
+  externalFontStyle,
+  onConsumeExternalFontStyle,
   youtubeMockTitle,
   scriptContext,
   onNotify
@@ -1277,6 +1287,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
   const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>(['3_hours', 'deep_sleep']);
   const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
+
+  useEffect(() => {
+    if (externalFontStyle) {
+      setFontStyle(externalFontStyle);
+      onConsumeExternalFontStyle?.();
+    }
+  }, [externalFontStyle, onConsumeExternalFontStyle]);
+
   const [royalDecorEnabled, setRoyalDecorEnabled] = useState<boolean>(true);
   const [magicDecorEnabled, setMagicDecorEnabled] = useState<boolean>(true);
   const [hookLayoutA, setHookLayoutA] = useState<HookTextLayout>({ ...DEFAULT_HOOK_LAYOUT });

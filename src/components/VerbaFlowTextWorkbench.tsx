@@ -25,22 +25,28 @@ import {
   Trash2,
   FileText,
   Layers,
-  Package
+  TrendingUp,
+  Globe,
+  Video
 } from 'lucide-react';
 import type { NarrativeSceneItem } from './MontageCombineView';
 import {
+  VerbaLanguage,
   VerbaTone,
   VerbaRewriteMode,
   VerbaHookCard,
   VerbaScenePromptCard,
   VoiceoverCleanStats,
-  XrayToken,
+  CameraMovementVector,
   analyzeVerbaTelemetry,
   buildXrayTokens,
   localRewriteScript,
   localGenerateHooks,
   localSliceToScenes,
   prepareVoiceoverScript,
+  extractWordTokens,
+  calculateSceneDurationFromWords,
+  pickAntiRepeatCameraVectors,
   AI_CLICHE_RULES,
   WATER_BALLAST_RULES
 } from '../utils/verbaFlowLinguistics';
@@ -50,7 +56,7 @@ type SubmoduleId = 'rewrite' | 'hooks' | 'voiceprep' | 'scenes' | 'xray';
 interface VerbaFlowTextWorkbenchProps {
   sourceText: string;
   onSourceTextChange: (text: string) => void;
-  onSendToVoiceStudio: (voiceReadyText: string) => void;
+  onSendToVoiceStudio?: (voiceReadyText: string) => void;
   onSendScenesToTimeline: (scenes: NarrativeSceneItem[], fullScriptText: string) => void;
   onSendToYoutubeSeo: (fullScriptText: string, scenes: NarrativeSceneItem[]) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
@@ -94,13 +100,13 @@ const SUBMODULES: Array<{
     id: 'voiceprep',
     emoji: '🎙️',
     title: 'Дикторский цех',
-    subtitle: 'Числа прописью, «Ё», чистка'
+    subtitle: 'Числа прописью, «Ё», паузы'
   },
   {
     id: 'scenes',
     emoji: '🎬',
     title: 'Видео-промты по сценам',
-    subtitle: 'Таймкоды, promptEn, SFX'
+    subtitle: 'Тайминг (words/2.2), камера, SFX'
   },
   {
     id: 'xray',
@@ -110,8 +116,11 @@ const SUBMODULES: Array<{
   }
 ];
 
-const DEFAULT_DEMO_SAMPLE =
+const DEFAULT_DEMO_SAMPLE_RU =
   'В современном мире не секрет, что история альпийской метеостанции 1978 года играет ключевую роль в архивах. На сегодняшний день, как известно, персонал подписал неразглашение на 50 лет, и станцию закрыли за 24 ч. На самом деле, стоит отметить, что приборы на высоте 3.5 км продолжали передавать сигнал со скоростью 120 м/с ещё три недели. Таким образом, важно понимать, что официальная версия о лавине вызывает вопросы.';
+
+const DEFAULT_DEMO_SAMPLE_EN =
+  "In today's world it is no secret that the 1978 Alpine weather station incident plays a crucial role in declassified archives. As is well known, the crew signed a 50-year non-disclosure agreement and evacuated the outpost in 24 hrs. Basically, it is worth noting that instruments at 3.5 km altitude kept transmitting a 120 m/s signal for three full weeks. In conclusion, the official avalanche story leaves major questions.";
 
 export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   sourceText,
@@ -122,8 +131,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   onNotify
 }) => {
   const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>('rewrite');
+  const [outputLanguage, setOutputLanguage] = useState<VerbaLanguage>('ru');
 
-  // Рабочий результат сценария (редактируется пользователем или обновляется ИИ / fallback)
   const [workingText, setWorkingText] = useState<string>(() => sourceText);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastEngineLabel, setLastEngineLabel] = useState<string>('Локальный движок готов');
@@ -137,7 +146,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   // 2. Настройки Хуков
   const [hookGenerationMode, setHookGenerationMode] = useState<'single15' | 'pack5'>('pack5');
   const [hookCards, setHookCards] = useState<VerbaHookCard[]>(() =>
-    localGenerateHooks(sourceText, 'doc').hooks
+    localGenerateHooks(sourceText, 'doc', 'ru').hooks
   );
   const [appliedHookId, setAppliedHookId] = useState<string>('');
 
@@ -148,12 +157,13 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const [voiceNumbersToWords, setVoiceNumbersToWords] = useState<boolean>(true);
   const [expandAbbr, setExpandAbbr] = useState<boolean>(true);
   const [restoreYo, setRestoreYo] = useState<boolean>(true);
+  const [insertBreathingPauses, setInsertBreathingPauses] = useState<boolean>(true);
   const [voiceReadyText, setVoiceReadyText] = useState<string>('');
   const [voiceStats, setVoiceStats] = useState<VoiceoverCleanStats | null>(null);
 
   // 4. Видео-промты по сценам
   const [sceneCards, setSceneCards] = useState<VerbaScenePromptCard[]>(() =>
-    localSliceToScenes(sourceText, 'doc')
+    localSliceToScenes(sourceText, 'doc', 'ru')
   );
 
   // 5. Цветовой рентген
@@ -161,9 +171,10 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const [copiedId, setCopiedId] = useState<string>('');
 
   // Сквозные живые метрики (Telemetry Bar) — пересчет при каждом вводе
-  const analyzedText = activeSubmodule === 'voiceprep' && voiceReadyText
-    ? voiceReadyText
-    : workingText || sourceText;
+  const analyzedText =
+    activeSubmodule === 'voiceprep' && voiceReadyText
+      ? voiceReadyText
+      : workingText || sourceText;
 
   const telemetry = useMemo(
     () => analyzeVerbaTelemetry(analyzedText, sourceText),
@@ -180,6 +191,41 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     setCopiedId(id);
     onNotify(message, 'success');
     setTimeout(() => setCopiedId(''), 1800);
+  };
+
+  // Переключение выходного языка RU / EN (US Native)
+  const handleSelectLanguage = (lang: VerbaLanguage) => {
+    setOutputLanguage(lang);
+    const base = (workingText || sourceText).trim();
+    if (base) {
+      const nextHooks = localGenerateHooks(base, tone, lang);
+      setHookCards(nextHooks.hooks);
+      const nextScenes = localSliceToScenes(base, tone, lang);
+      setSceneCards(nextScenes);
+      if (voiceReadyText) {
+        const nextVoice = prepareVoiceoverScript(
+          lang === 'en' ? nextHooks.rewrittenBody : base,
+          {
+            stripAds,
+            stripTimecodes,
+            stripStageNotes,
+            numbersToWords: voiceNumbersToWords,
+            expandAbbr,
+            restoreYo: lang === 'ru' && restoreYo,
+            insertBreathingPauses,
+            language: lang
+          }
+        );
+        setVoiceReadyText(nextVoice.text);
+        setVoiceStats(nextVoice.stats);
+      }
+    }
+    onNotify(
+      lang === 'en'
+        ? '🇺🇸 Выходной язык VerbaFlow: English (US Native) — хуки, рерайт и числа прописью на английском'
+        : '🇷🇺 Выходной язык VerbaFlow: Русский — восстановление «Ё», русские числительные и штампы',
+      'info'
+    );
   };
 
   // ============================================================================
@@ -203,7 +249,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           tone,
           mode: rewriteMode,
           preserveFacts,
-          numbersToWords
+          numbersToWords,
+          language: outputLanguage
         })
       });
 
@@ -212,8 +259,15 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         if (json.ok && json.data?.rewrittenText) {
           const out = String(json.data.rewrittenText).trim();
           setWorkingText(out);
-          setLastEngineLabel('Gemini API');
-          onNotify('Текст переработан через Gemini API с анти-ИИ ритмикой!', 'success');
+          setLastEngineLabel(
+            outputLanguage === 'en' ? 'Gemini API • US English' : 'Gemini API • RU'
+          );
+          onNotify(
+            outputLanguage === 'en'
+              ? 'Script rewritten in natural US English via Gemini API!'
+              : 'Текст переработан через Gemini API с анти-ИИ ритмикой!',
+            'success'
+          );
           setIsProcessing(false);
           return;
         }
@@ -226,11 +280,21 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       tone,
       mode: rewriteMode,
       preserveFacts,
-      numbersToWords
+      numbersToWords,
+      language: outputLanguage
     });
     setWorkingText(fallbackOut);
-    setLastEngineLabel('Локальный лингвистический обработчик');
-    onNotify('Рерайт выполнен локальным лингвистическим движком VerbaFlow!', 'success');
+    setLastEngineLabel(
+      outputLanguage === 'en'
+        ? 'Локальный движок • US English'
+        : 'Локальный лингвистический обработчик'
+    );
+    onNotify(
+      outputLanguage === 'en'
+        ? 'Сценарий переработан на естественном US English!'
+        : 'Рерайт выполнен локальным лингвистическим движком VerbaFlow!',
+      'success'
+    );
     setIsProcessing(false);
   };
 
@@ -250,7 +314,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           action: 'hooks',
           text: input,
           tone,
-          hookStyle: hookGenerationMode
+          hookStyle: hookGenerationMode,
+          language: outputLanguage
         })
       });
 
@@ -261,7 +326,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             (h: Omit<VerbaHookCard, 'id'>, idx: number) => ({
               id: `gemini-hook-${idx}`,
               archetype: h.archetype || 'paradox',
-              archetypeLabel: h.archetypeLabel || 'Хук',
+              archetypeLabel: h.archetypeLabel || 'Hook',
               durationSec: Number(h.durationSec) || 14,
               visualCue: h.visualCue || '',
               hookText: h.hookText || ''
@@ -271,8 +336,15 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           if (json.data.rewrittenBody && hookGenerationMode === 'single15') {
             setWorkingText(String(json.data.rewrittenBody).trim());
           }
-          setLastEngineLabel('Gemini API');
-          onNotify('Пак YouTube-хуков сгенерирован через Gemini!', 'success');
+          setLastEngineLabel(
+            outputLanguage === 'en' ? 'Gemini API • US English' : 'Gemini API • RU'
+          );
+          onNotify(
+            outputLanguage === 'en'
+              ? '5 US English YouTube hooks generated via Gemini!'
+              : 'Пак YouTube-хуков сгенерирован через Gemini!',
+            'success'
+          );
           setIsProcessing(false);
           return;
         }
@@ -281,13 +353,22 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       // Локальный fallback
     }
 
-    const local = localGenerateHooks(input, tone);
+    const local = localGenerateHooks(input, tone, outputLanguage);
     setHookCards(local.hooks);
     if (hookGenerationMode === 'single15') {
       setWorkingText(`${local.hooks[0].hookText}\n\n${local.rewrittenBody}`);
     }
-    setLastEngineLabel('Локальный лингвистический обработчик');
-    onNotify('Хуки и структура удержания собраны локальным движком VerbaFlow!', 'success');
+    setLastEngineLabel(
+      outputLanguage === 'en'
+        ? 'Локальный движок • US English'
+        : 'Локальный лингвистический обработчик'
+    );
+    onNotify(
+      outputLanguage === 'en'
+        ? 'Сгенерированы 5 хуков на естественном US English!'
+        : 'Хуки и структура удержания собраны локальным движком VerbaFlow!',
+      'success'
+    );
     setIsProcessing(false);
   };
 
@@ -303,23 +384,38 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   };
 
   const handleRunVoicePrep = () => {
-    const base = (workingText || sourceText).trim();
-    if (!base) {
+    const rawBase = (workingText || sourceText).trim();
+    if (!rawBase) {
       onNotify('Нет текста для подготовки к озвучке!', 'error');
       return;
     }
-    const { text, stats } = prepareVoiceoverScript(base, {
+    const baseForLang =
+      outputLanguage === 'en'
+        ? localRewriteScript(rawBase, {
+            tone,
+            mode: 'humanize',
+            preserveFacts: true,
+            numbersToWords: false,
+            language: 'en'
+          })
+        : rawBase;
+
+    const { text, stats } = prepareVoiceoverScript(baseForLang, {
       stripAds,
       stripTimecodes,
       stripStageNotes,
       numbersToWords: voiceNumbersToWords,
       expandAbbr,
-      restoreYo
+      restoreYo: outputLanguage === 'ru' && restoreYo,
+      insertBreathingPauses,
+      language: outputLanguage
     });
     setVoiceReadyText(text);
     setVoiceStats(stats);
     onNotify(
-      `Дикторский текст готов: чисел прописью ${stats.convertedNumbers}, букв «Ё» ${stats.restoredYo}!`,
+      outputLanguage === 'en'
+        ? `US English Voiceover Script ready: ${stats.convertedNumbers} numbers spelled out (1978 → nineteen seventy-eight), ${stats.insertedBreathingPauses} breathing pauses!`
+        : `Дикторский текст готов: чисел прописью ${stats.convertedNumbers}, букв «Ё» ${stats.restoredYo}, пауз дыхания ${stats.insertedBreathingPauses}!`,
       'success'
     );
   };
@@ -339,16 +435,52 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         body: JSON.stringify({
           action: 'scenes',
           text: base,
-          tone
+          tone,
+          language: outputLanguage
         })
       });
 
       if (resp.ok) {
         const json = await resp.json();
         if (json.ok && Array.isArray(json.data?.scenes) && json.data.scenes.length > 0) {
-          setSceneCards(json.data.scenes);
-          setLastEngineLabel('Gemini API');
-          onNotify(`Сценарий разбит на ${json.data.scenes.length} сцен через Gemini!`, 'success');
+          const rawScenes = json.data.scenes as Array<Partial<VerbaScenePromptCard>>;
+          const camVectors = pickAntiRepeatCameraVectors(rawScenes.length);
+          let cursor = 0;
+          const formatMMSS = (sec: number) => {
+            const m = Math.floor(sec / 60);
+            const s = Math.round(sec % 60);
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          };
+
+          const normalized: VerbaScenePromptCard[] = rawScenes.map((sc, idx) => {
+            const line = String(sc.scriptLine || '').trim();
+            const wc = Math.max(1, extractWordTokens(line).length);
+            const dur = calculateSceneDurationFromWords(wc);
+            const startStr = formatMMSS(cursor);
+            const endStr = formatMMSS(cursor + dur);
+            cursor += dur;
+            const cam = camVectors[idx];
+            return {
+              sceneIndex: idx + 1,
+              startTime: startStr,
+              timecodeRange: `${startStr}–${endStr}`,
+              durationSec: dur,
+              wordCount: wc,
+              cameraMove: cam,
+              visualStyle: sc.visualStyle || 'Historical Oil Painting & Chiaroscuro',
+              scriptLine: line,
+              promptEn: String(sc.promptEn || ''),
+              promptRu: String(sc.promptRu || ''),
+              sfx: String(sc.sfx || '')
+            };
+          });
+
+          setSceneCards(normalized);
+          setLastEngineLabel('Gemini API • Synced Timing');
+          onNotify(
+            `Сценарий разбит на ${normalized.length} сцен (тайминг words/2.2 сек + анти-повтор векторов камеры)!`,
+            'success'
+          );
           setIsProcessing(false);
           return;
         }
@@ -357,10 +489,13 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       // Локальный fallback
     }
 
-    const localScenes = localSliceToScenes(base, tone);
+    const localScenes = localSliceToScenes(base, tone, outputLanguage);
     setSceneCards(localScenes);
     setLastEngineLabel('Локальный лингвистический обработчик');
-    onNotify(`Сформировано ${localScenes.length} сцен с видео-промтами и SFX!`, 'success');
+    onNotify(
+      `Сформировано ${localScenes.length} сцен (длительность пропорциональна числу слов: words / 2.2 сек, анти-повтор камеры)!`,
+      'success'
+    );
     setIsProcessing(false);
   };
 
@@ -405,57 +540,105 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   };
 
   // ============================================================================
-  // СКВОЗНОЙ КОНВЕЙЕР В ДРУГИЕ ЦЕХА AETHER COMBINE
+  // СКВОЗНОЙ КОНВЕЙЕР В АКТУАЛЬНЫЕ ЦЕХА СТУДИИ AETHER COMBINE
   // ============================================================================
-  const handleTransferToVoiceStudio = () => {
-    const base = (voiceReadyText || workingText || sourceText).trim();
+  const handleOpenInternalVoicePrep = () => {
+    const base = (workingText || sourceText).trim();
     if (!base) {
-      onNotify('Текст пуст — нечего передавать в Дикторский цех!', 'error');
+      onNotify('Текст пуст — введите сценарий для подготовки к озвучке!', 'error');
       return;
     }
-    const prepared = voiceReadyText
-      ? voiceReadyText
-      : prepareVoiceoverScript(base, {
-          stripAds: true,
-          stripTimecodes: true,
-          stripStageNotes: true,
-          numbersToWords: true,
-          expandAbbr: true,
-          restoreYo: true
-        }).text;
-    setVoiceReadyText(prepared);
-    onSendToVoiceStudio(prepared);
+    const baseForLang =
+      outputLanguage === 'en'
+        ? localRewriteScript(base, {
+            tone,
+            mode: 'humanize',
+            preserveFacts: true,
+            numbersToWords: false,
+            language: 'en'
+          })
+        : base;
+
+    const prepared = prepareVoiceoverScript(baseForLang, {
+      stripAds: true,
+      stripTimecodes: true,
+      stripStageNotes: true,
+      numbersToWords: true,
+      expandAbbr: true,
+      restoreYo: outputLanguage === 'ru',
+      insertBreathingPauses: true,
+      language: outputLanguage
+    });
+    setVoiceReadyText(prepared.text);
+    setVoiceStats(prepared.stats);
+    setActiveSubmodule('voiceprep');
+    onSendToVoiceStudio?.(prepared.text);
+    onNotify(
+      outputLanguage === 'en'
+        ? '🎙️ Открыт подмодуль «Дикторский цех» (US English: числа и даты переведены в слова прописью + паузы дыхания)!'
+        : '🎙️ Открыт подмодуль «Дикторский цех» (Числа прописью, «Ё» и паузы дыхания готовы)!',
+      'success'
+    );
+  };
+
+  const buildSyncedMontageScenes = (baseScript: string): NarrativeSceneItem[] => {
+    const rawScenes =
+      sceneCards.length > 0
+        ? sceneCards
+        : localSliceToScenes(baseScript, tone, outputLanguage);
+    const antiRepeatVectors = pickAntiRepeatCameraVectors(rawScenes.length);
+
+    let cursorSec = 0;
+    const formatMMSS = (sec: number) => {
+      const m = Math.floor(sec / 60);
+      const s = Math.round(sec % 60);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    };
+
+    return rawScenes.map((sc, idx) => {
+      const wc = Math.max(1, extractWordTokens(sc.scriptLine).length);
+      const syncedDuration = calculateSceneDurationFromWords(wc);
+      const startTime = formatMMSS(cursorSec);
+      cursorSec += syncedDuration;
+      const camMove: CameraMovementVector =
+        idx > 0 && sc.cameraMove === antiRepeatVectors[idx - 1]
+          ? antiRepeatVectors[idx]
+          : sc.cameraMove || antiRepeatVectors[idx];
+
+      return {
+        scene_index: idx + 1,
+        scene_id: `SCENE_${String(idx + 1).padStart(3, '0')}`,
+        title: sc.promptRu.slice(0, 64),
+        file_name: '',
+        start_time: startTime,
+        duration: syncedDuration,
+        camera_movement: camMove,
+        visual_style: sc.visualStyle || 'Historical Oil Painting & Chiaroscuro',
+        transition: {
+          type: 'crossfade',
+          duration_sec: 0.6
+        },
+        text_overlay: sc.scriptLine,
+        ai_video_prompt: sc.promptEn.includes(camMove)
+          ? sc.promptEn
+          : `${sc.promptEn} [camera: ${camMove}]`,
+        prompt_ru: sc.promptRu,
+        sfx: sc.sfx
+      };
+    });
   };
 
   const handleTransferScenesToRenderTimeline = () => {
     const base = (workingText || sourceText).trim();
-    const activeScenes =
-      sceneCards.length > 0 ? sceneCards : localSliceToScenes(base, tone);
-    if (activeScenes.length === 0) {
+    if (!base) {
       onNotify('Сначала введите или сформируйте сценарий для разбивки на сцены!', 'error');
       return;
     }
-    if (sceneCards.length === 0) {
-      setSceneCards(activeScenes);
+    const mappedForMontage = buildSyncedMontageScenes(base);
+    if (mappedForMontage.length === 0) {
+      onNotify('Не удалось выделить сцены из текста!', 'error');
+      return;
     }
-
-    const mappedForMontage: NarrativeSceneItem[] = activeScenes.map(sc => ({
-      scene_index: sc.sceneIndex,
-      scene_id: `SCENE_${String(sc.sceneIndex).padStart(3, '0')}`,
-      title: sc.promptRu.slice(0, 64),
-      file_name: '',
-      start_time: sc.startTime,
-      duration: sc.durationSec,
-      transition: {
-        type: 'crossfade',
-        duration_sec: 0.6
-      },
-      text_overlay: sc.scriptLine,
-      ai_video_prompt: sc.promptEn,
-      prompt_ru: sc.promptRu,
-      sfx: sc.sfx
-    }));
-
     onSendScenesToTimeline(mappedForMontage, base);
   };
 
@@ -465,24 +648,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       onNotify('Текст пуст — нечего передавать в YouTube SEO!', 'error');
       return;
     }
-    const activeScenes =
-      sceneCards.length > 0 ? sceneCards : localSliceToScenes(base, tone);
-    const mappedForSeo: NarrativeSceneItem[] = activeScenes.map(sc => ({
-      scene_index: sc.sceneIndex,
-      scene_id: `SCENE_${String(sc.sceneIndex).padStart(3, '0')}`,
-      title: sc.promptRu.slice(0, 64),
-      file_name: '',
-      start_time: sc.startTime,
-      duration: sc.durationSec,
-      transition: {
-        type: 'crossfade',
-        duration_sec: 0.6
-      },
-      text_overlay: sc.scriptLine,
-      ai_video_prompt: sc.promptEn,
-      prompt_ru: sc.promptRu,
-      sfx: sc.sfx
-    }));
+    const mappedForSeo = buildSyncedMontageScenes(base);
     onSendToYoutubeSeo(base, mappedForSeo);
   };
 
@@ -493,33 +659,81 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   };
 
   const handleDownloadVoiceTxt = () => {
-    const content = voiceReadyText || prepareVoiceoverScript(workingText || sourceText).text;
+    const content =
+      voiceReadyText ||
+      prepareVoiceoverScript(workingText || sourceText, {
+        language: outputLanguage
+      }).text;
     if (!content.trim()) return;
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'verbaflow_voiceover_ready.txt';
+    a.download =
+      outputLanguage === 'en'
+        ? 'verbaflow_voiceover_us_en.txt'
+        : 'verbaflow_voiceover_ru.txt';
     a.click();
     URL.revokeObjectURL(url);
-    onNotify('Файл verbaflow_voiceover_ready.txt скачан!', 'success');
+    onNotify(
+      `Файл ${
+        outputLanguage === 'en'
+          ? 'verbaflow_voiceover_us_en.txt'
+          : 'verbaflow_voiceover_ru.txt'
+      } скачан!`,
+      'success'
+    );
   };
 
   return (
     <div className="rounded-2xl bg-[#090D16]/90 backdrop-blur-xl border border-white/[0.08] shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] p-5 sm:p-6 space-y-6">
-      {/* ШАПКА ВКЛАДКИ + КНОПКИ СКВОЗНОГО КОНВЕЙЕРА */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2.5">
+      {/* ШАПКА ВКЛАДКИ + ПЕРЕКЛЮЧАТЕЛЬ ЯЗЫКА RU / EN (US) + КНОПКИ СКВОЗНОГО КОНВЕЙЕРА */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-50 [text-wrap:balance]">
               📝 VerbaFlow • Сценарии &amp; Текст
             </h2>
+
+            {/* ПЕРЕКЛЮЧАТЕЛЬ ЯЗЫКА ГЕНЕРАЦИИ RU / EN (US NATIVE) */}
+            <div
+              role="group"
+              aria-label="Выходной язык генерации VerbaFlow"
+              className="inline-flex items-center rounded-xl bg-[#131B2E] p-1 border border-white/[0.08]"
+            >
+              <button
+                type="button"
+                onClick={() => handleSelectLanguage('ru')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition flex items-center gap-1.5 ${
+                  outputLanguage === 'ru'
+                    ? 'bg-amber-500/20 text-amber-200 border border-amber-400/45 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>🇷🇺 Русский</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectLanguage('en')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition flex items-center gap-1.5 ${
+                  outputLanguage === 'en'
+                    ? 'bg-sky-500/20 text-sky-200 border border-sky-400/45 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-300" />
+                <span>🇺🇸 English (US Native)</span>
+              </button>
+            </div>
+
             <span className="text-xs text-slate-400 font-medium">
               {lastEngineLabel}
             </span>
           </div>
-          <p className="text-xs text-slate-400 max-w-2xl">
-            Сквозная текстовая лаборатория: анти-ИИ ритмика, YouTube-хуки, дикторская нормализация, покадровые видео-промты и цветовой рентген
+          <p className="text-xs text-slate-400 max-w-3xl">
+            {outputLanguage === 'en'
+              ? 'Режим 🇺🇸 English (US Native): все хуки, рерайт сценария и Дикторский цех (1978 → nineteen seventy-eight) генерируют чистый английский текст под американскую озвучку'
+              : 'Сквозная текстовая лаборатория: анти-ИИ ритмика, YouTube-хуки, дикторская нормализация, покадровые видео-промты (words / 2.2 сек) и цветовой рентген'}
           </p>
         </div>
 
@@ -529,7 +743,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.97 }}
             type="button"
-            onClick={handleTransferToVoiceStudio}
+            onClick={handleOpenInternalVoicePrep}
             className="min-h-[42px] px-4 py-2 rounded-xl bg-[#131B2E] hover:bg-[#19233b] border border-emerald-400/35 text-emerald-300 text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
           >
             <Mic className="w-4 h-4 shrink-0" />
@@ -543,8 +757,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             onClick={handleTransferToYoutubeSeo}
             className="min-h-[42px] px-4 py-2 rounded-xl bg-[#131B2E] hover:bg-[#19233b] border border-sky-400/35 text-sky-300 text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
           >
-            <Package className="w-4 h-4 shrink-0" />
-            <span>📦 Сценарий → в YouTube SEO</span>
+            <TrendingUp className="w-4 h-4 shrink-0" />
+            <span>📈 Сценарий → в YouTube SEO</span>
           </motion.button>
 
           <motion.button
@@ -555,7 +769,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             className="min-h-[42px] px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 text-xs font-extrabold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer shadow-[0_8px_24px_-6px_rgba(245,158,11,0.45)]"
           >
             <Film className="w-4 h-4 shrink-0" />
-            <span>🎬 Сцены → отправить в наш Рендер-таймлайн / Ритм-карту</span>
+            <span>🎬 Сцены → в Повествовательный монтаж</span>
           </motion.button>
         </div>
       </div>
@@ -693,7 +907,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono tabular-nums">
             <span>Слов: {telemetry.wordCount}</span>
-            <span className="text-slate-400">130 сл/мин</span>
+            <span className="text-slate-400">130 сл/мин (~2.2 сл/с)</span>
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
             <span className={telemetry.remainingDigitsCount > 0 ? 'text-amber-300' : 'text-emerald-300'}>
@@ -709,7 +923,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
 
       {/* ОСНОВНАЯ РАБОЧАЯ СЕТКА: ПЕРЕКЛЮЧАТЕЛЬ 5 ПОДМОДУЛЕЙ СЛЕВА + СЦЕНА МОДУЛЯ СПРАВА */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* ЛЕВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ПОДМОДУЛЕЙ (260–280px эквивалент: 3 колонки на lg) */}
+        {/* ЛЕВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ПОДМОДУЛЕЙ */}
         <aside className="lg:col-span-3 space-y-2.5">
           <div className="rounded-xl bg-[#131B2E]/75 border border-white/[0.08] p-2 space-y-1">
             {SUBMODULES.map(mod => {
@@ -756,13 +970,22 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onSourceTextChange(DEFAULT_DEMO_SAMPLE);
-                  setWorkingText(DEFAULT_DEMO_SAMPLE);
-                  onNotify('Загружен текст со штампами, водой, цифрами и без «Ё» для проверки!', 'info');
+                  const sample =
+                    outputLanguage === 'en' ? DEFAULT_DEMO_SAMPLE_EN : DEFAULT_DEMO_SAMPLE_RU;
+                  onSourceTextChange(sample);
+                  setWorkingText(sample);
+                  onNotify(
+                    outputLanguage === 'en'
+                      ? 'Loaded English sample with AI clichés, numbers (1978, 50, 24), and units!'
+                      : 'Загружен текст со штампами, водой, цифрами и без «Ё» для проверки!',
+                    'info'
+                  );
                 }}
                 className="w-full px-3 py-2 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-white/[0.08] text-xs text-amber-300 font-semibold text-left cursor-pointer transition"
               >
-                Загрузить текст с ИИ-штампами
+                {outputLanguage === 'en'
+                  ? 'Load US English test draft'
+                  : 'Загрузить текст с ИИ-штампами'}
               </button>
               <button
                 type="button"
@@ -798,7 +1021,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     <div className="flex items-center gap-2">
                       <SlidersHorizontal className="w-4 h-4 text-amber-400" />
                       <h3 className="text-sm font-bold text-slate-100">
-                        Параметры рерайтинга &amp; Анти-ИИ
+                        Параметры рерайтинга &amp; Анти-ИИ ({outputLanguage === 'en' ? '🇺🇸 US English Output' : '🇷🇺 Русский'})
                       </h3>
                     </div>
                     <button
@@ -812,7 +1035,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       ) : (
                         <Wand2 className="w-4 h-4" />
                       )}
-                      <span>Переработать сценарий</span>
+                      <span>
+                        {outputLanguage === 'en'
+                          ? 'Переработать на US English'
+                          : 'Переработать сценарий'}
+                      </span>
                     </button>
                   </div>
 
@@ -876,7 +1103,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                         onChange={e => setNumbersToWords(e.target.checked)}
                         className="accent-amber-400 w-4 h-4"
                       />
-                      <span>Переводить цифры в слова прописью</span>
+                      <span>
+                        {outputLanguage === 'en'
+                          ? 'Переводить цифры в английские слова (1978 → nineteen seventy-eight)'
+                          : 'Переводить цифры в слова прописью'}
+                      </span>
                     </label>
                   </div>
                 </div>
@@ -886,7 +1117,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   <div className="rounded-xl bg-[#131B2E]/70 border border-white/[0.08] p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-200">
-                        Исходный текст / Черновик
+                        Исходный текст / Черновик (RU или EN)
                       </label>
                       <button
                         type="button"
@@ -908,7 +1139,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   <div className="rounded-xl bg-[#131B2E]/70 border border-emerald-400/25 p-4 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-xs font-bold text-emerald-300">
-                        Готовый результат (Редактируемый)
+                        Готовый результат ({outputLanguage === 'en' ? '🇺🇸 US English' : '🇷🇺 Русский'})
                       </label>
                       <button
                         type="button"
@@ -971,7 +1202,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      Пак из 5 вариантов хука
+                      Пак из 5 вариантов хука ({outputLanguage === 'en' ? 'US EN' : 'RU'})
                     </button>
                   </div>
 
@@ -986,7 +1217,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     ) : (
                       <Sparkles className="w-4 h-4" />
                     )}
-                    <span>Сгенерировать хуки</span>
+                    <span>
+                      {outputLanguage === 'en'
+                        ? 'Generate 5 Hooks (US English)'
+                        : 'Сгенерировать хуки'}
+                    </span>
                   </button>
                 </div>
 
@@ -1075,7 +1310,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             )}
 
             {/* =================================================================
-                ПОДМОДУЛЬ 3: 🎙️ ДИКТОРСКИЙ ЦЕХ
+                ПОДМОДУЛЬ 3: 🎙️ ДИКТОРСКИЙ ЦЕХ (RU & US ENGLISH VOICEOVER)
                ================================================================= */}
             {activeSubmodule === 'voiceprep' && (
               <motion.div
@@ -1090,10 +1325,12 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
                     <div>
                       <h3 className="text-sm font-bold text-slate-100">
-                        Очистка и нормализация под озвучку
+                        Очистка и нормализация под озвучку ({outputLanguage === 'en' ? '🇺🇸 English US Voiceover' : '🇷🇺 Русский диктор'})
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Удаление рекламы и таймкодов, 1978 → тысяча девятьсот семьдесят восьмого, разворот сокращений и «Ё»
+                        {outputLanguage === 'en'
+                          ? 'Удаление рекламы и таймкодов, 1978 → nineteen seventy-eight, разворот km/m/s и расстановка дыхательных пауз [pause 1.2s]'
+                          : 'Удаление рекламы и таймкодов, 1978 → тысяча девятьсот семьдесят восьмого, разворот сокращений, «Ё» и паузы дыхания'}
                       </p>
                     </div>
                     <button
@@ -1102,7 +1339,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950 text-xs font-extrabold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
                     >
                       <Mic className="w-4 h-4" />
-                      <span>Подготовить текст для диктора</span>
+                      <span>
+                        {outputLanguage === 'en'
+                          ? 'Prepare US English Voiceover'
+                          : 'Подготовить текст для диктора'}
+                      </span>
                     </button>
                   </div>
 
@@ -1111,9 +1352,33 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       { label: 'Удалить рекламу и спонсоров', checked: stripAds, set: setStripAds },
                       { label: 'Удалить таймкоды [00:15]', checked: stripTimecodes, set: setStripTimecodes },
                       { label: 'Удалить ремарки [Кадр: ...]', checked: stripStageNotes, set: setStripStageNotes },
-                      { label: 'Числа, даты и % прописью', checked: voiceNumbersToWords, set: setVoiceNumbersToWords },
-                      { label: 'Развернуть км, г., м/с, тыс.', checked: expandAbbr, set: setExpandAbbr },
-                      { label: 'Восстановить букву «Ё»', checked: restoreYo, set: setRestoreYo }
+                      {
+                        label:
+                          outputLanguage === 'en'
+                            ? 'Числа и годы в слова (1978 → nineteen seventy-eight)'
+                            : 'Числа, даты и % прописью',
+                        checked: voiceNumbersToWords,
+                        set: setVoiceNumbersToWords
+                      },
+                      {
+                        label:
+                          outputLanguage === 'en'
+                            ? 'Развернуть km, m/s, hrs, e.g.'
+                            : 'Развернуть км, г., м/с, тыс.',
+                        checked: expandAbbr,
+                        set: setExpandAbbr
+                      },
+                      outputLanguage === 'en'
+                        ? {
+                            label: 'Расставить паузы дыхания [pause 1.2s]',
+                            checked: insertBreathingPauses,
+                            set: setInsertBreathingPauses
+                          }
+                        : {
+                            label: 'Восстановить букву «Ё»',
+                            checked: restoreYo,
+                            set: setRestoreYo
+                          }
                     ].map(opt => (
                       <label
                         key={opt.label}
@@ -1136,7 +1401,13 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <span aria-hidden="true">·</span>
                       <span>Сокращений: {voiceStats.expandedAbbreviations}</span>
                       <span aria-hidden="true">·</span>
-                      <span>Букв «Ё»: {voiceStats.restoredYo}</span>
+                      <span>Пауз дыхания: {voiceStats.insertedBreathingPauses}</span>
+                      {outputLanguage === 'ru' && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>Букв «Ё»: {voiceStats.restoredYo}</span>
+                        </>
+                      )}
                       <span aria-hidden="true">·</span>
                       <span>
                         Удалено мусора: {voiceStats.removedAds + voiceStats.removedTimecodes + voiceStats.removedStageNotes}
@@ -1149,9 +1420,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
                       <FileText className="w-4 h-4" />
-                      Готовый дикторский сценарий (Без цифр и сокращений)
+                      Готовый дикторский сценарий ({outputLanguage === 'en' ? 'US English Native' : 'Русский'})
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() =>
@@ -1180,10 +1451,10 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={handleTransferToVoiceStudio}
+                        onClick={handleTransferScenesToRenderTimeline}
                         className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-300 flex items-center gap-1.5 cursor-pointer"
                       >
-                        <span>В Дикторский цех</span>
+                        <span>Синхронизировать с Монтажом</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -1192,7 +1463,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     rows={12}
                     value={voiceReadyText || workingText}
                     onChange={e => setVoiceReadyText(e.target.value)}
-                    placeholder="Нажмите «Подготовить текст для диктора», чтобы развернуть все цифры, даты и восстановить «Ё»..."
+                    placeholder="Нажмите «Подготовить текст для диктора», чтобы развернуть все цифры и даты в слова прописью..."
                     className="w-full bg-[#090D16] border border-white/[0.08] rounded-xl p-3.5 text-sm font-mono text-emerald-100 leading-relaxed outline-none custom-scrollbar"
                   />
                 </div>
@@ -1200,7 +1471,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             )}
 
             {/* =================================================================
-                ПОДМОДУЛЬ 4: 🎬 ВИДЕО-ПРОМТЫ ПО СЦЕНАМ
+                ПОДМОДУЛЬ 4: 🎬 ВИДЕО-ПРОМТЫ ПО СЦЕНАМ (АВТО-ТАЙМИНГ WORDS/2.2 + АНТИ-ПОВТОР КАМЕРЫ)
                ================================================================= */}
             {activeSubmodule === 'scenes' && (
               <motion.div
@@ -1217,7 +1488,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       Покадровая разбивка на сцены и видео-промты ({sceneCards.length})
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Готово к отправке в Рендер-таймлайн / Ритм-карту и сборку manifest.json для GitHub Actions
+                      Авто-расчёт <code className="text-emerald-300 font-mono">duration = words / 2.2 сек</code> под темп диктора и чередование векторов камеры (<code className="text-amber-300 font-mono">zoom_in / zoom_out / pan_left / pan_right</code> без повторов)
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1240,7 +1511,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 text-xs font-extrabold flex items-center gap-2 whitespace-nowrap cursor-pointer"
                     >
                       <Film className="w-4 h-4" />
-                      <span>Отправить в Рендер-таймлайн</span>
+                      <span>Отправить в Повествовательный монтаж</span>
                     </button>
                   </div>
                 </div>
@@ -1259,29 +1530,37 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                         className="rounded-xl bg-[#131B2E]/85 border border-white/[0.08] p-4 space-y-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-2">
-                          <div className="flex items-center gap-3 text-xs font-mono tabular-nums">
+                          <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono tabular-nums">
                             <span className="font-bold text-amber-300">
                               Сцена #{sc.sceneIndex}
                             </span>
-                            <span className="text-slate-400">·</span>
+                            <span className="text-slate-500">·</span>
                             <span className="text-sky-300">{sc.timecodeRange}</span>
-                            <span className="text-slate-400">·</span>
+                            <span className="text-slate-500">·</span>
+                            <span className="text-slate-400">{sc.wordCount || extractWordTokens(sc.scriptLine).length} сл.</span>
+                            <span className="text-slate-500">·</span>
                             <label className="flex items-center gap-1 text-slate-300">
                               <span>Длит.:</span>
                               <input
                                 type="number"
                                 min={2}
                                 max={30}
+                                step={0.5}
                                 value={sc.durationSec}
                                 onChange={e =>
                                   updateSceneCard(idx, {
                                     durationSec: Math.max(2, Number(e.target.value) || 5)
                                   })
                                 }
-                                className="w-12 bg-[#090D16] border border-white/[0.1] rounded px-1.5 py-0.5 text-center text-emerald-300 font-bold outline-none"
+                                className="w-14 bg-[#090D16] border border-white/[0.1] rounded px-1.5 py-0.5 text-center text-emerald-300 font-bold outline-none"
                               />
                               <span>с</span>
                             </label>
+                            <span className="text-slate-500">·</span>
+                            <span className="inline-flex items-center gap-1 text-indigo-300 bg-indigo-500/15 border border-indigo-400/30 px-2 py-0.5 rounded">
+                              <Video className="w-3 h-3" />
+                              {sc.cameraMove || 'zoom_in'}
+                            </span>
                           </div>
 
                           <button

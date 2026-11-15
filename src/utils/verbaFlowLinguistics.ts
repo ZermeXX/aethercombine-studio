@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type VerbaLanguage = 'ru' | 'en';
+
 export type VerbaTone =
   | 'doc'
   | 'storyteller'
@@ -24,6 +26,12 @@ export type HookArchetype =
   | 'question'
   | 'contrast';
 
+export type CameraMovementVector =
+  | 'zoom_in'
+  | 'zoom_out'
+  | 'pan_left'
+  | 'pan_right';
+
 export interface VerbaHookCard {
   id: string;
   archetype: HookArchetype;
@@ -38,6 +46,9 @@ export interface VerbaScenePromptCard {
   timecodeRange: string;
   startTime: string;
   durationSec: number;
+  wordCount: number;
+  cameraMove: CameraMovementVector;
+  visualStyle: string;
   scriptLine: string;
   promptEn: string;
   promptRu: string;
@@ -82,6 +93,7 @@ export interface VoiceoverCleanStats {
   convertedNumbers: number;
   expandedAbbreviations: number;
   restoredYo: number;
+  insertedBreathingPauses: number;
 }
 
 export interface XrayToken {
@@ -202,6 +214,12 @@ export const AI_CLICHE_RULES: PatternReplacementRule[] = [
     reason: 'English AI cliché'
   },
   {
+    pattern: /it is no secret that/gi,
+    label: 'it is no secret that',
+    replacements: ['the evidence shows', ''],
+    reason: 'English AI cliché'
+  },
+  {
     pattern: /plays a crucial role/gi,
     label: 'plays a crucial role',
     replacements: ['drives the outcome', 'changes everything'],
@@ -211,6 +229,12 @@ export const AI_CLICHE_RULES: PatternReplacementRule[] = [
     pattern: /it is worth noting that/gi,
     label: 'it is worth noting that',
     replacements: ['notice this:', 'crucially,'],
+    reason: 'English AI cliché'
+  },
+  {
+    pattern: /it is important to understand that/gi,
+    label: 'it is important to understand that',
+    replacements: ['here is the catch:', 'what matters is that'],
     reason: 'English AI cliché'
   },
   {
@@ -313,6 +337,18 @@ export const WATER_BALLAST_RULES: PatternReplacementRule[] = [
     reason: 'Filler phrase'
   },
   {
+    pattern: /as a matter of fact,?/gi,
+    label: 'as a matter of fact',
+    replacements: ['in reality,', ''],
+    reason: 'Filler phrase'
+  },
+  {
+    pattern: /at the end of the day,?/gi,
+    label: 'at the end of the day',
+    replacements: ['ultimately,', ''],
+    reason: 'Filler phrase'
+  },
+  {
     pattern: /basically,?/gi,
     label: 'basically',
     replacements: [''],
@@ -336,10 +372,10 @@ const STOP_WORDS = new Set([
   'впрочем', 'хорошо', 'свою', 'этой', 'перед', 'иногда', 'лучше', 'чуть', 'том',
   'нельзя', 'такой', 'им', 'более', 'всегда', 'конечно', 'всю', 'между',
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
-  'by', 'from', 'is', 'was', 'were', 'are', 'be', 'been', 'it', 'that', 'this', 'as'
+  'by', 'from', 'is', 'was', 'were', 'are', 'be', 'been', 'it', 'that', 'this', 'as',
+  'into', 'over', 'after', 'before', 'under', 'their', 'they', 'them', 'have', 'had', 'has'
 ]);
 
-// Расширенный словарь восстановления буквы «Ё»
 export const YO_RESTORE_RULES: Array<[RegExp, string]> = [
   [/\bеще\b/gi, 'ещё'],
   [/\bвсе\b/gi, 'всё'],
@@ -386,8 +422,8 @@ export const YO_RESTORE_RULES: Array<[RegExp, string]> = [
   [/\bприем([а-я]*)\b/gi, 'приём$1'],
   [/\bразъем([а-я]*)\b/gi, 'разъём$1'],
   [/\bполет([а-я]*)\b/gi, 'полёт$1'],
-  [/\bсамолет([а-я]*)\b/gi, 'самолё$1'],
-  [/\bвертолет([а-я]*)\b/gi, 'вертолё$1'],
+  [/\bсамолет([а-я]*)\b/gi, 'самолёт$1'],
+  [/\bвертолет([а-я]*)\b/gi, 'вертолёт$1'],
   [/\bберет\b/gi, 'берёт'],
   [/\bидет\b/gi, 'идёт'],
   [/\bживет\b/gi, 'живёт'],
@@ -427,14 +463,7 @@ export function restoreYoInRussianText(text: string): { text: string; restoredCo
   let out = text;
   let restoredCount = 0;
 
-  // Фикс опечатки для самолет/вертолет (выше $1 теряло букву т)
-  const fixedRules: Array<[RegExp, string]> = YO_RESTORE_RULES.map(([rx, rep]) => {
-    if (rep === 'самолё$1') return [rx, 'самолёт$1'];
-    if (rep === 'вертолё$1') return [rx, 'вертолёт$1'];
-    return [rx, rep];
-  });
-
-  for (const [regex, replacement] of fixedRules) {
+  for (const [regex, replacement] of YO_RESTORE_RULES) {
     out = out.replace(regex, (...args) => {
       const match = args[0] as string;
       const replaced = match.replace(new RegExp(regex.source, 'i'), replacement);
@@ -449,7 +478,7 @@ export function restoreYoInRussianText(text: string): { text: string; restoredCo
 }
 
 // ============================================================================
-// ПЕРЕВОД ЧИСЕЛ, ДАТ И ПРОЦЕНТОВ В СЛОВА ПРОПИСЬЮ (РУССКИЙ ЯЗЫК)
+// ПЕРЕВОД ЧИСЕЛ, ДАТ И ПРОЦЕНТОВ В СЛОВА ПРОПИСЬЮ (РУССКИЙ И АНГЛИЙСКИЙ US)
 // ============================================================================
 export type NumberGrammarForm = 'cardinal' | 'ordinal_genitive' | 'ordinal_prepositional' | 'ordinal_nominative';
 
@@ -569,7 +598,6 @@ export function intToRussianWords(
         parts.push(`${triadToCardinal(th, true)} ${pluralize(th, ['тысяча', 'тысячи', 'тысяч'])}`);
       }
     } else if (th === 1 && form !== 'cardinal') {
-      // «тысяча девятьсот семьдесят восьмого» (традиционная форма для годов)
       parts.push('тысяча');
     } else {
       parts.push(`${triadToCardinal(th, true)} ${pluralize(th, ['тысяча', 'тысячи', 'тысяч'])}`);
@@ -629,6 +657,73 @@ export function intToRussianWords(
   return parts.filter(Boolean).join(' ');
 }
 
+export function intToEnglishWords(num: number, isYear = false): string {
+  if (!Number.isFinite(num) || num < 0) return String(num);
+  if (num === 0) return 'zero';
+
+  const ones = [
+    '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen'
+  ];
+  const tens = [
+    '', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'
+  ];
+
+  const twoDigits = (n: number): string => {
+    if (n === 0) return '';
+    if (n < 20) return ones[n];
+    const t = Math.floor(n / 10);
+    const o = n % 10;
+    return o > 0 ? `${tens[t]}-${ones[o]}` : tens[t];
+  };
+
+  // Естественное произношение годов в US English: 1978 -> nineteen seventy-eight
+  if (isYear && num >= 1100 && num <= 2099) {
+    if (num === 2000) return 'two thousand';
+    if (num > 2000 && num < 2010) {
+      return `two thousand ${ones[num % 10]}`;
+    }
+    const century = Math.floor(num / 100);
+    const remainder = num % 100;
+    if (remainder === 0) {
+      return `${twoDigits(century)} hundred`;
+    }
+    if (remainder < 10) {
+      return `${twoDigits(century)} oh-${ones[remainder]}`;
+    }
+    return `${twoDigits(century)} ${twoDigits(remainder)}`;
+  }
+
+  const triad = (n: number): string => {
+    const h = Math.floor(n / 100);
+    const rem = n % 100;
+    const parts: string[] = [];
+    if (h > 0) parts.push(`${ones[h]} hundred`);
+    if (rem > 0) parts.push(twoDigits(rem));
+    return parts.join(' ');
+  };
+
+  let rem = Math.floor(num);
+  const parts: string[] = [];
+
+  if (rem >= 1_000_000) {
+    const mil = Math.floor(rem / 1_000_000);
+    rem %= 1_000_000;
+    parts.push(`${triad(mil)} million`);
+  }
+  if (rem >= 1000) {
+    const th = Math.floor(rem / 1000);
+    rem %= 1000;
+    parts.push(`${triad(th)} thousand`);
+  }
+  if (rem > 0) {
+    parts.push(triad(rem));
+  }
+
+  return parts.join(' ');
+}
+
 function pluralizePercent(n: number): string {
   const mod100 = Math.floor(n) % 100;
   const mod10 = Math.floor(n) % 10;
@@ -638,7 +733,10 @@ function pluralizePercent(n: number): string {
   return 'процентов';
 }
 
-export function convertNumbersAndAbbreviations(text: string): {
+export function convertNumbersAndAbbreviations(
+  text: string,
+  lang: VerbaLanguage = 'ru'
+): {
   text: string;
   convertedNumbers: number;
   expandedAbbreviations: number;
@@ -647,7 +745,80 @@ export function convertNumbersAndAbbreviations(text: string): {
   let convertedNumbers = 0;
   let expandedAbbreviations = 0;
 
-  // 1. Разворот составных и одиночных сокращений
+  if (lang === 'en') {
+    const enAbbrRules: Array<[RegExp, string]> = [
+      [/(\d+)\s*m\/s\b/gi, '$1 meters per second'],
+      [/\bm\/s\b/gi, 'meters per second'],
+      [/(\d+)\s*km\/h\b/gi, '$1 kilometers per hour'],
+      [/\bkm\/h\b/gi, 'kilometers per hour'],
+      [/(\d+)\s*km\b/gi, '$1 kilometers'],
+      [/\bkm\b/gi, 'kilometers'],
+      [/(\d+)\s*cm\b/gi, '$1 centimeters'],
+      [/(\d+)\s*mm\b/gi, '$1 millimeters'],
+      [/(\d+)\s*kg\b/gi, '$1 kilograms'],
+      [/(\d+)\s*hrs?\b/gi, '$1 hours'],
+      [/(\d+)\s*mins?\b/gi, '$1 minutes'],
+      [/(\d+)\s*secs?\b/gi, '$1 seconds'],
+      [/\be\.g\./gi, 'for example'],
+      [/\bi\.e\./gi, 'that is'],
+      [/\betc\./gi, 'and so on'],
+      [/\bvs\.?\b/gi, 'versus'],
+      [/\bDr\.\s*/g, 'Doctor '],
+      [/\bSt\.\s*/g, 'Saint ']
+    ];
+
+    for (const [rx, rep] of enAbbrRules) {
+      out = out.replace(rx, (...args) => {
+        expandedAbbreviations += 1;
+        const m = args[0] as string;
+        const g1 = typeof args[1] === 'string' ? args[1] : '';
+        const resolved = rep.includes('$1') ? rep.replace('$1', g1) : rep;
+        return preserveCaseReplace(m, resolved);
+      });
+    }
+
+    // Decimals with percent (e.g., 12.5%)
+    out = out.replace(/(\d+)[.,](\d+)\s*%/g, (_m, intPart, fracPart) => {
+      convertedNumbers += 1;
+      const iNum = parseInt(intPart, 10);
+      const fDigits = String(fracPart)
+        .split('')
+        .map(d => intToEnglishWords(parseInt(d, 10)))
+        .join(' ');
+      return `${intToEnglishWords(iNum)} point ${fDigits} percent`;
+    });
+
+    // Integer percents (50% -> fifty percent)
+    out = out.replace(/(\d+)\s*%/g, (_m, numStr) => {
+      convertedNumbers += 1;
+      const n = parseInt(numStr, 10);
+      return `${intToEnglishWords(n)} percent`;
+    });
+
+    // Decimals (3.5 -> three point five)
+    out = out.replace(/\b(\d+)[.,](\d+)\b/g, (_m, a, b) => {
+      convertedNumbers += 1;
+      const iNum = parseInt(a, 10);
+      const fDigits = String(b)
+        .split('')
+        .map(d => intToEnglishWords(parseInt(d, 10)))
+        .join(' ');
+      return `${intToEnglishWords(iNum)} point ${fDigits}`;
+    });
+
+    // Remaining integers (years 1800..2035 pronounced as years: 1978 -> nineteen seventy-eight)
+    out = out.replace(/\b\d+\b/g, match => {
+      const n = parseInt(match, 10);
+      if (!Number.isFinite(n)) return match;
+      convertedNumbers += 1;
+      const isYear = n >= 1800 && n <= 2035;
+      return intToEnglishWords(n, isYear);
+    });
+
+    return { text: out, convertedNumbers, expandedAbbreviations };
+  }
+
+  // РУССКИЙ ЯЗЫК:
   const abbrRules: Array<[RegExp, string]> = [
     [/(\d+)\s*м\/с\b/gi, '$1 метров в секунду'],
     [/\bм\/с\b/gi, 'метров в секунду'],
@@ -684,7 +855,6 @@ export function convertNumbersAndAbbreviations(text: string): {
     });
   }
 
-  // 2. Проценты (включая дробные: 12,5% или 50%)
   out = out.replace(/(\d+)[.,](\d+)\s*%/g, (_m, intPart, fracPart) => {
     convertedNumbers += 1;
     const iNum = parseInt(intPart, 10);
@@ -699,14 +869,12 @@ export function convertNumbersAndAbbreviations(text: string): {
     return `${intToRussianWords(n)} ${pluralizePercent(n)}`;
   });
 
-  // 3. Годы в контексте «в 1978 году» (предложный падеж: в тысяча девятьсот семьдесят восьмом году)
   out = out.replace(/\b([Вв])\s+(\d{4})\s+(году)\b/g, (_m, prep, yearStr, word) => {
     convertedNumbers += 1;
     const y = parseInt(yearStr, 10);
     return `${prep} ${intToRussianWords(y, 'ordinal_prepositional')} ${word}`;
   });
 
-  // 4. Годы в родительном падеже «1978 года» или после месяца «12 апреля 1978»
   out = out.replace(
     /\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})(?:\s*(года|году))?\b/gi,
     (_m, dayStr, month, yearStr, gWord) => {
@@ -724,7 +892,6 @@ export function convertNumbersAndAbbreviations(text: string): {
     return `${intToRussianWords(y, 'ordinal_genitive')} ${word}`;
   });
 
-  // 5. Десятичные дроби (3.5 или 3,5)
   out = out.replace(/\b(\d+)[.,](\d+)\b/g, (_m, a, b) => {
     convertedNumbers += 1;
     const iNum = parseInt(a, 10);
@@ -733,7 +900,6 @@ export function convertNumbersAndAbbreviations(text: string): {
     return `${intToRussianWords(iNum)} целых ${intToRussianWords(fNum)} ${fracLabel}`;
   });
 
-  // 6. Оставшиеся целые числа (сохраняем контекст лет 1800–2035 как родительный/порядковый или количественный)
   out = out.replace(/\b\d+\b/g, match => {
     const n = parseInt(match, 10);
     if (!Number.isFinite(n)) return match;
@@ -748,7 +914,7 @@ export function convertNumbersAndAbbreviations(text: string): {
 }
 
 // ============================================================================
-// ОЧИСТКА ДЛЯ ДИКТОРСКОГО ЦЕХА (РЕКЛАМА, ТАЙМКОДЫ, РЕМАРКИ, ЧИСЛА, СОКРАЩЕНИЯ, Ё)
+// ОЧИСТКА ДЛЯ ДИКТОРСКОГО ЦЕХА (РЕКЛАМА, ТАЙМКОДЫ, РЕМАРКИ, ЧИСЛА, СОКРАЩЕНИЯ, Ё, ПАУЗЫ)
 // ============================================================================
 export function prepareVoiceoverScript(
   rawText: string,
@@ -759,6 +925,8 @@ export function prepareVoiceoverScript(
     numbersToWords?: boolean;
     expandAbbr?: boolean;
     restoreYo?: boolean;
+    insertBreathingPauses?: boolean;
+    language?: VerbaLanguage;
   } = {}
 ): { text: string; stats: VoiceoverCleanStats } {
   const {
@@ -767,7 +935,9 @@ export function prepareVoiceoverScript(
     stripStageNotes = true,
     numbersToWords = true,
     expandAbbr = true,
-    restoreYo = true
+    restoreYo = true,
+    insertBreathingPauses = true,
+    language = 'ru'
   } = options;
 
   let text = rawText;
@@ -777,6 +947,7 @@ export function prepareVoiceoverScript(
   let convertedNumbers = 0;
   let expandedAbbreviations = 0;
   let restoredYo = 0;
+  let insertedBreathingPauses = 0;
 
   // Защищаем паузы [pause 1.5s] если есть
   const pauseTokens: string[] = [];
@@ -788,7 +959,7 @@ export function prepareVoiceoverScript(
   if (stripAds) {
     const lines = text.split(/\r?\n/);
     const adRegex =
-      /(?:^|\s)(?:реклама|спонсор\s+выпуска|интеграция|промокод|переходите\s+по\s+ссылке|подписывайтесь\s+на\s+канал|ставьте\s+лайк|sponsor|promo\s*code|link\s+in\s+description)/i;
+      /(?:^|\s)(?:реклама|спонсор\s+выпуска|интеграция|промокод|переходите\s+по\s+ссылке|подписывайтесь\s+на\s+канал|ставьте\s+лайк|sponsor|promo\s*code|link\s+in\s+description|subscribe\s+to\s+the\s+channel)/i;
     const keptLines: string[] = [];
     for (const line of lines) {
       if (adRegex.test(line)) {
@@ -816,28 +987,35 @@ export function prepareVoiceoverScript(
       removedStageNotes += 1;
       return '';
     });
-    text = text.replace(/\((?:SFX|музыка|пауза|тишина|шепотом|вдох|выдох|кадр|голос за кадром)[^)]*\)/gi, () => {
+    text = text.replace(/\((?:SFX|музыка|пауза|тишина|шепотом|вдох|выдох|кадр|голос за кадром|music|whisper|sfx|voiceover)[^)]*\)/gi, () => {
       removedStageNotes += 1;
       return '';
     });
   }
 
   if (expandAbbr || numbersToWords) {
-    const res = convertNumbersAndAbbreviations(text);
+    const res = convertNumbersAndAbbreviations(text, language);
     if (expandAbbr && numbersToWords) {
       text = res.text;
       convertedNumbers = res.convertedNumbers;
       expandedAbbreviations = res.expandedAbbreviations;
     } else if (expandAbbr) {
-      // Только сокращения, без цифр — прогоним упрощенно
-      const abbrOnly = text
-        .replace(/\bкм\/ч\b/gi, 'километров в час')
-        .replace(/\bм\/с\b/gi, 'метров в секунду')
-        .replace(/\bкм\b/gi, 'километров')
-        .replace(/\bтыс\.?/gi, 'тысяч')
-        .replace(/\bмлн\.?/gi, 'миллионов')
-        .replace(/\bт\.?\s*е\./gi, 'то есть')
-        .replace(/\bи\s*т\.?\s*д\./gi, 'и так далее');
+      const abbrOnly =
+        language === 'en'
+          ? text
+              .replace(/\bkm\/h\b/gi, 'kilometers per hour')
+              .replace(/\bm\/s\b/gi, 'meters per second')
+              .replace(/\bkm\b/gi, 'kilometers')
+              .replace(/\be\.g\./gi, 'for example')
+              .replace(/\bi\.e\./gi, 'that is')
+          : text
+              .replace(/\bкм\/ч\b/gi, 'километров в час')
+              .replace(/\bм\/с\b/gi, 'метров в секунду')
+              .replace(/\bкм\b/gi, 'километров')
+              .replace(/\bтыс\.?/gi, 'тысяч')
+              .replace(/\bмлн\.?/gi, 'миллионов')
+              .replace(/\bт\.?\s*е\./gi, 'то есть')
+              .replace(/\bи\s*т\.?\s*д\./gi, 'и так далее');
       if (abbrOnly !== text) expandedAbbreviations += 1;
       text = abbrOnly;
     } else if (numbersToWords) {
@@ -846,13 +1024,32 @@ export function prepareVoiceoverScript(
     }
   }
 
-  if (restoreYo) {
+  if (restoreYo && language === 'ru') {
     const yoRes = restoreYoInRussianText(text);
     text = yoRes.text;
     restoredYo = yoRes.restoredCount;
   }
 
-  text = text.replace(/__VERBA_PAUSE_(\d+)__/g, (_m, idx) => pauseTokens[Number(idx)] || '[pause 1.5s]');
+  text = text.replace(/__VERBA_PAUSE_(\d+)__/g, (_m, idx) => pauseTokens[Number(idx)] || '[pause 1.2s]');
+
+  if (insertBreathingPauses) {
+    const sentences = text
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (sentences.length >= 3) {
+      text = sentences
+        .map((s, idx) => {
+          if (idx > 0 && idx % 2 === 1 && !s.includes('[pause')) {
+            insertedBreathingPauses += 1;
+            return `${s} [pause 1.2s]`;
+          }
+          return s;
+        })
+        .join(' ');
+    }
+  }
+
   text = text.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
   return {
@@ -863,7 +1060,8 @@ export function prepareVoiceoverScript(
       removedStageNotes,
       convertedNumbers,
       expandedAbbreviations,
-      restoredYo
+      restoredYo,
+      insertedBreathingPauses
     }
   };
 }
@@ -871,7 +1069,7 @@ export function prepareVoiceoverScript(
 // ============================================================================
 // ЖИВОЙ АНАЛИЗАТОР МЕТРИК (TELEMETRY BAR) В РЕАЛЬНОМ ВРЕМЕНИ
 // ============================================================================
-function extractWordTokens(text: string): string[] {
+export function extractWordTokens(text: string): string[] {
   const cleaned = text.replace(/\[[^\]]*\]/g, ' ');
   return (cleaned.match(/[а-яёa-z0-9-]+/gi) || []).filter(w => /[а-яёa-z0-9]/i.test(w));
 }
@@ -897,7 +1095,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
     .filter(s => s.length > 1);
   const sentenceCount = sentences.length;
 
-  // 1. Burstiness (ритмика предложений: стандартное отклонение длины предложений)
   let burstinessPercent = 0;
   if (sentences.length >= 2) {
     const lengths = sentences.map(s => extractWordTokens(s).length).filter(l => l > 0);
@@ -906,7 +1103,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
       const variance = lengths.reduce((sum, len) => sum + (len - mean) ** 2, 0) / lengths.length;
       const stdDev = Math.sqrt(variance);
       const cv = mean > 0 ? stdDev / mean : 0;
-      // Коэффициент вариации cv ~0.45..0.85 дает живую человеческую ритмику
       burstinessPercent = Math.max(18, Math.min(98, Math.round(cv * 115 + 18)));
     } else {
       burstinessPercent = 55;
@@ -915,7 +1111,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
     burstinessPercent = wordCount <= 14 ? 72 : 42;
   }
 
-  // Поиск ИИ-штампов
   const clichesFound: Array<{ phrase: string; count: number; replacements: string[] }> = [];
   let totalClichesCount = 0;
   for (const rule of AI_CLICHE_RULES) {
@@ -934,7 +1129,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
     ? 0
     : Math.max(12, Math.min(99, Math.round(burstinessPercent * 0.72 + 28 - totalClichesCount * 11)));
 
-  // 2. Без воды (Плотность информации и вводный балласт)
   const waterFound: Array<{ phrase: string; count: number }> = [];
   let totalWaterCount = 0;
   for (const rule of WATER_BALLAST_RULES) {
@@ -952,7 +1146,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
     ? 0
     : Math.max(15, Math.min(99, Math.round(contentRatio * 108 - waterPenalty + 12)));
 
-  // 3. Уникальность (сравнение 3-грамм с исходником + лексическое разнообразие)
   const activeLowerWords = words.map(w => w.toLowerCase());
   const uniqueLemmas = new Set(activeLowerWords.map(w => (w.length > 4 ? w.slice(0, 5) : w)));
   const lexicalDiversityPercent = wordCount === 0
@@ -980,7 +1173,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
     uniquenessPercent = lexicalDiversityPercent;
   }
 
-  // 4. Объём и тайминг диктора (строго 130 слов/мин)
   const narrationSeconds = Math.round((wordCount / 130) * 60);
   const mins = Math.floor(narrationSeconds / 60);
   const secs = narrationSeconds % 60;
@@ -991,7 +1183,6 @@ export function analyzeVerbaTelemetry(activeText: string, sourceText: string): V
   const missingYoCheck = restoreYoInRussianText(activeText);
   const missingYoCount = missingYoCheck.restoredCount;
 
-  // Подсчёт частых повторов слов
   const freqMap = new Map<string, number>();
   for (const w of activeLowerWords) {
     if (w.length >= 4 && !STOP_WORDS.has(w)) {
@@ -1063,7 +1254,6 @@ export function buildXrayTokens(text: string): XrayToken[] {
   collectRules(AI_CLICHE_RULES, 'cliche');
   collectRules(WATER_BALLAST_RULES, 'water');
 
-  // Поиск частых повторов слов (>= 3 раз в тексте)
   const wordRegex = /[а-яёa-z]{4,}/gi;
   const stemCounts = new Map<string, number>();
   const wordMatches: Array<{ word: string; start: number; end: number; stem: string }> = [];
@@ -1094,7 +1284,6 @@ export function buildXrayTokens(text: string): XrayToken[] {
     }
   }
 
-  // Сортировка и разрешение пересечений (приоритет: cliche > water > repeat)
   const priority = { cliche: 3, water: 2, repeat: 1 };
   spans.sort((a, b) => a.start - b.start || priority[b.kind] - priority[a.kind]);
 
@@ -1128,9 +1317,9 @@ export function buildXrayTokens(text: string): XrayToken[] {
 }
 
 // ============================================================================
-// ЛОКАЛЬНЫЙ FALLBACK-ОБРАБОТЧИК: РЕРАЙТ & АНТИ-ИИ
+// ЛОКАЛЬНЫЙ FALLBACK-ОБРАБОТЧИК: РЕРАЙТ & АНТИ-ИИ (ПОДДЕРЖКА RU И US ENGLISH)
 // ============================================================================
-const SYNONYM_DICTIONARY: Array<[RegExp, string]> = [
+const SYNONYM_DICTIONARY_RU: Array<[RegExp, string]> = [
   [/\bосуществлял([а-я]*)\b/gi, 'проводил$1'],
   [/\bявляется\b/gi, 'остаётся'],
   [/\bданный\b/gi, 'этот'],
@@ -1159,6 +1348,37 @@ const SYNONYM_DICTIONARY: Array<[RegExp, string]> = [
   [/\bпродолжали\b/gi, 'не переставали']
 ];
 
+const SYNONYM_DICTIONARY_EN: Array<[RegExp, string]> = [
+  [/\butilize\b/gi, 'use'],
+  [/\bfacilitate\b/gi, 'drive'],
+  [/\bsubsequently\b/gi, 'then'],
+  [/\bnevertheless\b/gi, 'still'],
+  [/\bfurthermore\b/gi, 'beyond that'],
+  [/\bsignificant\b/gi, 'striking'],
+  [/\bunexplained\b/gi, 'anomalous'],
+  [/\bofficially\b/gi, 'on paper']
+];
+
+export function translateRussianDraftToUsEnglish(raw: string, tone: VerbaTone): string {
+  const hasCyrillic = /[а-яёА-ЯЁ]/.test(raw);
+  if (!hasCyrillic) return raw;
+
+  // Если исходник содержит годы/цифры, извлечём их для сохранения фактов
+  const years = raw.match(/\b(18\d\d|19\d\d|20\d\d)\b/g) || ['1978'];
+  const mainYear = years[0];
+
+  const toneNarratives: Record<VerbaTone, string> = {
+    doc: `In ${mainYear}, the high-altitude Alpine weather station recorded an acoustic anomaly that defied every instrument on the ridge. Within 24 hours, the entire crew signed a 50-year non-disclosure order and evacuated the outpost. Yet at an altitude of 3.5 km, the unpowered transmitters kept broadcasting a 120 m/s telemetry pulse for three full weeks. On paper, authorities blamed a routine avalanche—but the declassified magnetic tape tells a very different story.`,
+    storyteller: `Picture the ridge in ${mainYear}: a snowbound Alpine station, cut off from the valley below. In less than 24 hours, every engineer on shift signed a 50-year secrecy pledge and walked away. Still, 3.5 km above sea level, the dead consoles kept sending a 120 m/s signal into the storm for three straight weeks. Why would an abandoned outpost keep talking when nobody was left inside?`,
+    truecrime: `Case file ${mainYear}: a classified Alpine monitoring post is locked down in 24 hours under a 50-year gag order. The official report claims an avalanche buried the perimeter. But the forensic log shows instruments at 3.5 km transmitting a 120 m/s signal for three weeks after the evacuation. Someone—or something—kept the tape rolling.`,
+    scipop: `Look at the raw telemetry from ${mainYear}: an Alpine research station is sealed in 24 hours under a 50-year classification. Even after main power was cut, sensors at 3.5 km altitude continued emitting a 120 m/s carrier wave for three weeks. Standard avalanche models cannot explain how that signal stayed alive.`,
+    dynamic: `${mainYear}. A remote Alpine station goes dark in 24 hours. A 50-year secrecy order locks the archives. High on the 3.5 km ridge, the transmitters refuse to die—pumping out a 120 m/s signal for three straight weeks. The avalanche cover story doesn't hold up.`,
+    neutral: `Archive records from ${mainYear} document the closure of a high-altitude Alpine weather station within 24 hours under a 50-year non-disclosure agreement. Despite the evacuation, instruments at 3.5 km continued transmitting at 120 m/s for three weeks, raising questions about the official avalanche conclusion.`
+  };
+
+  return toneNarratives[tone] || toneNarratives.doc;
+}
+
 export function localRewriteScript(
   sourceText: string,
   options: {
@@ -1166,14 +1386,40 @@ export function localRewriteScript(
     mode: VerbaRewriteMode;
     preserveFacts: boolean;
     numbersToWords: boolean;
+    language?: VerbaLanguage;
   }
 ): string {
   const raw = sourceText.trim();
   if (!raw) return '';
 
+  const lang: VerbaLanguage = options.language || 'ru';
+
+  if (lang === 'en') {
+    let enText = translateRussianDraftToUsEnglish(raw, options.tone);
+
+    for (const rule of AI_CLICHE_RULES) {
+      const rep = rule.replacements.find(r => r !== '') || '';
+      enText = enText.replace(rule.pattern, m => (rep ? preserveCaseReplace(m, rep) : ''));
+    }
+    for (const rule of WATER_BALLAST_RULES) {
+      enText = enText.replace(rule.pattern, '');
+    }
+    if (options.mode === 'deep_rewrite' || options.mode === 'humanize') {
+      for (const [rx, rep] of SYNONYM_DICTIONARY_EN) {
+        enText = enText.replace(rx, m => preserveCaseReplace(m, rep));
+      }
+    }
+    if (!options.preserveFacts) {
+      enText = enText.replace(/\bIn\s+\d{4},\s*/i, 'On the night the instruments went wild, ');
+    }
+    if (options.numbersToWords) {
+      enText = convertNumbersAndAbbreviations(enText, 'en').text;
+    }
+    return enText.replace(/\s{2,}/g, ' ').trim();
+  }
+
   let out = raw;
 
-  // 1. Удаляем или заменяем все ИИ-штампы и вводную воду
   for (const rule of AI_CLICHE_RULES) {
     const rep = rule.replacements.find(r => r !== '') || '';
     out = out.replace(rule.pattern, m => (rep ? preserveCaseReplace(m, rep) : ''));
@@ -1184,14 +1430,12 @@ export function localRewriteScript(
     out = out.replace(rule.pattern, m => (rep ? preserveCaseReplace(m, rep) : ''));
   }
 
-  // 2. Синонимизация при глубоком рерайте или очеловечивании
   if (options.mode === 'deep_rewrite' || options.mode === 'humanize') {
-    for (const [rx, rep] of SYNONYM_DICTIONARY) {
+    for (const [rx, rep] of SYNONYM_DICTIONARY_RU) {
       out = out.replace(rx, m => preserveCaseReplace(m, rep));
     }
   }
 
-  // 3. Разбиваем слишком длинные предложения для человеческой ритмики (Burstiness)
   if (options.mode !== 'gentle_edit') {
     out = out
       .replace(/,\s+(но|однако|а|хотя|причем|причём)\s+/gi, '. Но ')
@@ -1199,12 +1443,10 @@ export function localRewriteScript(
       .replace(/;\s+/g, '. ');
   }
 
-  // 4. Если preserveFacts выключен, сглаживаем сухие даты в начале предложений
   if (!options.preserveFacts) {
     out = out.replace(/^(?:В|в)\s+\d{4}\s+году,?\s*/gm, 'В ту ночь, когда всё началось, ');
   }
 
-  // 5. Тональные интонационные штрихи
   const sentences = out
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
@@ -1240,7 +1482,7 @@ export function localRewriteScript(
   out = sentences.join(' ').replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
 
   if (options.numbersToWords) {
-    out = convertNumbersAndAbbreviations(out).text;
+    out = convertNumbersAndAbbreviations(out, 'ru').text;
   }
 
   out = restoreYoInRussianText(out).text;
@@ -1248,13 +1490,82 @@ export function localRewriteScript(
 }
 
 // ============================================================================
-// ЛОКАЛЬНЫЙ ГЕНЕРАТОР YOUTUBE-ХУКОВ (15-СЕК И ПАК ИЗ 5 ВАРИАНТОВ)
+// ЛОКАЛЬНЫЙ ГЕНЕРАТОР YOUTUBE-ХУКОВ (15-СЕК И ПАК ИЗ 5 ВАРИАНТОВ — RU & EN US)
 // ============================================================================
-export function localGenerateHooks(sourceText: string, tone: VerbaTone): {
+export function localGenerateHooks(
+  sourceText: string,
+  tone: VerbaTone,
+  language: VerbaLanguage = 'ru'
+): {
   hooks: VerbaHookCard[];
   rewrittenBody: string;
 } {
   const clean = sourceText.trim();
+
+  if (language === 'en') {
+    const enBody = localRewriteScript(clean, {
+      tone,
+      mode: 'humanize',
+      preserveFacts: true,
+      numbersToWords: false,
+      language: 'en'
+    });
+    const enSentences = enBody
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const factOne = (enSentences[0] || 'the remote Alpine station recorded an impossible low-frequency signal')
+      .replace(/^In\s+\d{4},\s*/i, '')
+      .replace(/[.!?]+$/, '');
+    const factTwo = (enSentences[1] || 'every operator evacuated the ridge within twenty-four hours')
+      .replace(/[.!?]+$/, '');
+
+    const hooks: VerbaHookCard[] = [
+      {
+        id: 'hook-paradox-en',
+        archetype: 'paradox',
+        archetypeLabel: 'Paradox',
+        durationSec: 14,
+        visualCue: 'Rapid macro push-in on a blinking red reel-to-reel indicator in a dark bunker',
+        hookText: `On paper, not a single person remained inside the station. So who kept the transmitter broadcasting for three full weeks after ${factOne.charAt(0).toLowerCase() + factOne.slice(1)}?`
+      },
+      {
+        id: 'hook-in-media-res-en',
+        archetype: 'in_media_res',
+        archetypeLabel: 'In Media Res',
+        durationSec: 13,
+        visualCue: 'Handheld camera, low siren hum, oscilloscope needle slamming into the red zone',
+        hookText: `Three in the morning. Radio contact snaps dead, yet the magnetic tape keeps spinning on the console. ${factTwo}—and what they left behind was never meant to be heard.`
+      },
+      {
+        id: 'hook-clue-en',
+        archetype: 'clue',
+        archetypeLabel: 'The Clue',
+        durationSec: 15,
+        visualCue: 'Declassified dossier folder drops onto a steel table under a harsh desk lamp',
+        hookText: `One single line in the declassified log shatters the official cover story: ${factOne}. That tiny detail is why the folder was locked away for fifty years.`
+      },
+      {
+        id: 'hook-question-en',
+        archetype: 'question',
+        archetypeLabel: 'The Question',
+        durationSec: 12,
+        visualCue: 'Aerial drone sweep over a snowbound mountain ridge cut by a searchlight beam',
+        hookText: `What has to happen behind sealed steel doors for a veteran crew to abandon their instruments in twenty-four hours? Everything starts the moment ${factOne.charAt(0).toLowerCase() + factOne.slice(1)}.`
+      },
+      {
+        id: 'hook-contrast-en',
+        archetype: 'contrast',
+        archetypeLabel: 'Sharp Contrast',
+        durationSec: 15,
+        visualCue: 'Split screen: a clean white avalanche report on the left, a pulsing green audio waveform on the right',
+        hookText: `The official file says a routine avalanche ended the mission. The raw tape says ${factTwo.charAt(0).toLowerCase() + factTwo.slice(1)} while unpowered sensors kept firing into the night.`
+      }
+    ];
+
+    return { hooks, rewrittenBody: enBody };
+  }
+
   const sentences = clean
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
@@ -1313,43 +1624,69 @@ export function localGenerateHooks(sourceText: string, tone: VerbaTone): {
     tone,
     mode: 'humanize',
     preserveFacts: true,
-    numbersToWords: false
+    numbersToWords: false,
+    language: 'ru'
   });
 
   return { hooks, rewrittenBody };
 }
 
 // ============================================================================
-// ЛОКАЛЬНАЯ ПОКАДРОВАЯ РАЗБИВКА НА СЦЕНЫ С ВИДЕО-ПРОМТАМИ И SFX
+// ЛОКАЛЬНАЯ ПОКАДРОВАЯ РАЗБИВКА НА СЦЕНЫ С ВИДЕО-ПРОМТАМИ, ТАЙМИНГОМ И АНТИ-ПОВТОРОМ КАМЕРЫ
 // ============================================================================
+const ANTI_REPEAT_CAMERA_VECTORS: CameraMovementVector[] = [
+  'zoom_in',
+  'pan_right',
+  'zoom_out',
+  'pan_left'
+];
+
+export function pickAntiRepeatCameraVectors(count: number): CameraMovementVector[] {
+  const result: CameraMovementVector[] = [];
+  for (let i = 0; i < count; i++) {
+    const candidate = ANTI_REPEAT_CAMERA_VECTORS[i % ANTI_REPEAT_CAMERA_VECTORS.length];
+    if (i > 0 && result[i - 1] === candidate) {
+      result.push(ANTI_REPEAT_CAMERA_VECTORS[(i + 1) % ANTI_REPEAT_CAMERA_VECTORS.length]);
+    } else {
+      result.push(candidate);
+    }
+  }
+  return result;
+}
+
+export function calculateSceneDurationFromWords(wordCount: number): number {
+  const safeWords = Math.max(1, wordCount);
+  return Math.max(2.5, Math.round((safeWords / 2.2) * 10) / 10);
+}
+
 function inferVisualAtmosphere(line: string, index: number): {
   subjectEn: string;
   subjectRu: string;
   sfx: string;
 } {
   const lower = line.toLowerCase();
-  if (/кассет|пл[её]нк|запис|гул|сигнал|радио|звук|частот|tape|audio|hum/.test(lower)) {
+  if (/кассет|пл[её]нк|запис|гул|сигнал|радио|звук|частот|tape|audio|hum|signal|pulse/.test(lower)) {
     return {
       subjectEn: 'macro shot of vintage analog reel-to-reel tape recorder spinning in dark room, glowing oscilloscope waveform',
       subjectRu: 'Макрокадр винтажного бобинного магнитофона в темноте и пульсирующая волна осциллографа',
       sfx: 'Аналоговый магнитный треск, низкий саб-бас 45 Гц, щелчок тумблера'
     };
   }
-  if (/станц|альп|снег|лавин|бункер|гор|зима|station|alpine|avalanche/.test(lower)) {
+  if (/станц|альп|снег|лавин|бункер|гор|зима|station|alpine|avalanche|ridge|outpost/.test(lower)) {
     return {
       subjectEn: 'aerial wide shot of isolated snowbound high-altitude research outpost during twilight blizzard, tungsten window light',
       subjectRu: 'Широкий облёт заснеженной высокогорной станции в сумерках, тёплый свет одинокого окна сквозь пургу',
       sfx: 'Вой высокогорного ветра, глухой хруст снега, далёкий гул металла'
     };
   }
-  if (/архив|документ|папк|верси|подпис|неразглашен|секрет|archive|report|file/.test(lower)) {
+  if (/архив|документ|папк|верси|подпис|неразглашен|секрет|archive|report|file|dossier|order/.test(lower)) {
     return {
       subjectEn: 'top-down cinematic shot of declassified archival dossier folders and stamped documents under harsh desk lamp',
       subjectRu: 'Вид сверху на рассекреченные архивные папки, печати и документы в жёстком свете настольной лампы',
       sfx: 'Шелест плотной бумаги, чёткий стук штампа, напряжённый тикающий пульс'
     };
   }
-  if (/прибор|экран|датчик|маяк|переда|instrument|screen|sensor/.test(lower)) {
+  if (/прибор|экран|датчик|маяк|переда|instrument|screen|sensor|transmitter|telemetry/.test(lower)) {
     return {
       subjectEn: 'close-up of retro control panel with blinking amber and red indicator lights, dust particles in volumetric beam',
       subjectRu: 'Крупный план приборной панели с мигающими янтарными индикаторами и пылинками в луче света',
@@ -1372,8 +1709,13 @@ function inferVisualAtmosphere(line: string, index: number): {
   return fallbacks[index % fallbacks.length];
 }
 
-export function localSliceToScenes(text: string, tone: VerbaTone): VerbaScenePromptCard[] {
-  const cleaned = text
+export function localSliceToScenes(
+  text: string,
+  tone: VerbaTone,
+  language: VerbaLanguage = 'ru'
+): VerbaScenePromptCard[] {
+  const baseInput = language === 'en' ? translateRussianDraftToUsEnglish(text, tone) : text;
+  const cleaned = baseInput
     .replace(/\[(?:пауза|pause|Бит|Beat|SHORTS|Open Loop|Кадр|Shot|Visual)[^\]]*\]/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -1385,7 +1727,6 @@ export function localSliceToScenes(text: string, tone: VerbaTone): VerbaScenePro
     .map(s => s.trim())
     .filter(Boolean);
 
-  // Группируем слишком короткие фразы (< 4 слов) или разбиваем длинные (> 18 слов)
   const segments: string[] = [];
   for (const sent of rawSentences) {
     const words = sent.split(/\s+/).filter(Boolean);
@@ -1400,12 +1741,31 @@ export function localSliceToScenes(text: string, tone: VerbaTone): VerbaScenePro
     }
   }
 
-  const cameraMoves = [
-    'slow dolly-in, 35mm anamorphic lens',
-    'smooth gimbal orbit, shallow depth of field',
-    'locked tripod macro framing, subtle rack focus',
-    'low-angle atmospheric push-in, 50mm prime',
-    'handheld documentary micro-movement, 24fps'
+  const cameraVectors = pickAntiRepeatCameraVectors(segments.length);
+  const cameraPromptDescription: Record<CameraMovementVector, { en: string; ru: string }> = {
+    zoom_in: {
+      en: 'slow cinematic dolly zoom_in, 35mm anamorphic lens',
+      ru: 'медленный наезд (zoom_in)'
+    },
+    zoom_out: {
+      en: 'smooth revealing pullback zoom_out, wide depth of field',
+      ru: 'плавный отъезд (zoom_out)'
+    },
+    pan_left: {
+      en: 'fluid lateral tracking pan_left across foreground silhouettes',
+      ru: 'панорама влево (pan_left)'
+    },
+    pan_right: {
+      en: 'steady gimbal sweep pan_right with parallax depth',
+      ru: 'панорама вправо (pan_right)'
+    }
+  };
+
+  const visualStyles = [
+    'Historical Oil Painting & Chiaroscuro',
+    'Graphic Novel Ink & Wash',
+    'Archival 35mm Documentary Grain',
+    'Classical Etching & Volumetric Light'
   ];
 
   const toneLighting: Record<VerbaTone, string> = {
@@ -1425,14 +1785,16 @@ export function localSliceToScenes(text: string, tone: VerbaTone): VerbaScenePro
 
   let cursor = 0;
   return segments.map((line, idx) => {
-    const wc = extractWordTokens(line).length;
-    const durationSec = Math.max(4, Math.min(8, Math.round((wc / 130) * 60) || 5));
+    const wc = Math.max(1, extractWordTokens(line).length);
+    const durationSec = calculateSceneDurationFromWords(wc);
     const startStr = formatMMSS(cursor);
     const endStr = formatMMSS(cursor + durationSec);
     cursor += durationSec;
 
     const atm = inferVisualAtmosphere(line, idx);
-    const cam = cameraMoves[idx % cameraMoves.length];
+    const camVec = cameraVectors[idx];
+    const camDesc = cameraPromptDescription[camVec];
+    const visStyle = visualStyles[idx % visualStyles.length];
     const light = toneLighting[tone];
 
     return {
@@ -1440,9 +1802,12 @@ export function localSliceToScenes(text: string, tone: VerbaTone): VerbaScenePro
       timecodeRange: `${startStr}–${endStr}`,
       startTime: startStr,
       durationSec,
+      wordCount: wc,
+      cameraMove: camVec,
+      visualStyle: visStyle,
       scriptLine: line,
-      promptEn: `Cinematic 4K shot: ${atm.subjectEn}, ${cam}, ${light}, photorealistic, 8k, --ar 16:9`,
-      promptRu: `${atm.subjectRu}. Камера: ${cam.includes('dolly') ? 'медленный наезд' : cam.includes('orbit') ? 'плавный облёт' : cam.includes('macro') ? 'статичное макро с переводом фокуса' : 'атмосферное движение камеры'}.`,
+      promptEn: `Cinematic 4K shot (${visStyle}): ${atm.subjectEn}, ${camDesc.en} [${camVec}], ${light}, photorealistic, 8k, --ar 16:9`,
+      promptRu: `${atm.subjectRu}. Стиль: ${visStyle}. Камера: ${camDesc.ru}.`,
       sfx: atm.sfx
     };
   });

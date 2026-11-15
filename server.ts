@@ -119,7 +119,7 @@ Requirements:
         return;
       }
 
-      const { action, text, tone, mode, preserveFacts, numbersToWords, hookStyle } = req.body as {
+      const { action, text, tone, mode, preserveFacts, numbersToWords, hookStyle, language } = req.body as {
         action?: 'rewrite' | 'hooks' | 'scenes';
         text?: string;
         tone?: string;
@@ -127,8 +127,10 @@ Requirements:
         preserveFacts?: boolean;
         numbersToWords?: boolean;
         hookStyle?: string;
+        language?: 'ru' | 'en';
       };
 
+      const targetLang = language === 'en' ? 'en' : 'ru';
       const cleanText = (text || '').trim().slice(0, 6000);
       if (!cleanText) {
         res.status(400).json({ ok: false, error: 'Empty text payload' });
@@ -138,7 +140,21 @@ Requirements:
       const ai = getGenAIClient();
 
       if (action === 'rewrite') {
-        const prompt = `Ты опытный шеф-редактор документальных и YouTube-сценариев. Переработай исходный текст на естественном русском языке, полностью убирая ИИ-штампы («в современном мире», «не секрет, что», «играет ключевую роль», «стоит отметить», «важно понимать», «таким образом») и вводный балласт («на сегодняшний день», «как известно», «безусловно», «на самом деле»).
+        const prompt =
+          targetLang === 'en'
+            ? `You are a veteran US documentary and YouTube script editor. Rewrite the input text into natural, compelling US English ready for voiceover.
+Eliminate all AI clichés ("in today's world", "it is no secret that", "plays a crucial role", "it is worth noting", "in conclusion") and filler words ("as is well known", "basically", "at the end of the day").
+Vary sentence length for high human burstiness.
+
+Parameters:
+- Tone: ${tone || 'doc'}
+- Rewrite mode: ${mode || 'humanize'}
+- Preserve 100% of facts (names, dates, context numbers): ${preserveFacts ? 'YES, keep every fact intact' : 'Dramatize dates if helpful'}
+- Convert all numbers, years, and percentages into natural US English words (e.g. 1978 -> nineteen seventy-eight): ${numbersToWords ? 'YES, spell out every number and year' : 'NO, digits allowed'}
+
+Source text:
+${cleanText}`
+            : `Ты опытный шеф-редактор документальных и YouTube-сценариев. Переработай исходный текст на естественном русском языке, полностью убирая ИИ-штампы («в современном мире», «не секрет, что», «играет ключевую роль», «стоит отметить», «важно понимать», «таким образом») и вводный балласт («на сегодняшний день», «как известно», «безусловно», «на самом деле»).
 Чередуй длину предложений для высокой ритмики (Burstiness). Восстанови букву «ё».
 
 Параметры:
@@ -171,7 +187,15 @@ ${cleanText}`;
       }
 
       if (action === 'hooks') {
-        const prompt = `Ты сценарист удержания внимания для YouTube. На основе текста создай:
+        const prompt =
+          targetLang === 'en'
+            ? `You are a YouTube retention scriptwriter. Based on the input text, generate STRICTLY IN NATURAL US ENGLISH:
+1) A pack of 5 high-retention 12-15 second hooks following these exact archetypes: paradox, in_media_res, clue, question, contrast. No greetings or dry openings.
+2) A rewritten main script body in natural US English with tone "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), ready to attach right after the hook.
+
+Input text:
+${cleanText}`
+            : `Ты сценарист удержания внимания для YouTube. На основе текста создай:
 1) Пак из 5 цепляющих 12-15 секундных хуков на русском языке строго по архетипам: paradox (парадокс), in_media_res (In Media Res), clue (улика), question (вопрос), contrast (контраст). Без приветствий и скучных дат.
 2) Переделанный основной сценарий в тональности "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), готовый для присоединения к хуку.
 
@@ -213,19 +237,13 @@ ${cleanText}`;
       }
 
       if (action === 'scenes') {
-        const prompt = `Разбей сценарий на покадровые сцены длительностью 4–7 секунд каждая для видеогенерации (Kling / Veo / Sora) и саунд-дизайна.
-Для каждой сцены верни:
-- sceneIndex (1, 2, ...)
-- startTime ("00:00", "00:05", ...)
-- timecodeRange ("00:00–00:05")
-- durationSec (целое число 4..8)
-- scriptLine (точная фраза диктора из текста)
-- promptEn (детальный кинематографичный видео-промт на английском: субъект, движение камеры, свет, стиль 4K)
-- promptRu (краткое режиссёрское описание кадра на русском)
-- sfx (конкретная рекомендация по звуковому оформлению и шумам на русском)
+        const prompt = `Break the script into frame-by-frame scenes for video generation (Kling / Veo / Sora) and sound design.
+Script narration language for "scriptLine": ${targetLang === 'en' ? 'Natural US English' : 'Russian'}.
+Calculate each scene's "durationSec" proportional to the word count of "scriptLine" (words / 2.2 seconds, minimum 2.5 seconds).
+Alternate camera movements ("cameraMove") across "zoom_in", "zoom_out", "pan_left", "pan_right" so two consecutive scenes NEVER share the same camera movement.
 
-Тональность: ${tone || 'doc'}
-Сценарий:
+Tone: ${tone || 'doc'}
+Script:
 ${cleanText}`;
 
         const response = await ai.models.generateContent({
@@ -244,7 +262,8 @@ ${cleanText}`;
                       sceneIndex: { type: Type.INTEGER },
                       startTime: { type: Type.STRING },
                       timecodeRange: { type: Type.STRING },
-                      durationSec: { type: Type.INTEGER },
+                      durationSec: { type: Type.NUMBER },
+                      cameraMove: { type: Type.STRING },
                       scriptLine: { type: Type.STRING },
                       promptEn: { type: Type.STRING },
                       promptRu: { type: Type.STRING },

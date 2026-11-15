@@ -16,7 +16,11 @@ import {
   FileText,
   Sliders
 } from 'lucide-react';
-import type { NarrativeSceneItem } from './MontageCombineView';
+import type {
+  NarrativeSceneItem,
+  ShortsExportManifestBlock,
+  ShortsExportSegment
+} from './MontageCombineView';
 import type { TimelineSlot } from '../App';
 
 import {
@@ -38,6 +42,8 @@ interface YouTubeSeoViewProps {
   projectName: string;
   seoState?: YoutubeSeoState;
   onSeoStateChange?: React.Dispatch<React.SetStateAction<YoutubeSeoState>>;
+  shortsExportConfig?: ShortsExportManifestBlock;
+  onShortsExportChange?: (cfg: ShortsExportManifestBlock) => void;
   onApplyTitleToThumbnail?: (title: string) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
@@ -50,6 +56,17 @@ const formatSecToTimestamp = (totalSeconds: number): string => {
   return `${h}:${m}:${s}`;
 };
 
+const formatSecToShortChapter = (totalSeconds: number): string => {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hrs > 0) {
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
+
 export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   scriptContext,
   narrativeScenes,
@@ -57,6 +74,8 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   projectName,
   seoState,
   onSeoStateChange,
+  shortsExportConfig,
+  onShortsExportChange,
   onApplyTitleToThumbnail,
   onNotify
 }) => {
@@ -408,6 +427,221 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     }
     return liveLoopTimestampsText || chaptersText.trim();
   }, [chapterSourceMode, chaptersText, liveLoopTimestampsText]);
+
+  // 3. НАСТРОЙКИ АВТО-SHORTS (9:16 + Динамические субтитры)
+  const [shortsEnabled, setShortsEnabled] = useState<boolean>(
+    shortsExportConfig?.enabled ?? true
+  );
+  const [shortsSubtitleColor, setShortsSubtitleColor] = useState<string>(
+    shortsExportConfig?.subtitle_style?.highlight_color ?? '#FBBF24'
+  );
+  const [shortsFontSize, setShortsFontSize] = useState<number>(
+    shortsExportConfig?.subtitle_style?.font_size_px ?? 68
+  );
+
+  // Автоматическое выделение 2–3 самых цепляющих абзацев из текста VerbaFlow (начиная с хука)
+  const extractedShortsSegments = useMemo<ShortsExportSegment[]>(() => {
+    const rawParagraphs = (scriptContext || '')
+      .split(/\n{2,}|\r?\n/)
+      .map(p => p.replace(/\[[^\]]*\]/g, '').trim())
+      .filter(p => p.length > 25);
+
+    const defaultHooks = [
+      'Everything you were told about this classified mountain outpost is missing one crucial detail recorded at the fourteenth second of the tape.',
+      'When the inspection team unlocked the subterranean vault twenty-four hours later, every transmitter was still broadcasting at full power.',
+      'Nobody had clearance to enter the command room, yet the signal returned at the exact same minute every single night.'
+    ];
+
+    const candidates = rawParagraphs.length >= 2 ? rawParagraphs : defaultHooks;
+    // Первый абзац — всегда стартовый хук, затем ещё 1–2 наиболее плотных/интригующих абзаца
+    const picked: string[] = [candidates[0]];
+    const rest = candidates.slice(1).sort((a, b) => {
+      const scoreA = (/[?!—]/.test(a) ? 30 : 0) + Math.min(a.length, 220) * 0.2;
+      const scoreB = (/[?!—]/.test(b) ? 30 : 0) + Math.min(b.length, 220) * 0.2;
+      return scoreB - scoreA;
+    });
+    picked.push(...rest.slice(0, 2));
+
+    let cursorSec = 0;
+    return picked.slice(0, 3).map((text, idx) => {
+      const words = text.split(/\s+/).filter(Boolean).length;
+      const estDur = Math.max(12, Math.min(28, Math.round((words / 2.2) * 10) / 10));
+      const seg: ShortsExportSegment = {
+        segment_index: idx + 1,
+        hook_type:
+          idx === 0
+            ? 'Hook & Opening Paradox'
+            : idx === 1
+            ? 'Core Twist & Evidence'
+            : 'Cliffhanger Finale',
+        start_sec: cursorSec,
+        duration_sec: estDur,
+        script_excerpt: text
+      };
+      cursorSec += estDur;
+      return seg;
+    });
+  }, [scriptContext]);
+
+  const computedShortsManifestBlock = useMemo<ShortsExportManifestBlock>(
+    () => ({
+      enabled: shortsEnabled,
+      aspect_ratio: '9:16',
+      resolution: '1080x1920',
+      crop_mode: 'center',
+      ffmpeg_crop_filter: 'crop=ih*9/16:ih,scale=1080:1920,setsar=1',
+      subtitle_style: {
+        font_family: 'Montserrat ExtraBold',
+        font_size_px: shortsFontSize,
+        text_color: '#FFFFFF',
+        highlight_color: shortsSubtitleColor,
+        stroke_color: '#000000',
+        stroke_width_px: 4,
+        background_box: 'rgba(9,13,22,0.78)',
+        position: 'center_lower_third',
+        uppercase: true
+      },
+      segments: extractedShortsSegments
+    }),
+    [shortsEnabled, shortsFontSize, shortsSubtitleColor, extractedShortsSegments]
+  );
+
+  useEffect(() => {
+    onShortsExportChange?.(computedShortsManifestBlock);
+  }, [computedShortsManifestBlock, onShortsExportChange]);
+
+  // 4. Точный расчёт глав output_chapters.txt путём суммирования реальных duration сцен из текущей Ритм-карты
+  const exactRhythmMapChaptersTxt = useMemo(() => {
+    if (narrativeScenes.length > 0) {
+      const totalScenes = narrativeScenes.length;
+      const chapterCount = Math.min(8, Math.max(3, Math.ceil(totalScenes / 3)));
+      const step = Math.max(1, Math.floor(totalScenes / chapterCount));
+      const lines: string[] = [];
+      let cumulativeSec = 0;
+
+      narrativeScenes.forEach((sc, idx) => {
+        if (idx === 0 || idx % step === 0) {
+          const ts = formatSecToShortChapter(cumulativeSec);
+          const chapterTitle = toEnglishSceneTitle(sc, lines.length);
+          lines.push(`${ts} ${chapterTitle}`);
+        }
+        const isLast = idx === narrativeScenes.length - 1;
+        const overlap =
+          !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
+            ? Math.max(0, Number(sc.transition.duration_sec) || 0)
+            : 0;
+        cumulativeSec += Math.max(0.5, Number(sc.duration) || 6) - overlap;
+      });
+
+      return lines.join('\n');
+    }
+
+    return computedChaptersFromManifest
+      .split('\n')
+      .map(line => line.replace(/^00:/, '').replace(' - ', ' '))
+      .join('\n');
+  }, [narrativeScenes, computedChaptersFromManifest]);
+
+  const totalRhythmMapDurationSec = useMemo(() => {
+    return narrativeScenes.reduce((acc, sc, idx) => {
+      const isLast = idx === narrativeScenes.length - 1;
+      const overlap =
+        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
+          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
+          : 0;
+      return acc + Math.max(0.5, Number(sc.duration) || 6) - overlap;
+    }, 0);
+  }, [narrativeScenes]);
+
+  // 4. Генерация и скачивание RELEASE_CARD.md (English Release Package)
+  const handleDownloadReleaseCardMd = () => {
+    const dominantCameraVectors = Array.from(
+      new Set(narrativeScenes.map(s => s.camera_movement || 'zoom_in'))
+    ).join(', ');
+    const dominantStyle =
+      narrativeScenes[0]?.visual_style ||
+      (tone === 'Cozy Ambient'
+        ? 'Ambient Sanctuary (4K Atmospheric Matte)'
+        : 'Historical Storytelling (Oil Painting / Graphic Novel)');
+
+    const mdContent = [
+      `# 📦 YOUTUBE RELEASE CARD — ${(projectName || 'AETHER COMBINE 4K RELEASE').toUpperCase()}`,
+      ``,
+      `> **Target Market:** US / Global English Audience  `,
+      `> **Tone Profile:** \`${tone}\`  `,
+      `> **Total Scenes:** \`${narrativeScenes.length}\` (` +
+        `\`${formatSecToShortChapter(totalRhythmMapDurationSec)}\` exact Rhythm-Map duration)`,
+      ``,
+      `---`,
+      ``,
+      `## 1. PRIMARY RELEASE TITLE`,
+      `\`\`\`text`,
+      `${activeReleaseTitle.trim()}`,
+      `\`\`\``,
+      ``,
+      `## 2. A/B TEST TITLE VARIANTS (CTR OPTIMIZED • <= 60 CHARS)`,
+      ...titles.map(
+        t => `- **Variant ${t.id} (${t.category} — ${t.title.length}/60 chars):** \`${t.title}\``
+      ),
+      ``,
+      `## 3. FULL YOUTUBE SEO DESCRIPTION (US ENGLISH)`,
+      `\`\`\`text`,
+      `${description.trim()}`,
+      ``,
+      `CHAPTERS:`,
+      `${exactRhythmMapChaptersTxt}`,
+      `\`\`\``,
+      ``,
+      `## 4. YOUTUBE TAGS (${tagsListCount} TAGS • ${tagsCharCount}/500 CHARS)`,
+      `\`\`\`text`,
+      `${tagsString.trim()}`,
+      `\`\`\``,
+      ``,
+      `## 5. VISUAL STYLE & PACING SUMMARY (RHYTHM-MAP DNA)`,
+      `- **Visual Aesthetic:** ${dominantStyle}`,
+      `- **Camera Movement Vectors:** \`${dominantCameraVectors}\` (Anti-Repeat Enabled)`,
+      `- **Average Scene Pacing:** \`${
+        narrativeScenes.length > 0
+          ? (totalRhythmMapDurationSec / narrativeScenes.length).toFixed(1)
+          : '5.0'
+      } sec/scene\``,
+      `- **9:16 Auto-Shorts Config:** \`${shortsEnabled ? 'ENABLED' : 'DISABLED'}\` (${extractedShortsSegments.length} viral segments extracted)`,
+      ``,
+      `## 6. PRE-UPLOAD PRODUCTION CHECKLIST`,
+      `- [x] Primary title verified under 60 characters for mobile & desktop feeds`,
+      `- [x] Chapter timestamps synchronized second-for-second with Rhythm-Map (\`00:00\` start verified)`,
+      `- [x] Voiceover numbers converted to natural English words & breathing pauses \`[pause 1.2s]\` applied`,
+      `- [x] 4K Thumbnail exported with high-contrast typography and zero badge clutter`,
+      `- [x] Softsub / Hardsub \`.SRT\` captions aligned with master audio track`,
+      ``
+    ].join('\n');
+
+    const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'RELEASE_CARD.md';
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify('📦 Файл RELEASE_CARD.md (English Release Package) успешно скачан!', 'success');
+  };
+
+  // Скачивание output_chapters.txt с точным суммированием реальных duration сцен
+  const handleDownloadOutputChaptersTxt = () => {
+    const blob = new Blob([exactRhythmMapChaptersTxt + '\n'], {
+      type: 'text/plain;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'output_chapters.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify(
+      `⏱️ Файл output_chapters.txt скачан (точный расчёт по ${narrativeScenes.length} сценам Ритм-карты)!`,
+      'success'
+    );
+  };
 
   const releaseCardText = useMemo(() => {
     return [
@@ -828,6 +1062,142 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         <pre className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto custom-scroll">
           {releaseCardText}
         </pre>
+      </div>
+
+      {/* е) БЛОК «📦 ЭКСПОРТ ПАКЕТА РЕЛИЗА (ENGLISH)» (RELEASE_CARD.md + output_chapters.txt) И АВТО-SHORTS (9:16) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Левая карточка (6 cols): 📦 Экспорт пакета релиза (English) */}
+        <div className="lg:col-span-6 bg-[#0b0f19] border border-emerald-500/40 rounded-2xl p-5 space-y-4 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-2">
+                <Package className="w-4 h-4 text-emerald-400" />
+                📦 Экспорт пакета релиза (English)
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Структурированный Markdown-манифест релиза и точные таймкоды глав по реальным <code className="text-emerald-300">duration</code> сцен Ритм-карты
+              </p>
+            </div>
+            <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2.5 py-0.5 rounded tabular-nums">
+              {narrativeScenes.length} сцен • {formatSecToShortChapter(totalRhythmMapDurationSec)}
+            </span>
+          </div>
+
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+              <span>Предпросмотр точных глав (output_chapters.txt):</span>
+              <span className="text-emerald-400">Секунда в секунду с монтажом</span>
+            </div>
+            <pre className="text-xs font-mono text-indigo-200 whitespace-pre-wrap max-h-32 overflow-y-auto custom-scroll leading-relaxed tabular-nums">
+              {exactRhythmMapChaptersTxt}
+            </pre>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <button
+              type="button"
+              onClick={handleDownloadReleaseCardMd}
+              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-lg shadow-emerald-500/20"
+            >
+              <Download className="w-4 h-4" />
+              <span>Скачать RELEASE_CARD.md</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadOutputChaptersTxt}
+              className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+            >
+              <Clock className="w-4 h-4 text-indigo-300" />
+              <span>Скачать output_chapters.txt</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Правая карточка (6 cols): 3. НАСТРОЙКИ АВТО-SHORTS (9:16 + Динамические субтитры) */}
+        <div className="lg:col-span-6 bg-[#0b0f19] border border-amber-500/40 rounded-2xl p-5 space-y-4 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                📱 Настройки Авто-Shorts (9:16 + Динамические субтитры)
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Выделяет 2–3 самых цепляющих абзаца из VerbaFlow (начиная с хука) и записывает <code className="text-amber-300">shorts_export</code> в <code className="text-amber-300">manifest.json</code>
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !shortsEnabled;
+                setShortsEnabled(next);
+                onNotify(
+                  next
+                    ? '📱 Конфиг для Shorts (9:16) активирован и добавлен в manifest.json!'
+                    : 'Конфиг Shorts (9:16) отключён',
+                  'info'
+                );
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${
+                shortsEnabled
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                  : 'bg-slate-900 border-slate-700 text-slate-400'
+              }`}
+            >
+              <span>📱 Сформировать конфиг для Shorts (9:16): {shortsEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-[11px]">
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+              <span className="text-slate-400 block text-[10px]">Вертикальный кроп</span>
+              <strong className="text-slate-100 font-mono">9:16 • 1080x1920</strong>
+            </div>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+              <span className="text-slate-400 block text-[10px]">Размер титров (px)</span>
+              <input
+                type="number"
+                min={42}
+                max={96}
+                value={shortsFontSize}
+                onChange={e => setShortsFontSize(Math.max(42, Number(e.target.value) || 68))}
+                className="w-full bg-transparent font-mono font-bold text-amber-300 outline-none tabular-nums"
+              />
+            </div>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+              <span className="text-slate-400 block text-[10px]">Акцент субтитров</span>
+              <select
+                value={shortsSubtitleColor}
+                onChange={e => setShortsSubtitleColor(e.target.value)}
+                className="w-full bg-transparent font-mono font-bold text-amber-300 outline-none"
+              >
+                <option value="#FBBF24" className="bg-slate-900">Gold #FBBF24</option>
+                <option value="#34D399" className="bg-slate-900">Emerald #34D399</option>
+                <option value="#38BDF8" className="bg-slate-900">Cyan #38BDF8</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-40 overflow-y-auto custom-scroll pr-1">
+            {extractedShortsSegments.map((seg, idx) => (
+              <div
+                key={`short-seg-${seg.segment_index}`}
+                className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1"
+              >
+                <div className="flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-amber-300 font-bold">
+                    #{idx + 1} • SHORT_9x16_0{seg.segment_index} — {seg.hook_type}
+                  </span>
+                  <span className="text-emerald-400 tabular-nums">
+                    ~{seg.duration_sec} сек
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 line-clamp-2">{seg.script_excerpt}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

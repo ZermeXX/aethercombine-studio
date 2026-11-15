@@ -42,6 +42,42 @@ import {
   toEnglishSceneTitle
 } from '../utils/englishExport';
 
+export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
+
+export type CinematicOverlayId =
+  | 'ambient_particles'
+  | 'cinematic_film_grain'
+  | 'historical_lower_thirds'
+  | 'warm_glow';
+
+export interface ShortsExportSegment {
+  segment_index: number;
+  hook_type: string;
+  start_sec: number;
+  duration_sec: number;
+  script_excerpt: string;
+}
+
+export interface ShortsExportManifestBlock {
+  enabled: boolean;
+  aspect_ratio: '9:16';
+  resolution: '1080x1920';
+  crop_mode: 'center';
+  ffmpeg_crop_filter: string;
+  subtitle_style: {
+    font_family: string;
+    font_size_px: number;
+    text_color: string;
+    highlight_color: string;
+    stroke_color: string;
+    stroke_width_px: number;
+    background_box: string;
+    position: 'center_lower_third' | 'center';
+    uppercase: boolean;
+  };
+  segments: ShortsExportSegment[];
+}
+
 export interface NarrativeSceneItem {
   scene_index: number;
   scene_id: string;
@@ -49,6 +85,10 @@ export interface NarrativeSceneItem {
   file_name: string;
   start_time: string | number;
   duration: number;
+  camera_movement?: CameraVectorType;
+  visual_style?: string;
+  needs_revision?: boolean;
+  revision_note?: string;
   transition: {
     type: 'crossfade' | 'dissolve' | 'fade' | 'cut' | 'none';
     duration_sec: number;
@@ -133,6 +173,8 @@ export interface NarrativeMontageManifest {
   project_type: 'narrative_scenes_montage';
   project_name: string;
   manifest_name?: string;
+  rhythm_profile?: string;
+  overlays: CinematicOverlayId[];
   total_scenes: number;
   total_duration_sec: number;
   cloud_export: {
@@ -145,6 +187,7 @@ export interface NarrativeMontageManifest {
   subtitles: SubtitlesFlexibleConfig;
   subtitles_burn_in?: BurnInSrtConfig;
   shorts_config?: ShortsAutoSliceConfig;
+  shorts_export?: ShortsExportManifestBlock;
   telegram_notifications?: {
     enabled: boolean;
     bot_token: string;
@@ -169,6 +212,11 @@ interface MontageCombineViewProps {
   driveUser: User | null;
   driveToken: string | null;
   onDriveAuthChange: (user: User | null, token: string | null) => void;
+  externalProjectName?: string;
+  onExternalProjectNameChange?: (name: string) => void;
+  rhythmProfilePreset?: 'historical_storytelling' | 'ambient_meditative' | null;
+  onConsumeRhythmProfilePreset?: () => void;
+  shortsExportConfig?: ShortsExportManifestBlock;
   transferredScript: string;
   onClearTransferredScript: () => void;
   externalScenes?: NarrativeSceneItem[] | null;
@@ -217,9 +265,43 @@ const parseTimecodeToSec = (val: unknown, fallbackSec: number): number => {
 };
 
 // Параметры виртуализации компактной строчной сетки (для 100–200+ сцен без перегрузки DOM)
-const ROW_HEIGHT = 44;
-const VIEWPORT_HEIGHT = 484;
+const ROW_HEIGHT = 50;
+const VIEWPORT_HEIGHT = 500;
 const OVERSCAN_ROWS = 8;
+
+const CAMERA_VECTORS_ORDER: CameraVectorType[] = ['zoom_in', 'pan_right', 'zoom_out', 'pan_left'];
+
+const CINEMATIC_OVERLAY_PRESETS: Array<{
+  id: CinematicOverlayId;
+  label: string;
+  badge: string;
+  desc: string;
+}> = [
+  {
+    id: 'ambient_particles',
+    label: '✨ Частицы / Снег / Искры (Ambient Particles)',
+    badge: 'ambient_particles',
+    desc: 'Атмосферные пылинки, пепел или мягкий снег поверх видеоряда'
+  },
+  {
+    id: 'cinematic_film_grain',
+    label: '🎞️ Зерно 35mm плёнки и виньетка (Cinematic Film Grain)',
+    badge: 'cinematic_film_grain',
+    desc: 'Аналоговая текстура киноплёнки 35mm + мягкое затемнение углов'
+  },
+  {
+    id: 'historical_lower_thirds',
+    label: '📍 Исторические титры дат и локаций (Lower Thirds)',
+    badge: 'historical_lower_thirds',
+    desc: 'Документальные плашки с печатным трекингом для дат и архивных мест'
+  },
+  {
+    id: 'warm_glow',
+    label: '🕯️ Мягкое пульсирующее свечение (Warm Glow)',
+    badge: 'warm_glow',
+    desc: 'Тёплое анаморфное свечение свечей и ламп (Halation & Bloom)'
+  }
+];
 
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ghToken,
@@ -229,6 +311,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   driveUser,
   driveToken,
   onDriveAuthChange,
+  externalProjectName,
+  onExternalProjectNameChange,
+  rhythmProfilePreset,
+  onConsumeRhythmProfilePreset,
+  shortsExportConfig,
   transferredScript,
   onClearTransferredScript,
   externalScenes,
@@ -251,7 +338,42 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   onClearTerminalLogs
 }) => {
   // Редактируемое имя проекта (по умолчанию: "Narrative Movie 4K")
-  const [projectName, setProjectName] = useState<string>('Narrative Movie 4K');
+  const [projectName, setProjectName] = useState<string>(externalProjectName || 'Narrative Movie 4K');
+
+  useEffect(() => {
+    if (typeof externalProjectName === 'string' && externalProjectName !== projectName) {
+      setProjectName(externalProjectName);
+    }
+  }, [externalProjectName]);
+
+  const handleProjectNameUpdate = (val: string) => {
+    setProjectName(val);
+    onExternalProjectNameChange?.(val);
+  };
+
+  // Профиль Ритм-карты и Генератор ритма по референсу (Style & Pacing DNA)
+  const [rhythmProfile, setRhythmProfile] = useState<
+    'historical_storytelling' | 'ambient_meditative' | 'custom_dna'
+  >('historical_storytelling');
+  const [isDnaModalOpen, setIsDnaModalOpen] = useState<boolean>(false);
+  const [dnaReferenceInput, setDnaReferenceInput] = useState<string>(
+    'Быстрый монтаж каждые 3 сек, резкие наезды, мрачный нуар'
+  );
+  const [lastAppliedDnaSummary, setLastAppliedDnaSummary] = useState<string>(
+    'Historical Storytelling • 2.5–8 сек • Живопись / Графический роман'
+  );
+
+  // Мультивыбор кинематографичных оверлеев (записываются в массив overlays внутри manifest.json)
+  const [selectedOverlays, setSelectedOverlays] = useState<CinematicOverlayId[]>([
+    'ambient_particles',
+    'cinematic_film_grain'
+  ]);
+
+  const toggleOverlayPreset = (overlayId: CinematicOverlayId) => {
+    setSelectedOverlays(prev =>
+      prev.includes(overlayId) ? prev.filter(item => item !== overlayId) : [...prev, overlayId]
+    );
+  };
 
   // Динамический массив сцен любой длины (80, 120, 160, 200+ сцен без лимитов и без тестовых заглушек)
   const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() =>
@@ -259,15 +381,189 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       scene_index: idx + 1,
       scene_id: `SCENE_${String(idx + 1).padStart(3, '0')}`,
       file_name: '',
-      start_time: formatTimecode(idx * 6),
-      duration: 6,
+      start_time: formatTimecode(idx * 5.5),
+      duration: idx % 3 === 0 ? 4.5 : idx % 2 === 0 ? 6.5 : 5.0,
+      camera_movement: CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length],
+      visual_style: idx % 2 === 0 ? 'Живопись (Historical Oil)' : 'Графический роман (Dark Ink)',
       transition: {
         type: 'crossfade',
         duration_sec: 0.8
       },
-      text_overlay: ''
+      text_overlay: '',
+      needs_revision: false,
+      revision_note: ''
     }))
   );
+
+  // Применение 1-Click пресета Ритм-карты из шапки студии или блока Ритм-карты
+  const applyRhythmProfileToScenes = (
+    profile: 'historical_storytelling' | 'ambient_meditative',
+    silent = false
+  ) => {
+    setRhythmProfile(profile);
+    if (profile === 'historical_storytelling') {
+      const histDurations = [3.5, 5.0, 2.5, 6.5, 4.0, 7.5, 3.0, 5.5];
+      setNarrativeScenes(prev =>
+        recalculateStartTimes(
+          prev.map((sc, idx) => ({
+            ...sc,
+            duration: histDurations[idx % histDurations.length],
+            camera_movement: CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length],
+            visual_style:
+              idx % 2 === 0 ? 'Живопись (Historical Oil)' : 'Графический роман (Dark Ink)',
+            transition: {
+              type: idx % 4 === 0 ? 'dissolve' : 'crossfade',
+              duration_sec: 0.8
+            }
+          }))
+        )
+      );
+      setSelectedOverlays(['cinematic_film_grain', 'historical_lower_thirds']);
+      setLastAppliedDnaSummary(
+        'Historical Storytelling • Динамичное чередование 2.5–8 сек • Живопись / Графический роман'
+      );
+      if (!silent) {
+        onNotify(
+          'Применён профиль Ритм-карты «Historical Storytelling» (2.5–8 сек, векторы камеры и стили Живопись / Графический роман)!',
+          'success'
+        );
+      }
+    } else {
+      const ambientDurations = [12, 15, 10, 18, 14, 16];
+      setNarrativeScenes(prev =>
+        recalculateStartTimes(
+          prev.map((sc, idx) => ({
+            ...sc,
+            duration: ambientDurations[idx % ambientDurations.length],
+            camera_movement: idx % 2 === 0 ? 'zoom_in' : 'pan_right',
+            visual_style: 'Ambient Sanctuary (4K Atmospheric Matte)',
+            transition: {
+              type: 'crossfade',
+              duration_sec: 1.8
+            }
+          }))
+        )
+      );
+      setSelectedOverlays(['ambient_particles', 'warm_glow']);
+      setLastAppliedDnaSummary(
+        'Ambient Meditative • Плавное дыхание 10–18 сек • Кроссфейды 1.8 сек'
+      );
+      if (!silent) {
+        onNotify(
+          'Применён медитативный профиль Ритм-карты «Ambient Loop» (10–18 сек, плавные кроссфейды 1.8 сек)!',
+          'success'
+        );
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (rhythmProfilePreset) {
+      applyRhythmProfileToScenes(rhythmProfilePreset, true);
+      onConsumeRhythmProfilePreset?.();
+    }
+  }, [rhythmProfilePreset, onConsumeRhythmProfilePreset]);
+
+  // 1. ГЕНЕРАТОР РИТМА ПО РЕФЕРЕНСУ (Style & Pacing DNA)
+  const applyReferenceDnaToTimeline = (rawDnaText?: string) => {
+    const text = (rawDnaText ?? dnaReferenceInput).trim();
+    if (!text) {
+      onNotify('Введите описание ритма и стиля видео-референса!', 'error');
+      return;
+    }
+    const lower = text.toLowerCase();
+
+    // Извлекаем явно указанный шаг в секундах (например: "каждые 3 сек", "по 4.5 с", "every 3 sec")
+    const explicitSecMatch = lower.match(/(\d+(?:[.,]\d+)?)\s*(?:сек|с\b|sec|s\b)/i);
+    const explicitSec = explicitSecMatch
+      ? Math.max(1.5, Math.min(30, parseFloat(explicitSecMatch[1].replace(',', '.'))))
+      : null;
+
+    const isFast =
+      /быстр|динам|резк|клип|агрессив|fast|rapid|quick|snappy|action|триллер/i.test(lower);
+    const isSlow =
+      /медлен|плавн|медитат|тягуч|спокойн|slow|ambient|calm|cinematic|долг/i.test(lower);
+
+    const baseSec = explicitSec ?? (isFast ? 3.0 : isSlow ? 11.0 : 5.0);
+    const offsets = isFast
+      ? [0, -0.5, 0.5, -0.3, 0.7, -0.2]
+      : isSlow
+      ? [0, 2.0, -1.5, 3.0, -1.0, 1.5]
+      : [0, -1.0, 1.5, -0.5, 2.0, 0.5];
+
+    // Определяем тип переходов
+    const isHardCut = /резк|стык|cut|прям|без переход|жёстк|жестк|whip/i.test(lower);
+    const isFade = /затемнен|чёрн|черн|fade|нуар|noir|мрачн/i.test(lower);
+    const isDissolve = /раствор|dissolve|мягк|плавн|эмбиент/i.test(lower);
+
+    const targetTransitionType: NarrativeSceneItem['transition']['type'] = isHardCut
+      ? 'cut'
+      : isFade
+      ? 'fade'
+      : isDissolve
+      ? 'dissolve'
+      : 'crossfade';
+
+    const targetTransitionDur =
+      targetTransitionType === 'cut' ? 0 : isSlow ? 1.6 : isFast ? 0.4 : 0.8;
+
+    // Определяем доминирующие векторы движения камеры
+    const preferZoomIn = /наезд|зум|крупн|zoom\s*in|push\s*in|приближ/i.test(lower);
+    const preferPan = /панорам|пролет|пролёт|pan|трекинг|горизонт/i.test(lower);
+    const preferZoomOut = /отъезд|отдален|общий план|zoom\s*out|pull\s*back/i.test(lower);
+
+    const vectorCycle: CameraVectorType[] = preferZoomIn
+      ? ['zoom_in', 'pan_right', 'zoom_in', 'pan_left', 'zoom_out']
+      : preferPan
+      ? ['pan_left', 'pan_right', 'zoom_in', 'pan_left', 'zoom_out']
+      : preferZoomOut
+      ? ['zoom_out', 'pan_left', 'zoom_out', 'zoom_in', 'pan_right']
+      : CAMERA_VECTORS_ORDER;
+
+    // Определяем художественный стиль
+    const detectedStyle = /нуар|мрачн|noir|детектив|тру-крайм/i.test(lower)
+      ? 'Dark Noir / High-Contrast Archival 35mm'
+      : /живопис|масл|истор|классич|oil/i.test(lower)
+      ? 'Живопись (Historical Oil)'
+      : /графич|роман|комикс|чернил|ink/i.test(lower)
+      ? 'Графический роман (Dark Ink)'
+      : /эмбиент|космос|фэнтези|ambient/i.test(lower)
+      ? 'Atmospheric Matte 4K'
+      : 'Cinematic Documentary DNA';
+
+    setNarrativeScenes(prev =>
+      recalculateStartTimes(
+        prev.map((sc, idx) => {
+          const delta = offsets[idx % offsets.length];
+          const computedDur = Math.max(
+            1.5,
+            Math.round((baseSec + delta) * 10) / 10
+          );
+          return {
+            ...sc,
+            duration: computedDur,
+            camera_movement: vectorCycle[idx % vectorCycle.length],
+            visual_style: detectedStyle,
+            transition: {
+              type: targetTransitionType,
+              duration_sec: targetTransitionDur
+            }
+          };
+        })
+      )
+    );
+
+    setRhythmProfile('custom_dna');
+    const summary = `DNA: ~${baseSec}с • Камера: ${vectorCycle[0]}/${vectorCycle[1]} • Переход: ${targetTransitionType}${
+      targetTransitionDur ? ` (${targetTransitionDur}с)` : ''
+    } • Стиль: ${detectedStyle}`;
+    setLastAppliedDnaSummary(summary);
+    setIsDnaModalOpen(false);
+    onNotify(
+      `🧬 Ритм с референса применён ко всем ${narrativeScenes.length} сценам (${summary})!`,
+      'success'
+    );
+  };
 
   // Прием сгенерированных сцен из VerbaFlow («🎬 Разбить на видео-промты»)
   useEffect(() => {
@@ -1232,6 +1528,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       project_type: 'narrative_scenes_montage',
       project_name: projectName.trim() || 'Narrative Movie 4K',
       manifest_name: importedScenarioName || projectName.trim() || 'Narrative Movie 4K',
+      rhythm_profile: rhythmProfile,
+      overlays: selectedOverlays,
       total_scenes: narrativeScenes.length,
       total_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
       cloud_export: {
@@ -1269,9 +1567,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         target_language: subtitleLanguage,
         srt_filename: subtitlesConfigObject.srt_filename || 'subtitles.srt',
         srt_content: subtitlesConfigObject.srt_content,
-        srt_content_base64: subtitlesConfigObject.enabled && subtitlesConfigObject.srt_content
-          ? encodeManifestBase64(subtitlesConfigObject.srt_content)
-          : '',
+        srt_content_base64:
+          subtitlesConfigObject.enabled && subtitlesConfigObject.srt_content
+            ? encodeManifestBase64(subtitlesConfigObject.srt_content)
+            : '',
         ffmpeg_filter: burnInSrtEnabled ? burnInFfmpegFilter : ''
       },
       shorts_config: {
@@ -1284,6 +1583,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         output_dir: './output/shorts/',
         upload_to_gdrive: true
       },
+      ...(shortsExportConfig ? { shorts_export: shortsExportConfig } : {}),
       ...(telegramBotToken && telegramChatId
         ? {
             telegram_notifications: {
@@ -1307,8 +1607,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         file_name: sc.file_name.trim(),
         start_time: sc.start_time,
         duration: Number(sc.duration) || 6,
+        camera_movement: sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length],
+        ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
         transition: sc.transition,
         text_overlay: sc.text_overlay,
+        ...(sc.needs_revision ? { needs_revision: true } : {}),
+        ...(sc.revision_note && sc.revision_note.trim()
+          ? { revision_note: sc.revision_note.trim() }
+          : {}),
         ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
         ...(sc.prompt_ru ? { prompt_ru: sc.prompt_ru } : {}),
         ...(sc.sfx ? { sfx: sc.sfx } : {})
@@ -1317,6 +1623,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     [
       projectName,
       importedScenarioName,
+      rhythmProfile,
+      selectedOverlays,
       narrativeScenes,
       totalNarrativeDurationSec,
       gdriveFolderId,
@@ -1332,6 +1640,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       shortsAutoSliceEnabled,
       shortsSliceCount,
       shortsHookTextEn,
+      shortsExportConfig,
       telegramBotToken,
       telegramChatId,
       driftDiffSec,
@@ -1340,6 +1649,65 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       encodeManifestBase64
     ]
   );
+
+  const flaggedRevisionScenes = useMemo(
+    () => narrativeScenes.filter(sc => Boolean(sc.needs_revision)),
+    [narrativeScenes]
+  );
+
+  // 4. Экспорт Patch-манифеста (только помеченные на пересборку сцены)
+  const handleExportPatchManifest = () => {
+    if (flaggedRevisionScenes.length === 0) {
+      onNotify(
+        'Отметьте хотя бы одну сцену флажком «🔄 На пересборку», чтобы сформировать Patch-манифест!',
+        'error'
+      );
+      return;
+    }
+
+    const patchManifest = {
+      schema_version: '3.0-patch',
+      patch_mode: true,
+      project_name: projectName.trim() || 'Narrative Movie 4K',
+      rhythm_profile: rhythmProfile,
+      overlays: selectedOverlays,
+      total_project_scenes: narrativeScenes.length,
+      total_patch_scenes: flaggedRevisionScenes.length,
+      generated_at: new Date().toISOString(),
+      cloud_export: {
+        target_folder_id: gdriveFolderId.trim()
+      },
+      scenes: flaggedRevisionScenes.map(sc => ({
+        scene_index: sc.scene_index,
+        scene_id: sc.scene_id,
+        title: toEnglishSceneTitle(sc, sc.scene_index - 1),
+        file_name: sc.file_name.trim(),
+        start_time: sc.start_time,
+        duration: Number(sc.duration) || 6,
+        camera_movement: sc.camera_movement || 'zoom_in',
+        visual_style: sc.visual_style || 'Historical Storytelling',
+        transition: sc.transition,
+        text_overlay: sc.text_overlay,
+        needs_revision: true,
+        revision_note: sc.revision_note?.trim() || 'Точечная пересборка сцены',
+        ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
+        ...(sc.sfx ? { sfx: sc.sfx } : {})
+      }))
+    };
+
+    const jsonString = JSON.stringify(patchManifest, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `patch_manifest_${flaggedRevisionScenes.length}scenes.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify(
+      `Patch-манифест (${flaggedRevisionScenes.length} помеченных сцен) скачан для точечной пересборки!`,
+      'success'
+    );
+  };
 
   const handleExportScenarioJson = () => {
     const jsonString = JSON.stringify(narrativeManifest, null, 2);
@@ -1460,7 +1828,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <input
               type="text"
               value={projectName}
-              onChange={e => setProjectName(e.target.value)}
+              onChange={e => handleProjectNameUpdate(e.target.value)}
               placeholder="Narrative Movie 4K"
               className="bg-slate-900 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-xs font-mono text-indigo-200 outline-none w-56"
             />
@@ -2171,7 +2539,200 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         </div>
       </div>
 
-      {/* 4. ВИРТУАЛИЗИРОВАННЫЙ ТАЙМЛАЙН СЦЕН (100–200+ СЦЕН БЕЗ ОГРАНИЧЕНИЙ) */}
+      {/* 3.5. РИТМ-КАРТА МОНТАЖА (Style & Pacing DNA) + ПРЕСЕТЫ КИНЕМАТОГРАФИЧНЫХ ОВЕРЛЕЕВ */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Левая колонка (7 cols): Ритм-карта монтажа и Генератор ритма по референсу */}
+        <div className="lg:col-span-7 bg-[#0b0f19] border border-indigo-500/30 rounded-2xl p-5 space-y-4 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+            <div>
+              <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                Ритм-карта монтажа (Style &amp; Pacing DNA)
+              </span>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Автоматическое управление темпом сцен (<code className="text-indigo-300">duration</code>), векторами камеры и переходами
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsDnaModalOpen(prev => !prev)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all duration-200 cursor-pointer border ${
+                isDnaModalOpen
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02]'
+                  : 'bg-indigo-500/20 hover:bg-indigo-500/30 border-indigo-500/40 text-indigo-200'
+              }`}
+            >
+              <span>🧬 Снять ритм с референса</span>
+            </button>
+          </div>
+
+          {/* Быстрые профили Ритм-карты */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => applyRhythmProfileToScenes('historical_storytelling')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                rhythmProfile === 'historical_storytelling'
+                  ? 'bg-indigo-500/15 border-indigo-400 text-slate-100 shadow-md shadow-indigo-500/10'
+                  : 'bg-[#111827]/90 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-300">
+                  🏛️ Historical Storytelling
+                </span>
+                <span className="text-[10px] font-mono bg-indigo-500/20 text-indigo-200 px-2 py-0.5 rounded">
+                  2.5–8 сек
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Динамичное чередование планов, анти-повтор векторов камеры, стиль Живопись / Графический роман
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyRhythmProfileToScenes('ambient_meditative')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                rhythmProfile === 'ambient_meditative'
+                  ? 'bg-amber-500/15 border-amber-400 text-slate-100 shadow-md shadow-amber-500/10'
+                  : 'bg-[#111827]/90 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-300">
+                  🌙 Ambient Meditative
+                </span>
+                <span className="text-[10px] font-mono bg-amber-500/20 text-amber-200 px-2 py-0.5 rounded">
+                  10–18 сек
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Медитативное дыхание кадра, плавные кроссфейды 1.5–2.0 сек без резких склеек
+              </p>
+            </button>
+          </div>
+
+          {/* Аккордеон / Модальное окно «🧬 Снять ритм с референса» */}
+          {isDnaModalOpen && (
+            <div className="bg-[#111827] border border-amber-500/40 rounded-xl p-4 space-y-3 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  🧬 Генератор ритма по референсу (Style &amp; Pacing DNA)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsDnaModalOpen(false)}
+                  className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                >
+                  Свернуть ✕
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Опишите темп, характер склеек и атмосферу понравившегося видео-референса — студия автоматически пересчитает{' '}
+                <code className="text-amber-300">duration</code>, векторы камеры и переходы всех сцен:
+              </p>
+              <textarea
+                rows={2}
+                value={dnaReferenceInput}
+                onChange={e => setDnaReferenceInput(e.target.value)}
+                placeholder="Например: быстрый монтаж каждые 3 сек, резкие наезды, мрачный нуар..."
+                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl p-2.5 text-xs text-slate-100 outline-none"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    'Быстрый монтаж каждые 3 сек, резкие наезды, мрачный нуар',
+                    'Документальное расследование каждые 4.5 сек, плавные панорамы, живопись',
+                    'Медленный гипнотический ритм каждые 12 сек, мягкое растворение, эмбиент'
+                  ].map((sample, sIdx) => (
+                    <button
+                      key={sIdx}
+                      type="button"
+                      onClick={() => {
+                        setDnaReferenceInput(sample);
+                        applyReferenceDnaToTimeline(sample);
+                      }}
+                      className="text-[10px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 px-2 py-1 rounded-lg cursor-pointer transition"
+                    >
+                      ⚡ Пресет #{sIdx + 1}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyReferenceDnaToTimeline()}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 rounded-xl text-xs cursor-pointer transition shadow-md shadow-amber-500/20"
+                >
+                  🧬 Применить ДНК ритма к {narrativeScenes.length} сценам
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+            <span className="text-slate-400">
+              Активный профиль: <strong className="text-emerald-400">{lastAppliedDnaSummary}</strong>
+            </span>
+            <span className="text-indigo-300 tabular-nums">
+              Сцен: {narrativeScenes.length} • Хронометраж: {formatTimecode(totalNarrativeDurationSec)}
+            </span>
+          </div>
+        </div>
+
+        {/* Правая колонка (5 cols): 2. ПРЕСЕТЫ КИНЕМАТОГРАФИЧНЫХ ОВЕРЛЕЕВ (HTML/FFmpeg Overlays) */}
+        <div className="lg:col-span-5 bg-[#0b0f19] border border-amber-500/30 rounded-2xl p-5 space-y-3.5 shadow-lg">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+            <div>
+              <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                Кинематографичные оверлеи (FFmpeg Overlays)
+              </span>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Мультивыбор слоёв в массив <code className="text-amber-300">manifest.overlays</code>
+              </p>
+            </div>
+            <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded tabular-nums">
+              Выбрано: {selectedOverlays.length}/4
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {CINEMATIC_OVERLAY_PRESETS.map(layer => {
+              const active = selectedOverlays.includes(layer.id);
+              return (
+                <button
+                  key={layer.id}
+                  type="button"
+                  onClick={() => toggleOverlayPreset(layer.id)}
+                  className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                    active
+                      ? 'bg-amber-500/15 border-amber-400/70 text-slate-100 shadow-sm'
+                      : 'bg-[#111827]/80 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-slate-100">{layer.label}</div>
+                    <div className="text-[10px] text-slate-400">{layer.desc}</div>
+                  </div>
+                  <span
+                    className={`shrink-0 text-[10px] font-mono px-2 py-0.5 rounded border ${
+                      active
+                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300 font-bold'
+                        : 'bg-slate-900 border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    {active ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. ВИРТУАЛИЗИРОВАННЫЙ ТАЙМЛАЙН СЦЕН (100–200+ СЦЕН БЕЗ ОГРАНИЧЕНИЙ) + ОЧЕРЕДЬ НА ПЕРЕСБОРКУ */}
       <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
         {/* Шапка таймлайна с обязательным автоматическим счетчиком */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
@@ -2186,7 +2747,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             {/* Автоматический счетчик по ТЗ */}
             <div
               id="narrative-timeline-counter"
-              className="text-xs font-mono bg-slate-900/95 border border-indigo-500/40 text-slate-200 px-3 py-1.5 rounded-xl inline-flex flex-wrap items-center gap-2 shadow-sm"
+              className="text-xs font-mono bg-slate-900/95 border border-indigo-500/40 text-slate-200 px-3 py-1.5 rounded-xl inline-flex flex-wrap items-center gap-2 shadow-sm tabular-nums"
             >
               <span>
                 Всего сцен: <strong className="text-indigo-300">{narrativeScenes.length}</strong>
@@ -2201,6 +2762,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </span>
               <span className="text-slate-600">|</span>
               <span>
+                На пересборку:{' '}
+                <strong className={flaggedRevisionScenes.length > 0 ? 'text-rose-400' : 'text-slate-400'}>
+                  {flaggedRevisionScenes.length}
+                </strong>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span>
                 Аудиодорожка:{' '}
                 <strong className="text-emerald-300">
                   {masterAudio.file_name.trim() || 'Не выбрана'}
@@ -2209,8 +2777,24 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             </div>
           </div>
 
-          {/* Быстрые генераторы сетки на 80 / 120 / 160 / 200+ сцен и кнопки управления */}
+          {/* Быстрые генераторы сетки на 80 / 120 / 160 / 200+ сцен и кнопка Patch-манифеста */}
           <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleExportPatchManifest}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
+                flaggedRevisionScenes.length > 0
+                  ? 'bg-rose-500/20 hover:bg-rose-500/30 border-rose-400/60 text-rose-200 shadow-sm shadow-rose-500/10'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
+              }`}
+              title="Экспортировать компактный JSON только с помеченными флажком «🔄 На пересборку» сценами"
+            >
+              <Download className="w-3.5 h-3.5 text-rose-400" />
+              <span>
+                Скачать Patch-манифест (только помеченные сцены: {flaggedRevisionScenes.length})
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() => generateNScenesTemplate(80)}
@@ -2297,23 +2881,23 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   setScrollTop(0);
                 }
               }}
-              placeholder="Поиск по номеру сцены (#1..200+), scene_id, имени файла или титру..."
+              placeholder="Поиск по номеру сцены (#1..200+), scene_id, имени файла, титру или заметке..."
               className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-400 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 outline-none"
             />
           </div>
 
-          <span className="text-[11px] font-mono text-slate-400">
+          <span className="text-[11px] font-mono text-slate-400 tabular-nums">
             Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows} (Виртуализация DOM активна)
           </span>
         </div>
 
         {/* Шапка колонок компактной строчной таблицы */}
         <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-t-xl text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          <div className="col-span-2">№ / ID Сцены</div>
-          <div className="col-span-4">Видеофайл (file_name)</div>
+          <div className="col-span-2">№ / ID / Камера</div>
+          <div className="col-span-3">Видеофайл (file_name)</div>
           <div className="col-span-2 text-center">Старт / Длит. (с)</div>
-          <div className="col-span-2">Переход (Transition)</div>
-          <div className="col-span-2">Титр (text_overlay)</div>
+          <div className="col-span-2">Переход / Титр</div>
+          <div className="col-span-3">🔄 На пересборку &amp; Заметка</div>
         </div>
 
         {/* Виртуализированный контейнер прокрутки компактной строчной сетки */}
@@ -2326,38 +2910,56 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
             {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
               const hasFile = Boolean(sc.file_name.trim());
+              const isFlagged = Boolean(sc.needs_revision);
               return (
                 <div
                   key={sc.scene_id + '-' + idx}
                   style={{ height: `${ROW_HEIGHT}px` }}
                   className={`grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition ${
-                    hasFile
+                    isFlagged
+                      ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-2 border-l-rose-500'
+                      : hasFile
                       ? 'bg-indigo-950/15 hover:bg-indigo-950/30'
                       : 'bg-[#0d1320] hover:bg-slate-900/80'
                   }`}
                 >
-                  {/* 1. Индекс и scene_id */}
-                  <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                    <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-1.5 py-0.5 rounded shrink-0">
+                  {/* 1. Индекс, scene_id и вектор камеры */}
+                  <div className="col-span-2 flex items-center gap-1 min-w-0">
+                    <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-1.5 py-0.5 rounded shrink-0 tabular-nums">
                       #{idx + 1}
                     </span>
                     <input
                       type="text"
                       value={sc.scene_id}
                       onChange={e => updateScene(idx, { scene_id: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] font-mono text-slate-200 outline-none focus:border-indigo-400"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 outline-none focus:border-indigo-400"
                     />
+                    <select
+                      value={sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length]}
+                      onChange={e =>
+                        updateScene(idx, {
+                          camera_movement: e.target.value as CameraVectorType
+                        })
+                      }
+                      title="Вектор движения камеры (camera_movement)"
+                      className="bg-slate-900 border border-indigo-500/40 rounded px-1 py-1 text-[10px] font-mono text-indigo-300 outline-none shrink-0"
+                    >
+                      <option value="zoom_in">zoom_in</option>
+                      <option value="zoom_out">zoom_out</option>
+                      <option value="pan_left">pan_left</option>
+                      <option value="pan_right">pan_right</option>
+                    </select>
                   </div>
 
                   {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
-                  <div className="col-span-4 flex items-center gap-1.5 min-w-0">
+                  <div className="col-span-3 flex items-center gap-1.5 min-w-0">
                     <input
                       type="text"
                       value={sc.file_name}
                       placeholder={
                         sc.ai_video_prompt
-                          ? `Промт готов: ${sc.ai_video_prompt.slice(0, 38)}...`
-                          : 'Имя файла (из JSON или Drag & Drop)'
+                          ? `Промт: ${sc.ai_video_prompt.slice(0, 32)}...`
+                          : 'Имя файла (JSON / Drag&Drop)'
                       }
                       title={
                         sc.ai_video_prompt
@@ -2388,7 +2990,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   </div>
 
                   {/* 3. Старт (start_time) и длительность (duration) */}
-                  <div className="col-span-2 flex items-center gap-1">
+                  <div className="col-span-2 flex items-center gap-1 tabular-nums">
                     <input
                       type="text"
                       value={String(sc.start_time)}
@@ -2412,8 +3014,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     />
                   </div>
 
-                  {/* 4. Переход (transition) */}
-                  <div className="col-span-2 flex items-center gap-1">
+                  {/* 4. Переход (transition) + Титр (text_overlay) */}
+                  <div className="col-span-2 flex items-center gap-1 min-w-0">
                     <select
                       value={sc.transition.type}
                       onChange={e => {
@@ -2428,41 +3030,53 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                           }
                         });
                       }}
-                      className="flex-1 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none"
+                      className="w-20 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none shrink-0"
                     >
-                      <option value="crossfade">crossfade</option>
+                      <option value="crossfade">xfade</option>
                       <option value="dissolve">dissolve</option>
                       <option value="fade">fade</option>
                       <option value="cut">cut</option>
                     </select>
-                    {sc.transition.type !== 'cut' && sc.transition.type !== 'none' && (
-                      <input
-                        type="number"
-                        min={0.2}
-                        max={10}
-                        step={0.1}
-                        value={sc.transition.duration_sec}
-                        onChange={e =>
-                          updateScene(idx, {
-                            transition: {
-                              ...sc.transition,
-                              duration_sec: Math.max(0.2, Number(e.target.value) || 0.8)
-                            }
-                          })
-                        }
-                        className="w-11 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] font-mono text-amber-300 text-center outline-none"
-                      />
-                    )}
-                  </div>
-
-                  {/* 5. Титр (text_overlay) и кнопка удаления */}
-                  <div className="col-span-2 flex items-center gap-1 min-w-0">
                     <input
                       type="text"
                       value={sc.text_overlay}
                       placeholder="Титр..."
                       onChange={e => updateScene(idx, { text_overlay: e.target.value })}
                       className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
+                    />
+                  </div>
+
+                  {/* 5. Точечная пометка сцен на пересборку («🔄 На пересборку» + заметка + удаление) */}
+                  <div className="col-span-3 flex items-center gap-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateScene(idx, { needs_revision: !sc.needs_revision })
+                      }
+                      className={`shrink-0 px-2 py-1 rounded text-[10px] font-bold transition cursor-pointer border ${
+                        isFlagged
+                          ? 'bg-rose-500 text-slate-950 border-rose-400 shadow-sm'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-700/80'
+                      }`}
+                      title="Пометить сцену на точечную пересборку в Patch-манифест"
+                    >
+                      🔄 {isFlagged ? 'В патче' : 'На пересборку'}
+                    </button>
+                    <input
+                      type="text"
+                      value={sc.revision_note || ''}
+                      placeholder="Заметка (сменить ракурс, зум...)"
+                      onChange={e =>
+                        updateScene(idx, {
+                          revision_note: e.target.value,
+                          needs_revision: Boolean(e.target.value.trim()) || sc.needs_revision
+                        })
+                      }
+                      className={`w-full bg-slate-900 border rounded px-1.5 py-1 text-[11px] outline-none ${
+                        isFlagged
+                          ? 'border-rose-400/60 text-rose-200 focus:border-rose-400'
+                          : 'border-slate-700/80 text-slate-300 focus:border-indigo-400'
+                      }`}
                     />
                     <button
                       type="button"

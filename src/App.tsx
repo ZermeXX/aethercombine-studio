@@ -53,11 +53,11 @@ import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploade
 import {
   MontageCombineView,
   NarrativeSceneItem,
+  ShortsExportManifestBlock,
   SubtitlesFlexibleConfig
 } from './components/MontageCombineView';
 import { VerbaFlowTextWorkbench } from './components/VerbaFlowTextWorkbench';
-import { ThumbnailStudioView } from './components/ThumbnailStudioView';
-import { VoiceStudioView } from './components/VoiceStudioView';
+import { ThumbnailStudioView, ThumbnailFontStyleId } from './components/ThumbnailStudioView';
 import { YouTubeSeoView } from './components/YouTubeSeoView';
 import {
   LiveTerminal,
@@ -74,7 +74,8 @@ import {
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
 
-type TabId = 'combine' | 'loop' | 'verbaflow' | 'voice' | 'seo' | 'thumb';
+type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb';
+type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
 
 interface SceneItem {
   id: string;
@@ -902,15 +903,24 @@ export default function App() {
     file?: File;
     durationSec?: number;
   } | null>(null);
-  const [voiceStudioScript, setVoiceStudioScript] = useState<string>(
-    'In the classified archives of the alpine station, a strange low-frequency hum was recorded. [pause 1.5s] Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order.'
-  );
   const [seoScriptText, setSeoScriptText] = useState<string>(
     'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.'
   );
 
+  // Пресеты форматов каналов (1-Click Format Presets) + синхронизация Ритм-карты, Shorts и шрифта превью
+  const [activeFormatPreset, setActiveFormatPreset] =
+    useState<StudioFormatPresetId>('histoviva_doc');
+  const [rhythmProfilePreset, setRhythmProfilePreset] = useState<
+    'historical_storytelling' | 'ambient_meditative' | null
+  >(null);
+  const [shortsExportConfig, setShortsExportConfig] = useState<
+    ShortsExportManifestBlock | undefined
+  >(undefined);
+  const [externalThumbFontStyle, setExternalThumbFontStyle] =
+    useState<ThumbnailFontStyleId | null>(null);
+
   // Loop studio state (Universal dynamic manifest state)
-  const [loopProjectName, setLoopProjectName] = useState<string>('Ambient Loop 4K');
+  const [loopProjectName, setLoopProjectName] = useState<string>('HistoViva Documentary 4K');
   const [youtubeSeoState, setYoutubeSeoState] = useState<YoutubeSeoState>(() =>
     loadStoredYoutubeSeoState()
   );
@@ -1040,9 +1050,38 @@ export default function App() {
 
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
-  const [thumbTitle, setThumbTitle] = useState<string>('');
-  const [thumbBadge, setThumbBadge] = useState<string>('4k_ultra_hd');
+  const [thumbTitle, setThumbTitle] = useState<string>('SEALED ARCHIVE');
+  const [thumbBadge, setThumbBadge] = useState<string>('archive_file,classified_doc,documentary');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // 2. ПЕРЕКЛЮЧАТЕЛЬ ФОРМАТОВ ПРОЕКТА В ШАПКЕ СТУДИИ (1-Click Format Presets)
+  const applyStudioFormatPreset = (presetId: StudioFormatPresetId) => {
+    setActiveFormatPreset(presetId);
+    if (presetId === 'histoviva_doc') {
+      handleSelectTab('combine');
+      setRhythmProfilePreset('historical_storytelling');
+      setExternalThumbFontStyle('medieval_serif');
+      setThumbBadge('archive_file,classified_doc,documentary');
+      setYoutubeSeoState(prev => ({ ...prev, tone: 'Historical Doc' }));
+      showToast(
+        '🏛️ Активирован пресет «HistoViva • Документальный (~10 мин)»: профиль Historical Storytelling (2.5–8 сек), стили Живопись / Графический роман и документальные бейджи обложки!',
+        'success'
+      );
+    } else {
+      handleSelectTab('loop');
+      setRhythmProfilePreset('ambient_meditative');
+      setLoopHours(3);
+      setActCrossfadeSec(1.8);
+      setInternalLoopCrossfadeSec(1.8);
+      setExternalThumbFontStyle('gold_ice_magic');
+      setThumbBadge('4k_ultra_hd,3_hours,no_ads_seamless');
+      setYoutubeSeoState(prev => ({ ...prev, tone: 'Cozy Ambient' }));
+      showToast(
+        '🌙 Активирован пресет «Ambient Loop • 3 Часа (Атмосфера)»: медитативный профиль (10–18 сек, кроссфейды 1.8 сек), шрифт Gold & Ice Magic и бейджи 4K ULTRA HD • 3 HOURS • NO ADS • SEAMLESS!',
+        'success'
+      );
+    }
+  };
 
   // VerbaFlow source text state
   const [sourceText, setSourceText] = useState<string>(
@@ -3864,6 +3903,54 @@ export default function App() {
             </div>
           </div>
 
+          {/* Центральный блок: 1-Click Format Presets + Свободный ввод названия проекта и обложки */}
+          <div className="flex flex-wrap items-center gap-2 bg-[#090d16]/90 border border-white/[0.08] rounded-2xl p-1.5 shadow-inner">
+            <button
+              type="button"
+              onClick={() => applyStudioFormatPreset('histoviva_doc')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeFormatPreset === 'histoviva_doc'
+                  ? 'bg-indigo-500/25 border border-indigo-400/60 text-indigo-200 shadow-[0_0_14px_rgba(99,102,241,0.3)]'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+              title="Переключить на Повествовательный монтаж, профиль Historical Storytelling (2.5–8 сек) и документальные бейджи"
+            >
+              <span>🏛️ HistoViva • Документальный (~10 мин)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyStudioFormatPreset('ambient_loop_3h')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeFormatPreset === 'ambient_loop_3h'
+                  ? 'bg-amber-500/25 border border-amber-400/60 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.3)]'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+              title="Переключить на Многочасовой Луп, медитативный профиль (10–18 сек), шрифт Gold & Ice Magic и бейджи 4K ULTRA HD • 3 HOURS • NO ADS • SEAMLESS"
+            >
+              <span>🌙 Ambient Loop • 3 Часа (Атмосфера)</span>
+            </button>
+
+            <div className="hidden xl:flex items-center gap-1.5 pl-2 border-l border-white/[0.08]">
+              <input
+                type="text"
+                value={loopProjectName}
+                onChange={e => setLoopProjectName(e.target.value)}
+                placeholder="Название ролика..."
+                title="Свободное уникальное название текущего видеопроекта"
+                className="bg-slate-950/90 border border-slate-800 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-200 outline-none w-44"
+              />
+              <input
+                type="text"
+                value={thumbTitle}
+                onChange={e => setThumbTitle(e.target.value)}
+                placeholder="Заголовок обложки..."
+                title="Свободный заголовок 4K обложки для текущего выпуска"
+                className="bg-slate-950/90 border border-slate-800 focus:border-amber-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-amber-300 outline-none w-40"
+              />
+            </div>
+          </div>
+
           {/* Правый бейдж статуса */}
           <button
             type="button"
@@ -3893,7 +3980,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Нижний ряд: Сегментированные вкладки со скользящим индикатором (flex-wrap для комфортного нажатия на смартфонах и десктопах) */}
+        {/* Нижний ряд: Ровно 5 чистых модулей в верхней навигации со скользящим индикатором */}
         <nav
           role="tablist"
           aria-label="Цехи продакшна AetherCombine"
@@ -3928,20 +4015,11 @@ export default function App() {
               label: 'VerbaFlow • Сценарии & Текст'
             },
             {
-              id: 'voice' as TabId,
-              domId: 'tab-voice',
-              cls: 'nav-tab-voice',
-              iconCls: 'nav-icon-voice',
-              emoji: '🎙️',
-              glow: 'rgba(236,72,153,0.95)',
-              label: 'Дикторский цех'
-            },
-            {
               id: 'seo' as TabId,
               domId: 'tab-seo',
               cls: 'nav-tab-seo',
               iconCls: 'nav-icon-seo',
-              emoji: '📦',
+              emoji: '📈',
               glow: 'rgba(14,165,233,0.95)',
               label: 'YouTube SEO'
             },
@@ -3952,7 +4030,7 @@ export default function App() {
               iconCls: 'nav-icon-thumb',
               emoji: '🎨',
               glow: 'rgba(16,185,129,0.95)',
-              label: '4K Превью и Арт-цех'
+              label: '4К Превью & Арт-цех'
             }
           ].map(tabItem => {
             const isActive = activeTab === tabItem.id;
@@ -4020,6 +4098,11 @@ export default function App() {
               setDriveUser(u);
               setDriveToken(t);
             }}
+            externalProjectName={loopProjectName}
+            onExternalProjectNameChange={setLoopProjectName}
+            rhythmProfilePreset={rhythmProfilePreset}
+            onConsumeRhythmProfilePreset={() => setRhythmProfilePreset(null)}
+            shortsExportConfig={shortsExportConfig}
             transferredScript={transferredScript}
             onClearTransferredScript={() => setTransferredScript('')}
             externalScenes={externalNarrativeScenes}
@@ -6276,6 +6359,8 @@ export default function App() {
             onThumbTitleChange={setThumbTitle}
             thumbBadge={thumbBadge}
             onThumbBadgeChange={setThumbBadge}
+            externalFontStyle={externalThumbFontStyle}
+            onConsumeExternalFontStyle={() => setExternalThumbFontStyle(null)}
             onNotify={showToast}
           />
         </section>
@@ -6291,9 +6376,11 @@ export default function App() {
             sourceText={sourceText}
             onSourceTextChange={setSourceText}
             onSendToVoiceStudio={ttsReadyText => {
-              setVoiceStudioScript(ttsReadyText);
-              setActiveTab('voice');
-              showToast('🎙️ Результат передан в Дикторский цех!', 'success');
+              setTransferredScript(ttsReadyText);
+              showToast(
+                '🎙️ Текст очищен и подготовлен во внутреннем модуле «Дикторский цех» VerbaFlow!',
+                'success'
+              );
             }}
             onSendToYoutubeSeo={(fullScript, newScenes) => {
               setSeoScriptText(fullScript);
@@ -6302,7 +6389,7 @@ export default function App() {
                 setActiveNarrativeScenes(newScenes);
               }
               setActiveTab('seo');
-              showToast('📦 Сценарий и структура сцен переданы в YouTube SEO!', 'success');
+              showToast('📈 Сценарий и структура сцен переданы в YouTube SEO!', 'success');
             }}
             onSendScenesToTimeline={(newScenes, fullScript) => {
               setExternalNarrativeScenes(newScenes);
@@ -6311,7 +6398,7 @@ export default function App() {
               setSeoScriptText(fullScript);
               setActiveTab('combine');
               showToast(
-                `🎬 В Рендер-таймлайн / Ритм-карту передано ${newScenes.length} сцен с таймкодами и промптами для manifest.json!`,
+                `🎬 В Повествовательный монтаж / Ритм-карту передано ${newScenes.length} сцен с точным расчётом duration и векторами камеры!`,
                 'success'
               );
             }}
@@ -6320,37 +6407,7 @@ export default function App() {
         </section>
 
         {/* =========================================
-            ЦЕХ 5: ДИКТОРСКИЙ ЦЕХ (VOICE STUDIO — ELEVENLABS DUAL-KEY & EDGE TTS)
-           ========================================= */}
-        <section
-          id="view-voice"
-          className={`studio-view space-y-6 ${activeTab === 'voice' ? '' : 'hidden'}`}
-        >
-          <VoiceStudioView
-            scriptText={voiceStudioScript || transferredScript || sourceText}
-            onScriptTextChange={setVoiceStudioScript}
-            onMasterVoiceoverReady={(audioFileName, audioFile, durationSec) => {
-              setExternalMasterAudioFile({
-                fileName: audioFileName,
-                file: audioFile,
-                durationSec
-              });
-              setLoopMasterAudio(prev => ({
-                ...prev,
-                enabled: true,
-                file_name: audioFileName
-              }));
-              showToast(
-                `🎙 Файл «${audioFileName}» автоматически подставлен в мастер-аудиодорожку манифеста!`,
-                'success'
-              );
-            }}
-            onNotify={showToast}
-          />
-        </section>
-
-        {/* =========================================
-            ЦЕХ 6: YOUTUBE SEO & УПАКОВКА (SEO HUB — GEMINI US ENGLISH)
+            ЦЕХ 5: YOUTUBE SEO & УПАКОВКА (SEO HUB — GEMINI US ENGLISH)
            ========================================= */}
         <section
           id="view-seo"
@@ -6363,6 +6420,8 @@ export default function App() {
             loopSlots={timelineSlots}
             seoState={youtubeSeoState}
             onSeoStateChange={setYoutubeSeoState}
+            shortsExportConfig={shortsExportConfig}
+            onShortsExportChange={setShortsExportConfig}
             onApplyTitleToThumbnail={selectedTitle => {
               const words = selectedTitle
                 .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
