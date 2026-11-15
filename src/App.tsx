@@ -55,7 +55,6 @@ import {
   NarrativeSceneItem,
   SubtitlesFlexibleConfig
 } from './components/MontageCombineView';
-import { VerbaFlowStudioView } from './components/VerbaFlowStudioView';
 import { VerbaFlowTextWorkbench } from './components/VerbaFlowTextWorkbench';
 import { ThumbnailStudioView } from './components/ThumbnailStudioView';
 import { VoiceStudioView } from './components/VoiceStudioView';
@@ -75,23 +74,7 @@ import {
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
 
-type TabId = 'combine' | 'loop' | 'verbaflow' | 'hooks' | 'voice' | 'seo' | 'thumb';
-
-type VerbaMode =
-  | '15sec_rewrite'
-  | 'pack5_script'
-  | 'doc_loops'
-  | 'shorts_1sec';
-
-type MysteryType = 'mystery' | 'question' | 'epicenter' | 'myth';
-
-type ToneOfVoice =
-  | 'doc'
-  | 'storyteller'
-  | 'truecrime'
-  | 'scipop'
-  | 'dynamic'
-  | 'neutral';
+type TabId = 'combine' | 'loop' | 'verbaflow' | 'voice' | 'seo' | 'thumb';
 
 interface SceneItem {
   id: string;
@@ -101,13 +84,6 @@ interface SceneItem {
   type: 'video' | 'image' | 'script_block';
   duration: number;
   subtitle?: string;
-}
-
-interface ComplianceIssue {
-  word: string;
-  category: string;
-  risk: 'high' | 'medium';
-  replacements: string[];
 }
 
 export interface SlotInsertItem {
@@ -401,99 +377,6 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
       type: 'none',
       duration_sec: 0
     }
-  }
-];
-
-const COMPLIANCE_DICTIONARY: {
-  pattern: RegExp;
-  label: string;
-  category: string;
-  risk: 'high' | 'medium';
-  replacements: string[];
-}[] = [
-  {
-    pattern: /убийств[а-я]*/gi,
-    label: 'убийство / убить',
-    category: 'Насилие / True Crime',
-    risk: 'high',
-    replacements: ['устранение', 'трагический инцидент', 'роковое событие', 'лишение жизни']
-  },
-  {
-    pattern: /убит[а-я]*/gi,
-    label: 'убит',
-    category: 'Насилие / True Crime',
-    risk: 'high',
-    replacements: ['найден без признаков жизни', 'погиб при загадочных обстоятельствах']
-  },
-  {
-    pattern: /смерт[а-я]*/gi,
-    label: 'смерть',
-    category: 'Шокирующий контент',
-    risk: 'medium',
-    replacements: ['гибель', 'уход из жизни', 'трагический финал', 'фатальный исход']
-  },
-  {
-    pattern: /труп[а-я]*/gi,
-    label: 'труп',
-    category: 'Шокирующий контент',
-    risk: 'high',
-    replacements: ['тело', 'останки', 'обнаруженный объект']
-  },
-  {
-    pattern: /кров[а-я]*/gi,
-    label: 'кровь / кровавый',
-    category: 'Графическое насилие',
-    risk: 'medium',
-    replacements: ['багровые следы', 'биологические улики', 'мрачный']
-  },
-  {
-    pattern: /самоубийств[а-я]*|суицид[а-я]*/gi,
-    label: 'суицид / самоубийство',
-    category: 'Селф-харм (Строгий фильтр)',
-    risk: 'high',
-    replacements: ['добровольный уход', 'отчаянный шаг', 'фатальное решение']
-  },
-  {
-    pattern: /взрыв[а-я]*|теракт[а-я]*|террор[а-я]*/gi,
-    label: 'взрыв / теракт',
-    category: 'Опасные события',
-    risk: 'high',
-    replacements: ['мощный хлопок', 'детонация', 'чрезвычайное происшествие', 'катастрофа']
-  },
-  {
-    pattern: /оружи[а-я]*|пистолет[а-я]*|автомат[а-я]*/gi,
-    label: 'оружие / огнестрел',
-    category: 'Вооружение',
-    risk: 'medium',
-    replacements: ['арсенал', 'табельное средство', 'спецсредство']
-  },
-  {
-    pattern: /наркот[а-я]*|кокаин[а-я]*|героин[а-я]*/gi,
-    label: 'наркотики / вещества',
-    category: 'Запрещенные вещества',
-    risk: 'high',
-    replacements: ['запрещенные препараты', 'нелегальные субстанции', 'токсичные вещества']
-  },
-  {
-    pattern: /войн[а-я]*/gi,
-    label: 'война',
-    category: 'Военные конфликты',
-    risk: 'medium',
-    replacements: ['масштабное противостояние', 'вооруженный конфликт', 'историческая кампания']
-  },
-  {
-    pattern: /пытк[а-я]*|пытал[а-я]*/gi,
-    label: 'пытки',
-    category: 'Жестокость',
-    risk: 'high',
-    replacements: ['жесткий допрос', 'экстремальное давление', 'нечеловеческие испытания']
-  },
-  {
-    pattern: /жертв[а-я]*/gi,
-    label: 'жертва',
-    category: 'Криминал',
-    risk: 'medium',
-    replacements: ['пострадавший', 'фигурант истории', 'участник событий']
   }
 ];
 
@@ -1161,22 +1044,10 @@ export default function App() {
   const [thumbBadge, setThumbBadge] = useState<string>('4k_ultra_hd');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // VerbaFlow Retention Engine state
-  const [verbaMode, setVerbaMode] = useState<VerbaMode>('15sec_rewrite');
-  const [mysteryType, setMysteryType] = useState<MysteryType>('mystery');
-  const [toneOfVoice, setToneOfVoice] = useState<ToneOfVoice>('doc');
+  // VerbaFlow source text state
   const [sourceText, setSourceText] = useState<string>(
     'В 1974 году в архивах альпийской метеостанции нашли кассету с записью странного низкочастотного гула. Станцию закрыли за 24 часа, а персонал подписал неразглашение на 50 лет. Официальная версия гласила, что сошла лавина, но все приборы продолжали передавать сигнал еще три недели.'
   );
-  const [generatedHook15s, setGeneratedHook15s] = useState<string>('');
-  const [generatedHookPack, setGeneratedHookPack] = useState<string[]>([]);
-  const [generatedScript, setGeneratedScript] = useState<string>('');
-  const [complianceReport, setComplianceReport] = useState<{
-    checked: boolean;
-    issues: ComplianceIssue[];
-    score: number;
-  } | null>(null);
-  const [copiedAll, setCopiedAll] = useState<boolean>(false);
 
   // GitHub & Google Drive Runner Configuration state
   const [ghToken, setGhToken] = useState<string>(() => localStorage.getItem('ac_gh_token') || '');
@@ -3963,289 +3834,6 @@ export default function App() {
     link.click();
   };
 
-  // =========================================
-  // VERBAFLOW ENGINE: REWRITE & COMPLIANCE
-  // =========================================
-  const runVerbaFlowRewrite = useCallback(() => {
-    const raw = sourceText.trim();
-    if (!raw) {
-      showToast('Введите исходный текст или заметку для переработки!', 'error');
-      return;
-    }
-
-    // Extract key sentences / subject from source text
-    const sentences = raw
-      .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-    const coreSubject =
-      sentences[0]?.replace(/[.!?]+$/, '') || 'Засекреченный архивный объект';
-    const detailOne =
-      sentences[1]?.replace(/[.!?]+$/, '') ||
-      'Приборы зафиксировали аномалию, которую невозможно объяснить классической физикой';
-    const detailTwo =
-      sentences.slice(2).join(' ') ||
-      'Свидетельства очевидцев указывают на то, что ключевая улика все еще скрыта на месте событий.';
-
-    // Build 15-sec Hook based on MysteryType
-    const hookByMystery: Record<MysteryType, string> = {
-      mystery: `[00:00–00:15 • ХУК-ТАЙНА] Все официальные отчеты утверждали одно: «${coreSubject}». Но никто не смог объяснить деталь, обнаруженную на 14-й секунде архивной пленки — именно там скрыто то, ради чего территорию закрыли на полвека...`,
-      question: `[00:00–00:15 • ХУК-ВОПРОС] Что заставило опытных специалистов бросить оборудование за одну ночь? Если «${coreSubject}» — всего лишь совпадение, то почему датчики продолжали передавать сигнал из пустого бункера?`,
-      epicenter: `[00:00–00:15 • В ЭПИЦЕНТР СОБЫТИЯ] 03:17 ночи. Красный индикатор зашкаливает. На столе остается включенный магнитофон: «${coreSubject}». Через двенадцать минут связь обрывается, но запись продолжается...`,
-      myth: `[00:00–00:15 • РАЗРУШЕНИЕ МИФА] Десятилетиями эту историю списывали на обычную природную случайность. Но рассекреченный протокол доказывает обратное: «${coreSubject}» стал лишь прикрытием для куда более масштабного эксперимента.`
-    };
-
-    // Tone modifiers
-    const toneConfig: Record<
-      ToneOfVoice,
-      { badge: string; leadIn: string; transition: string; closer: string }
-    > = {
-      doc: {
-        badge: '🎬 Документальный жанр',
-        leadIn: 'Хроника событий восстанавливается по крупицам из уцелевших журналов дежурств.',
-        transition: 'Однако в этой стройной картине обнаруживается критическое несоответствие.',
-        closer: 'И пока архивы остаются закрытыми, финальная точка в этом досье не поставлена.'
-      },
-      storyteller: {
-        badge: '🎙️ Живой рассказчик (YouTube)',
-        leadIn: 'Только представьте себе эту картину: вы открываете старый кейс, а внутри — то, чего там быть просто не может.',
-        transition: 'И вот тут начинается самое интересное — деталь, которую упустили почти все.',
-        closer: 'Напишите в комментариях, какой из двух сценариев кажется вам реальным.'
-      },
-      truecrime: {
-        badge: '🕵️ Расследование / Тру-крайм',
-        leadIn: 'Улика №1 в материалах дела противоречит первичным показаниям.',
-        transition: 'Сопоставим временные метки: между последним выходом на связь и оцеплением прошло ровно 40 минут.',
-        closer: 'Следствие закрыло дело, но главная нестыковка так и осталась без ответа.'
-      },
-      scipop: {
-        badge: '🧠 Научпоп / Аналитика',
-        leadIn: 'Если отбросить конспирологию и взглянуть на сухие данные телеметрии, возникает парадокс.',
-        transition: 'С точки зрения акустики и геофизики, подобный резонанс требует колоссального источника энергии.',
-        closer: 'Именно этот физический феномен и делает данный случай уникальным для современной науки.'
-      },
-      dynamic: {
-        badge: '🔥 Динамичный / Энергичный',
-        leadIn: 'Никаких долгих вступлений — сразу к фактам, от которых бегут мурашки.',
-        transition: 'Думаете, на этом всё закончилось? Как бы не так! Вторая фаза началась мгновенно.',
-        closer: 'Это меняет абсолютно всё, что мы знали об этой истории раньше!'
-      },
-      neutral: {
-        badge: '⚖️ Нейтральный / Строгий',
-        leadIn: 'Зафиксированные документальные сведения позволяют выделить три ключевых этапа инцидента.',
-        transition: 'При анализе вторичных источников выявляется ряд объективных противоречий.',
-        closer: 'Совокупность приведенных фактов оставляет вопрос открытым для дальнейшей экспертизы.'
-      }
-    };
-
-    const selectedHook = hookByMystery[mysteryType];
-    const tone = toneConfig[toneOfVoice];
-
-    const packOf5Hooks = [
-      `1. [ТАЙНА 0–15с]: ${hookByMystery.mystery}`,
-      `2. [ПРОВОКАЦИЯ 0–15с]: ${hookByMystery.question}`,
-      `3. [ЭПИЦЕНТР 0–15с]: ${hookByMystery.epicenter}`,
-      `4. [МИФ 0–15с]: ${hookByMystery.myth}`,
-      `5. [КОНТРАСТ 0–15с]: На бумаге объект числился полностью заброшенным. На практике — внутри каждую ночь фиксировался импульс: «${coreSubject}».`
-    ];
-
-    setGeneratedHook15s(selectedHook);
-
-    if (verbaMode === '15sec_rewrite') {
-      setGeneratedHookPack([]);
-      setGeneratedScript(
-        `=== БЛОК 1: ЗАВЯЗКА И КОНТЕКСТ (${tone.badge}) ===\n` +
-          `${tone.leadIn}\n` +
-          `${coreSubject}. ${detailOne}.\n\n` +
-          `=== БЛОК 2: ПЕТЛЯ УДЕРЖАНИЯ (ОТКРЫТЫЙ ВОПРОС) ===\n` +
-          `${tone.transition} Но прежде чем мы разберем содержимое найденного носителя, обратите внимание на странную закономерность в датах...\n\n` +
-          `=== БЛОК 3: КУЛЬМИНАЦИЯ И АНАЛИЗ ФАКТОВ ===\n` +
-          `${detailTwo}\n\n` +
-          `=== ФИНАЛ ===\n` +
-          `${tone.closer}`
-      );
-    } else if (verbaMode === 'pack5_script') {
-      setGeneratedHookPack(packOf5Hooks);
-      setGeneratedScript(
-        `=== ПОЛНЫЙ СЦЕНАРИЙ РОЛИКА (${tone.badge}) ===\n\n` +
-          `[СЦЕНА 1 • 00:15–01:10 | Визуал: Медленный наезд Ken Burns на архивный кадр]\n` +
-          `${tone.leadIn} ${coreSubject}.\n\n` +
-          `[СЦЕНА 2 • 01:10–02:30 | Визуал: Крупный план приборов и карты локации]\n` +
-          `${detailOne}. ${tone.transition}\n\n` +
-          `[СЦЕНА 3 • 02:30–04:00 | Визуал: Сравнение официальной версии и скрытых улик]\n` +
-          `${detailTwo}\n\n` +
-          `[СЦЕНА 4 • ФИНАЛ | Визуал: Затемнение под низкий эмбиенс]\n` +
-          `${tone.closer}`
-      );
-    } else if (verbaMode === 'doc_loops') {
-      setGeneratedHookPack([]);
-      setGeneratedScript(
-        `=== ДОКУМЕНТАЛЬНЫЙ СЦЕНАРИЙ С ПЕТЛЯМИ ИНТРИГИ (${tone.badge}) ===\n\n` +
-          `[ГЛАВА I. ИСХОДНЫЙ ИМПУЛЬС]\n` +
-          `${tone.leadIn} ${coreSubject}.\n` +
-          `🪝 ПЕТЛЯ ИНТРИГИ #1: Тогда никто не придал значения короткому сбою питания, но через 18 минут именно он станет ключом к разгадке...\n\n` +
-          `[ГЛАВА II. СКРЫТЫЙ ФАКТОР]\n` +
-          `${detailOne}. ${tone.transition}\n` +
-          `🪝 ПЕТЛЯ ИНТРИГИ #2: Однако главная аномалия скрывалась не в самом сигнале, а в том, откуда именно он транслировался...\n\n` +
-          `[ГЛАВА III. РАЗВЯЗКА АРХИВА]\n` +
-          `${detailTwo}\n` +
-          `🪝 ПЕТЛЯ ИНТРИГИ #3 (ФИНАЛЬНЫЙ ТВИСТ): ${tone.closer}`
-      );
-    } else {
-      // shorts_1sec
-      setGeneratedHookPack([]);
-      setGeneratedScript(
-        `=== SHORTS / REELS СЦЕНАРИЙ (УДЕРЖАНИЕ С 1-Й СЕКУНДЫ • ДО 60 СЕК) ===\n\n` +
-          `[00:00–00:03 • СТОП-КАДР]: Стоп! Эту запись пытались стереть трижды.\n` +
-          `[00:03–00:15 • ИНТРИГА]: ${coreSubject}.\n` +
-          `[00:15–00:35 • РАЗВИТИЕ (Смена кадров каждые 2.5 сек)]: ${detailOne}.\n` +
-          `[00:35–00:52 • КУЛЬМИНАЦИЯ]: ${detailTwo}\n` +
-          `[00:52–00:60 • ЗАКОЛЬЦОВКА (LOOP END)]: ${tone.closer} А начинается всё с того, что...`
-      );
-    }
-
-    showToast('Текст успешно переработан движком VerbaFlow!', 'success');
-  }, [sourceText, mysteryType, toneOfVoice, verbaMode, showToast]);
-
-  // Run initial generation on first load so the workspace is immediately populated
-  useEffect(() => {
-    if (!generatedScript && sourceText) {
-      runVerbaFlowRewrite();
-    }
-  }, []);
-
-  // YouTube Compliance Check
-  const runYouTubeComplianceCheck = () => {
-    const combinedText = `${sourceText}\n${generatedHook15s}\n${generatedScript}`;
-    const foundIssues: ComplianceIssue[] = [];
-
-    COMPLIANCE_DICTIONARY.forEach(entry => {
-      const matches = combinedText.match(entry.pattern);
-      if (matches && matches.length > 0) {
-        const uniqueMatches = Array.from(new Set(matches.map(m => m.toLowerCase())));
-        foundIssues.push({
-          word: uniqueMatches.join(', '),
-          category: entry.category,
-          risk: entry.risk,
-          replacements: entry.replacements
-        });
-      }
-    });
-
-    const score = Math.max(
-      10,
-      100 -
-        foundIssues.reduce(
-          (acc, item) => acc + (item.risk === 'high' ? 22 : 12),
-          0
-        )
-    );
-
-    setComplianceReport({
-      checked: true,
-      issues: foundIssues,
-      score
-    });
-
-    if (foundIssues.length === 0) {
-      showToast('YouTube Compliance: Триггерных слов не обнаружено (100% Safe)', 'success');
-    } else {
-      showToast(
-        `Обнаружено ${foundIssues.length} триггерных групп. Доступны безопасные синонимы!`,
-        'info'
-      );
-    }
-  };
-
-  // Replace trigger word with safe synonym across source & generated script
-  const applySafeSynonym = (issueWord: string, replacement: string) => {
-    const words = issueWord.split(',').map(w => w.trim()).filter(Boolean);
-    let updatedSource = sourceText;
-    let updatedHook = generatedHook15s;
-    let updatedScript = generatedScript;
-
-    words.forEach(w => {
-      const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(escaped, 'gi');
-      updatedSource = updatedSource.replace(regex, replacement);
-      updatedHook = updatedHook.replace(regex, replacement);
-      updatedScript = updatedScript.replace(regex, replacement);
-    });
-
-    setSourceText(updatedSource);
-    setGeneratedHook15s(updatedHook);
-    setGeneratedScript(updatedScript);
-    setComplianceReport(prev =>
-      prev
-        ? {
-            ...prev,
-            issues: prev.issues.filter(i => i.word !== issueWord),
-            score: Math.min(100, prev.score + 18)
-          }
-        : null
-    );
-    showToast(`Заменено на безопасный синоним: «${replacement}»`, 'success');
-  };
-
-  // Copy all generated content
-  const handleCopyAllVerbaFlow = () => {
-    const packBlock =
-      generatedHookPack.length > 0
-        ? `=== ПАК ИЗ 5 ХУКОВ (15 СЕК) ===\n${generatedHookPack.join('\n')}\n\n`
-        : '';
-    const fullOutput = `${generatedHook15s}\n\n${packBlock}${generatedScript}`.trim();
-    if (!fullOutput) {
-      showToast('Сначала сгенерируйте сценарий!', 'error');
-      return;
-    }
-    navigator.clipboard.writeText(fullOutput);
-    setCopiedAll(true);
-    showToast('Полный сценарий и 15-сек хук скопированы в буфер обмена!', 'success');
-    setTimeout(() => setCopiedAll(false), 2000);
-  };
-
-  // Transfer generated script to Combine Montage Studio
-  const handleTransferToCombine = () => {
-    const fullOutput = `${generatedHook15s}\n\n${generatedScript}`.trim();
-    if (!fullOutput) {
-      showToast('Сначала сгенерируйте сценарий для трансфера!', 'error');
-      return;
-    }
-
-    // Split script into visual scene blocks for the timeline
-    const paragraphs = generatedScript
-      .split(/\n\n+/)
-      .map(p => p.trim())
-      .filter(Boolean);
-
-    const scriptScenes: SceneItem[] = [
-      {
-        id: 'hook-scene-' + Date.now(),
-        name: '01_HOOK_15SEC.mp4',
-        url: '',
-        type: 'script_block',
-        duration: 15,
-        subtitle: generatedHook15s.slice(0, 90) + '...'
-      },
-      ...paragraphs.map((p, idx) => ({
-        id: `scene-block-${idx}-${Date.now()}`,
-        name: `0${idx + 2}_SCENE_BLOCK.mp4`,
-        url: '',
-        type: 'script_block' as const,
-        duration: 12,
-        subtitle: p.replace(/^===.*===\n?/, '').slice(0, 90) + '...'
-      }))
-    ];
-
-    setScenes(prev => [...prev, ...scriptScenes]);
-    setTransferredScript(fullOutput);
-    setActiveTab('combine');
-    showToast(
-      `Сценарий перенесен в сборочный цех (${scriptScenes.length} сценарных блоков добавлено в ленту)!`,
-      'success'
-    );
-  };
-
   const isGhConnected = Boolean(ghToken && ghRepo);
   const isGdriveConfigured = Boolean(gdriveFolderId);
   const estimatedGb = estimateLoopSizeGb();
@@ -4338,15 +3926,6 @@ export default function App() {
               emoji: '📝',
               glow: 'rgba(56,189,248,0.95)',
               label: 'VerbaFlow • Сценарии & Текст'
-            },
-            {
-              id: 'hooks' as TabId,
-              domId: 'tab-hooks',
-              cls: 'nav-tab-hooks',
-              iconCls: 'nav-icon-hooks',
-              emoji: '⚡',
-              glow: 'rgba(250,204,21,0.95)',
-              label: 'Сценарий и Хуки'
             },
             {
               id: 'voice' as TabId,
@@ -6702,7 +6281,7 @@ export default function App() {
         </section>
 
         {/* =========================================
-            ЦЕХ 3.5: VERBAFLOW • СЦЕНАРИИ & ТЕКСТ (АНТИ-ИИ, ХУКИ, ДИКТОР, РЕНТГЕН, СЦЕНЫ)
+            ЦЕХ 4: VERBAFLOW • СЦЕНАРИИ & ТЕКСТ (АНТИ-ИИ, ХУКИ, ДИКТОР, РЕНТГЕН, СЦЕНЫ)
            ========================================= */}
         <section
           id="view-verbaflow"
@@ -6716,6 +6295,15 @@ export default function App() {
               setActiveTab('voice');
               showToast('🎙️ Результат передан в Дикторский цех!', 'success');
             }}
+            onSendToYoutubeSeo={(fullScript, newScenes) => {
+              setSeoScriptText(fullScript);
+              setTransferredScript(fullScript);
+              if (newScenes.length > 0) {
+                setActiveNarrativeScenes(newScenes);
+              }
+              setActiveTab('seo');
+              showToast('📦 Сценарий и структура сцен переданы в YouTube SEO!', 'success');
+            }}
             onSendScenesToTimeline={(newScenes, fullScript) => {
               setExternalNarrativeScenes(newScenes);
               setActiveNarrativeScenes(newScenes);
@@ -6724,54 +6312,6 @@ export default function App() {
               setActiveTab('combine');
               showToast(
                 `🎬 В Рендер-таймлайн / Ритм-карту передано ${newScenes.length} сцен с таймкодами и промптами для manifest.json!`,
-                'success'
-              );
-            }}
-            onNotify={showToast}
-          />
-        </section>
-
-        {/* =========================================
-            ЦЕХ 4: СЦЕНАРИЙ И ХУКИ (VERBAFLOW ENGINE)
-           ========================================= */}
-        <section
-          id="view-hooks"
-          className={`studio-view space-y-6 ${activeTab === 'hooks' ? '' : 'hidden'}`}
-        >
-          <VerbaFlowStudioView
-            sourceText={sourceText}
-            onSourceTextChange={setSourceText}
-            verbaMode={verbaMode}
-            onVerbaModeChange={setVerbaMode}
-            mysteryType={mysteryType}
-            onMysteryTypeChange={setMysteryType}
-            toneOfVoice={toneOfVoice}
-            onToneOfVoiceChange={setToneOfVoice}
-            complianceDictionary={COMPLIANCE_DICTIONARY}
-            onTransferToNarrativeMontage={(newScenes, fullScript) => {
-              setExternalNarrativeScenes(newScenes);
-              setActiveNarrativeScenes(newScenes);
-              setTransferredScript(fullScript);
-              setActiveTab('combine');
-              showToast(
-                `🎬 В Повествовательный монтаж передано ${newScenes.length} сцен и полный сценарий (US English)!`,
-                'success'
-              );
-            }}
-            onSendToVoiceStudio={ttsReadyText => {
-              setVoiceStudioScript(ttsReadyText);
-              setActiveTab('voice');
-              showToast('🎙 Сценарий с разметкой пауз передан в Дикторский цех!', 'success');
-            }}
-            onSyncAllWorkshops={(newScenes, fullScript, ttsScript) => {
-              setExternalNarrativeScenes(newScenes);
-              setActiveNarrativeScenes(newScenes);
-              setTransferredScript(fullScript);
-              setVoiceStudioScript(ttsScript);
-              setSeoScriptText(fullScript);
-              setActiveTab('seo');
-              showToast(
-                `🚀 Сценарий синхронизирован в YouTube SEO, Дикторский цех и Видеопромпты (${newScenes.length} сцен)!`,
                 'success'
               );
             }}

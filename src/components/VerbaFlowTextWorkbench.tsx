@@ -24,7 +24,8 @@ import {
   Volume2,
   Trash2,
   FileText,
-  Layers
+  Layers,
+  Package
 } from 'lucide-react';
 import type { NarrativeSceneItem } from './MontageCombineView';
 import {
@@ -51,6 +52,7 @@ interface VerbaFlowTextWorkbenchProps {
   onSourceTextChange: (text: string) => void;
   onSendToVoiceStudio: (voiceReadyText: string) => void;
   onSendScenesToTimeline: (scenes: NarrativeSceneItem[], fullScriptText: string) => void;
+  onSendToYoutubeSeo: (fullScriptText: string, scenes: NarrativeSceneItem[]) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -116,6 +118,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   onSourceTextChange,
   onSendToVoiceStudio,
   onSendScenesToTimeline,
+  onSendToYoutubeSeo,
   onNotify
 }) => {
   const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>('rewrite');
@@ -456,6 +459,33 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     onSendScenesToTimeline(mappedForMontage, base);
   };
 
+  const handleTransferToYoutubeSeo = () => {
+    const base = (workingText || sourceText).trim();
+    if (!base) {
+      onNotify('Текст пуст — нечего передавать в YouTube SEO!', 'error');
+      return;
+    }
+    const activeScenes =
+      sceneCards.length > 0 ? sceneCards : localSliceToScenes(base, tone);
+    const mappedForSeo: NarrativeSceneItem[] = activeScenes.map(sc => ({
+      scene_index: sc.sceneIndex,
+      scene_id: `SCENE_${String(sc.sceneIndex).padStart(3, '0')}`,
+      title: sc.promptRu.slice(0, 64),
+      file_name: '',
+      start_time: sc.startTime,
+      duration: sc.durationSec,
+      transition: {
+        type: 'crossfade',
+        duration_sec: 0.6
+      },
+      text_overlay: sc.scriptLine,
+      ai_video_prompt: sc.promptEn,
+      prompt_ru: sc.promptRu,
+      sfx: sc.sfx
+    }));
+    onSendToYoutubeSeo(base, mappedForSeo);
+  };
+
   const updateSceneCard = (idx: number, patch: Partial<VerbaScenePromptCard>) => {
     setSceneCards(prev =>
       prev.map((item, i) => (i === idx ? { ...item, ...patch } : item))
@@ -504,6 +534,17 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           >
             <Mic className="w-4 h-4 shrink-0" />
             <span>🎙️ Результат → в Дикторский цех</span>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            type="button"
+            onClick={handleTransferToYoutubeSeo}
+            className="min-h-[42px] px-4 py-2 rounded-xl bg-[#131B2E] hover:bg-[#19233b] border border-sky-400/35 text-sky-300 text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+          >
+            <Package className="w-4 h-4 shrink-0" />
+            <span>📦 Сценарий → в YouTube SEO</span>
           </motion.button>
 
           <motion.button

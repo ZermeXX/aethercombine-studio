@@ -68,7 +68,7 @@ Requirements:
 4. "tags": 30 relevant YouTube search tags as a single comma-separated string in US English, total length strictly under 490 characters.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -107,59 +107,7 @@ Requirements:
   });
 
   // ==========================================================================
-  // 2. POST /api/gemini/script — Генерация 3-блочного сценария VerbaFlow (US English)
-  // ==========================================================================
-  app.post('/api/gemini/script', async (req, res) => {
-    try {
-      const { sourceText, mysteryType, toneOfVoice, verbaMode } = req.body as {
-        sourceText?: string;
-        mysteryType?: string;
-        toneOfVoice?: string;
-        verbaMode?: string;
-      };
-
-      const ai = getGenAIClient();
-      const prompt = `You are a master YouTube retention scriptwriter. Rewrite the user's raw notes into a high-retention 3-block script STRICTLY IN NATURAL US ENGLISH.
-Remove boring encyclopedia dates from the opening hook and turn dry facts into dramatic conflict.
-
-Mystery Hook Type: ${mysteryType || 'mystery'}
-Tone of Voice: ${toneOfVoice || 'doc'}
-Mode: ${verbaMode || '15sec_rewrite'}
-Raw Source Input:
-${(sourceText || '').slice(0, 3500)}
-
-Return JSON with:
-1. "hook": [HOOK 00:00–00:15] trigger without dates + visual scene marker [Visual: ...] at the start.
-2. "bridge": [THE BRIDGE / OPEN LOOP 00:15–00:45] open loop intrigue promising a climax payoff.
-3. "body": [BODY SCRIPT] rhythmic short sentences (<= 10 words average) with pause markers [pause 1.5s] and vocal emphasis in *CAPS*.`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              hook: { type: Type.STRING },
-              bridge: { type: Type.STRING },
-              body: { type: Type.STRING }
-            },
-            required: ['hook', 'bridge', 'body']
-          }
-        }
-      });
-
-      const parsed = JSON.parse((response.text ?? '{}').trim());
-      res.json({ ok: true, data: parsed });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ ok: false, error: msg });
-    }
-  });
-
-  // ==========================================================================
-  // 2.5. POST /api/gemini/verbaflow — Интеллектуальный цех VerbaFlow (Рерайт, Хуки, Сцены)
+  // 2. POST /api/gemini/verbaflow — Интеллектуальный цех VerbaFlow (Рерайт, Хуки, Сцены)
   // ==========================================================================
   app.post('/api/gemini/verbaflow', async (req, res) => {
     try {
