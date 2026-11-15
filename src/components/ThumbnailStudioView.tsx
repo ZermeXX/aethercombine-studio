@@ -32,7 +32,9 @@ import {
   Flame,
   RotateCcw,
   Move,
-  ChevronDown
+  ChevronDown,
+  Image as ImageIcon,
+  ArrowRight
 } from 'lucide-react';
 
 declare global {
@@ -48,6 +50,9 @@ interface ThumbnailStudioViewProps {
   onThumbBadgeChange: (badge: string) => void;
   externalFontStyle?: ThumbnailFontStyleId | null;
   onConsumeExternalFontStyle?: () => void;
+  externalCoverAImageUrl?: string | null;
+  onConsumeExternalCoverAImage?: () => void;
+  onSendToArtEditor?: (imageDataUrl: string, slotLabel: string) => void;
   youtubeMockTitle?: string;
   scriptContext?: string;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
@@ -695,34 +700,54 @@ function renderProcedural16x9ArtworkDataUrl(
 
 export type CinematicBadgeId =
   | '4k_ultra_hd'
+  | 'documentary'
+  | 'true_story'
+  | 'full_story'
+  | 'untold_history'
+  | 'lost_archives'
+  | 'real_footage'
+  | 'deep_dive'
+  | 'no_ads'
   | '3_hours'
+  | 'no_ads_seamless'
   | 'ambience_asmr'
   | 'deep_sleep'
-  | 'no_ads_seamless'
-  | 'binaural_audio'
   | 'cozy_fireplace'
-  | '432_hz'
-  | 'archive_file'
-  | 'classified_doc'
-  | 'documentary';
+  | 'winter_nights'
+  | 'rain_and_thunder'
+  | 'study_and_focus';
 
 export interface CinematicBadgeOption {
   id: CinematicBadgeId;
   label: string;
 }
 
-const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
+const HISTOVIVA_BADGE_OPTIONS: CinematicBadgeOption[] = [
   { id: '4k_ultra_hd', label: '4K ULTRA HD' },
+  { id: 'documentary', label: 'DOCUMENTARY' },
+  { id: 'true_story', label: 'TRUE STORY' },
+  { id: 'full_story', label: 'FULL STORY' },
+  { id: 'untold_history', label: 'UNTOLD HISTORY' },
+  { id: 'lost_archives', label: 'LOST ARCHIVES' },
+  { id: 'real_footage', label: 'REAL FOOTAGE' },
+  { id: 'deep_dive', label: 'DEEP DIVE' },
+  { id: 'no_ads', label: 'NO ADS' }
+];
+
+const AMBIENT_BADGE_OPTIONS: CinematicBadgeOption[] = [
   { id: '3_hours', label: '3 HOURS' },
   { id: 'no_ads_seamless', label: 'NO ADS • SEAMLESS' },
-  { id: 'archive_file', label: 'ARCHIVE FILE' },
-  { id: 'classified_doc', label: 'CLASSIFIED' },
-  { id: 'documentary', label: 'DOCUMENTARY' },
   { id: 'ambience_asmr', label: 'AMBIENCE • ASMR' },
   { id: 'deep_sleep', label: 'DEEP SLEEP' },
-  { id: 'binaural_audio', label: 'BINAURAL AUDIO' },
   { id: 'cozy_fireplace', label: 'COZY FIREPLACE' },
-  { id: '432_hz', label: '432 HZ' }
+  { id: 'winter_nights', label: 'WINTER NIGHTS' },
+  { id: 'rain_and_thunder', label: 'RAIN & THUNDER' },
+  { id: 'study_and_focus', label: 'STUDY & FOCUS' }
+];
+
+const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
+  ...HISTOVIVA_BADGE_OPTIONS,
+  ...AMBIENT_BADGE_OPTIONS
 ];
 
 const BADGE_LABEL_BY_ID: Record<CinematicBadgeId, string> = CINEMATIC_BADGE_OPTIONS.reduce(
@@ -741,7 +766,10 @@ function parseBadgeIds(raw: string): CinematicBadgeId[] {
     .split(',')
     .map(s => {
       const trimmed = s.trim();
-      return trimmed === '4k_gold' ? '4k_ultra_hd' : trimmed;
+      if (trimmed === '4k_gold') return '4k_ultra_hd';
+      if (trimmed === 'archive_file') return 'lost_archives';
+      if (trimmed === 'classified_doc') return 'true_story';
+      return trimmed;
     })
     .filter((s): s is CinematicBadgeId => VALID_BADGE_IDS.has(s));
   return Array.from(new Set(normalized)).slice(0, 3);
@@ -1274,6 +1302,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   onThumbBadgeChange,
   externalFontStyle,
   onConsumeExternalFontStyle,
+  externalCoverAImageUrl,
+  onConsumeExternalCoverAImage,
+  onSendToArtEditor,
   youtubeMockTitle,
   scriptContext,
   onNotify
@@ -1285,7 +1316,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [imgA, setImgA] = useState<HTMLImageElement | null>(null);
   const [imgB, setImgB] = useState<HTMLImageElement | null>(null);
   const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
-  const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>(['3_hours', 'deep_sleep']);
+  const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>([
+    '3_hours',
+    'no_ads_seamless',
+    'deep_sleep'
+  ]);
   const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
 
   useEffect(() => {
@@ -1294,6 +1329,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       onConsumeExternalFontStyle?.();
     }
   }, [externalFontStyle, onConsumeExternalFontStyle]);
+
+  useEffect(() => {
+    if (!externalCoverAImageUrl) return;
+    const editedImg = new Image();
+    editedImg.onload = () => {
+      setImgA(editedImg);
+      window.selectedMasterThumbnail = externalCoverAImageUrl;
+      onConsumeExternalCoverAImage?.();
+    };
+    editedImg.src = externalCoverAImageUrl;
+  }, [externalCoverAImageUrl, onConsumeExternalCoverAImage]);
 
   const [royalDecorEnabled, setRoyalDecorEnabled] = useState<boolean>(true);
   const [magicDecorEnabled, setMagicDecorEnabled] = useState<boolean>(true);
@@ -1462,10 +1508,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       next = selectedBadgesA.filter(id => id !== badgeId);
     } else {
       if (selectedBadgesA.length >= 3) {
-        onNotify(
-          'Можно включить максимум 3 бейджа одновременно — отключите один из выбранных.',
-          'info'
-        );
+        onNotify('Максимум 3 бейджа', 'info');
         return;
       }
       next = [...selectedBadgesA, badgeId];
@@ -1474,19 +1517,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   const toggleBadgeB = (badgeId: CinematicBadgeId) => {
-    setBadgesB(prev => {
-      if (prev.includes(badgeId)) {
-        return prev.filter(id => id !== badgeId);
-      }
-      if (prev.length >= 3) {
-        onNotify(
-          'Для Варианта B можно включить максимум 3 бейджа одновременно.',
-          'info'
-        );
-        return prev;
-      }
-      return [...prev, badgeId];
-    });
+    if (badgesB.includes(badgeId)) {
+      setBadgesB(prev => prev.filter(id => id !== badgeId));
+      return;
+    }
+    if (badgesB.length >= 3) {
+      onNotify('Максимум 3 бейджа', 'info');
+      return;
+    }
+    setBadgesB(prev => [...prev, badgeId]);
   };
 
   // Автогенератор визуального промпта на английском языке
@@ -1678,7 +1717,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       if (badgesToDraw.length > 0) {
         const badgeFontPx = 13.5 * scale;
-        const badgeFontFamily = '"Inter", "Montserrat", sans-serif';
+        const badgeFontFamily = '"Montserrat", "Inter", sans-serif';
         const badgeFontWeight = '800';
         const baseTrackingPx = 1.4 * scale;
 
@@ -1740,15 +1779,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           const label = badgesToDraw[i];
 
           ctx.save();
-          ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
-          ctx.strokeStyle = '#f59e0b';
-          ctx.lineWidth = Math.max(1, 2 * scale);
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.90)';
+          ctx.strokeStyle = '#FACC15';
+          ctx.lineWidth = Math.max(1.5, 2 * scale);
           ctx.beginPath();
           ctx.roundRect(bx, topY, bw, effectiveH, 9 * scale);
           ctx.fill();
           ctx.stroke();
 
-          ctx.fillStyle = '#fbbf24';
+          ctx.fillStyle = '#FDE047';
           drawTrackedCenteredText(label, bx + bw / 2, topY + effectiveH * 0.52, effectiveTracking);
           ctx.restore();
 
@@ -2838,6 +2877,34 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     onNotify(`📥 4K обложка ${slot} (3840×2160 PNG без водяных знаков) скачана!`, 'success');
   };
 
+  // Передача чистого арта или скомпонованного кадра в модуль «🖼️ Арт-Редактор & Фон»
+  const handleOpenSlotInArtEditor = (slot: 'A' | 'B') => {
+    if (!onSendToArtEditor) return;
+    const rawImg = slot === 'A' ? imgA : imgB || imgA;
+    let exportDataUrl = '';
+    if (rawImg && rawImg.naturalWidth > 0 && rawImg.naturalHeight > 0) {
+      const off = document.createElement('canvas');
+      off.width = rawImg.naturalWidth;
+      off.height = rawImg.naturalHeight;
+      const ctx = off.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(rawImg, 0, 0, off.width, off.height);
+        exportDataUrl = off.toDataURL('image/png');
+      }
+    }
+    if (!exportDataUrl) {
+      const canvas = slot === 'A' ? canvasARef.current : canvasBRef.current;
+      if (canvas) {
+        exportDataUrl = canvas.toDataURL('image/png');
+      }
+    }
+    if (!exportDataUrl) {
+      onNotify('Сначала выберите или сгенерируйте обложку для передачи в Арт-Редактор.', 'info');
+      return;
+    }
+    onSendToArtEditor(exportDataUrl, slot === 'A' ? 'Обложка A (4K Превью)' : 'Обложка B (4K Превью)');
+  };
+
   // Кнопка «📋 Скопировать промпт для веб-генератора»
   const copyCoverPromptForWebGenerator = () => {
     navigator.clipboard.writeText(activePromptText);
@@ -3379,7 +3446,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] text-white/55">
                   Кинематографичные бейджи A (верхний правый угол, до 3):
@@ -3399,25 +3466,59 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {CINEMATIC_BADGE_OPTIONS.map(badge => {
-                  const isActive = selectedBadgesA.includes(badge.id);
-                  return (
-                    <button
-                      key={`badge-a-${badge.id}`}
-                      type="button"
-                      aria-pressed={isActive}
-                      onClick={() => toggleBadgeA(badge.id)}
-                      className={`min-h-[44px] px-3 py-2 rounded-xl text-[11px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center ${
-                        isActive
-                          ? 'btn-artistic-premium shadow-[0_0_16px_rgba(245,158,11,0.35)]'
-                          : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                      }`}
-                    >
-                      {badge.label}
-                    </button>
-                  );
-                })}
+
+              {/* Категория 1: Документальные / Исторические (@Histoviva) */}
+              <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300/90 block">
+                  🏛️ Документальные / Исторические (@Histoviva)
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {HISTOVIVA_BADGE_OPTIONS.map(badge => {
+                    const isActive = selectedBadgesA.includes(badge.id);
+                    return (
+                      <button
+                        key={`badge-a-${badge.id}`}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => toggleBadgeA(badge.id)}
+                        className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                          isActive
+                            ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
+                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
+                        }`}
+                      >
+                        {badge.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Категория 2: Эмбиент / Многочасовой Луп */}
+              <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300/90 block">
+                  🌙 Эмбиент / Многочасовой Луп
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {AMBIENT_BADGE_OPTIONS.map(badge => {
+                    const isActive = selectedBadgesA.includes(badge.id);
+                    return (
+                      <button
+                        key={`badge-a-${badge.id}`}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => toggleBadgeA(badge.id)}
+                        className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                          isActive
+                            ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
+                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
+                        }`}
+                      >
+                        {badge.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -3515,7 +3616,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] text-white/55">
                     Кинематографичные бейджи B (до 3):
@@ -3535,31 +3636,65 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     )}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {CINEMATIC_BADGE_OPTIONS.map(badge => {
-                    const isActive = badgesB.includes(badge.id);
-                    return (
-                      <button
-                        key={`badge-b-${badge.id}`}
-                        type="button"
-                        aria-pressed={isActive}
-                        onClick={() => toggleBadgeB(badge.id)}
-                        className={`min-h-[44px] px-3 py-2 rounded-xl text-[11px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center ${
-                          isActive
-                            ? 'btn-primary-action shadow-[0_0_16px_rgba(16,185,129,0.35)]'
-                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                        }`}
-                      >
-                        {badge.label}
-                      </button>
-                    );
-                  })}
+
+                {/* Категория 1: Документальные / Исторические (@Histoviva) */}
+                <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300/90 block">
+                    🏛️ Документальные / Исторические (@Histoviva)
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {HISTOVIVA_BADGE_OPTIONS.map(badge => {
+                      const isActive = badgesB.includes(badge.id);
+                      return (
+                        <button
+                          key={`badge-b-${badge.id}`}
+                          type="button"
+                          aria-pressed={isActive}
+                          onClick={() => toggleBadgeB(badge.id)}
+                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                            isActive
+                              ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
+                              : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
+                          }`}
+                        >
+                          {badge.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Категория 2: Эмбиент / Многочасовой Луп */}
+                <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300/90 block">
+                    🌙 Эмбиент / Многочасовой Луп
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AMBIENT_BADGE_OPTIONS.map(badge => {
+                      const isActive = badgesB.includes(badge.id);
+                      return (
+                        <button
+                          key={`badge-b-${badge.id}`}
+                          type="button"
+                          aria-pressed={isActive}
+                          onClick={() => toggleBadgeB(badge.id)}
+                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                            isActive
+                              ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
+                              : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
+                          }`}
+                        >
+                          {badge.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Главный экшен: экспорт 4K обложки (изумрудно-бирюзовый градиент) */}
+          {/* Главный экшен: экспорт 4K обложки и передача в Арт-Редактор */}
           <div className="space-y-2.5 pt-1">
             <button
               type="button"
@@ -3569,6 +3704,30 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <Download className="w-4 h-4 shrink-0" />
               <span>📥 Экспорт 4K обложки A (3840×2160 PNG)</span>
             </button>
+            {onSendToArtEditor && (
+              <div className={`grid gap-2 ${abModeEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <button
+                  type="button"
+                  onClick={() => handleOpenSlotInArtEditor('A')}
+                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-cyan-400/40 text-cyan-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <ImageIcon className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Открыть A в Арт-Редакторе</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+                </button>
+                {abModeEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSlotInArtEditor('B')}
+                    className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Открыть B в Арт-Редакторе</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                  </button>
+                )}
+              </div>
+            )}
             {abModeEnabled && (
               <button
                 type="button"
@@ -3600,9 +3759,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
-                  3840×2160 • 16:9
-                </span>
+                <div className="flex items-center gap-2">
+                  {onSendToArtEditor && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSlotInArtEditor('A')}
+                      className="text-[10.5px] font-bold text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/35 px-2.5 py-0.5 rounded-full flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <span>Открыть в Арт-Редакторе</span>
+                      <ArrowRight className="w-3 h-3 shrink-0" />
+                    </button>
+                  )}
+                  <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
+                    3840×2160 • 16:9
+                  </span>
+                </div>
               </div>
 
               {/* Рамка с тонким бликом по краю и плавным появлением элементов управления */}

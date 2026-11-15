@@ -58,6 +58,10 @@ import {
 } from './components/MontageCombineView';
 import { VerbaFlowTextWorkbench } from './components/VerbaFlowTextWorkbench';
 import { ThumbnailStudioView, ThumbnailFontStyleId } from './components/ThumbnailStudioView';
+import {
+  ImageArtEditorView,
+  ArtEditorIncomingAsset
+} from './components/ImageArtEditorView';
 import { YouTubeSeoView } from './components/YouTubeSeoView';
 import {
   LiveTerminal,
@@ -74,7 +78,7 @@ import {
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
 
-type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb';
+type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb' | 'editor';
 type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
 
 interface SceneItem {
@@ -1051,7 +1055,10 @@ export default function App() {
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
   const [thumbTitle, setThumbTitle] = useState<string>('SEALED ARCHIVE');
-  const [thumbBadge, setThumbBadge] = useState<string>('archive_file,classified_doc,documentary');
+  const [thumbBadge, setThumbBadge] = useState<string>('4k_ultra_hd,documentary,lost_archives');
+  const [artEditorIncomingAsset, setArtEditorIncomingAsset] =
+    useState<ArtEditorIncomingAsset | null>(null);
+  const [editorEditedCoverAUrl, setEditorEditedCoverAUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // 2. ПЕРЕКЛЮЧАТЕЛЬ ФОРМАТОВ ПРОЕКТА В ШАПКЕ СТУДИИ (1-Click Format Presets)
@@ -1061,7 +1068,7 @@ export default function App() {
       handleSelectTab('combine');
       setRhythmProfilePreset('historical_storytelling');
       setExternalThumbFontStyle('medieval_serif');
-      setThumbBadge('archive_file,classified_doc,documentary');
+      setThumbBadge('4k_ultra_hd,documentary,lost_archives');
       setYoutubeSeoState(prev => ({ ...prev, tone: 'Historical Doc' }));
       showToast(
         '🏛️ Активирован пресет «HistoViva • Документальный (~10 мин)»: профиль Historical Storytelling (2.5–8 сек), стили Живопись / Графический роман и документальные бейджи обложки!',
@@ -1074,10 +1081,10 @@ export default function App() {
       setActCrossfadeSec(1.8);
       setInternalLoopCrossfadeSec(1.8);
       setExternalThumbFontStyle('gold_ice_magic');
-      setThumbBadge('4k_ultra_hd,3_hours,no_ads_seamless');
+      setThumbBadge('3_hours,no_ads_seamless,deep_sleep');
       setYoutubeSeoState(prev => ({ ...prev, tone: 'Cozy Ambient' }));
       showToast(
-        '🌙 Активирован пресет «Ambient Loop • 3 Часа (Атмосфера)»: медитативный профиль (10–18 сек, кроссфейды 1.8 сек), шрифт Gold & Ice Magic и бейджи 4K ULTRA HD • 3 HOURS • NO ADS • SEAMLESS!',
+        '🌙 Активирован пресет «Ambient Loop • 3 Часа (Атмосфера)»: медитативный профиль (10–18 сек, кроссфейды 1.8 сек), шрифт Gold & Ice Magic и бейджи 3 HOURS • NO ADS • SEAMLESS • DEEP SLEEP!',
         'success'
       );
     }
@@ -3804,29 +3811,38 @@ export default function App() {
       const labelMap: Record<string, string> = {
         '4k_ultra_hd': '4K ULTRA HD',
         '4k_gold': '4K ULTRA HD',
+        documentary: 'DOCUMENTARY',
+        true_story: 'TRUE STORY',
+        full_story: 'FULL STORY',
+        untold_history: 'UNTOLD HISTORY',
+        lost_archives: 'LOST ARCHIVES',
+        real_footage: 'REAL FOOTAGE',
+        deep_dive: 'DEEP DIVE',
+        no_ads: 'NO ADS',
         '3_hours': '3 HOURS',
+        no_ads_seamless: 'NO ADS • SEAMLESS',
         ambience_asmr: 'AMBIENCE • ASMR',
         deep_sleep: 'DEEP SLEEP',
-        no_ads_seamless: 'NO ADS • SEAMLESS',
-        binaural_audio: 'BINAURAL AUDIO',
         cozy_fireplace: 'COZY FIREPLACE',
-        '432_hz': '432 HZ'
+        winter_nights: 'WINTER NIGHTS',
+        rain_and_thunder: 'RAIN & THUNDER',
+        study_and_focus: 'STUDY & FOCUS'
       };
       const bText = labelMap[firstId || ''] || '4K ULTRA HD';
-      const badgeX = 1280 - 210;
+      const badgeX = 1280 - 220;
       const badgeY = 30;
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 1.5;
+      ctx.fillStyle = 'rgba(9, 13, 22, 0.90)';
+      ctx.strokeStyle = '#FACC15';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.roundRect(badgeX, badgeY, 180, 42, 8);
+      ctx.roundRect(badgeX, badgeY, 190, 42, 8);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = '#f59e0b';
-      ctx.font = 'bold 13px Inter, sans-serif';
+      ctx.fillStyle = '#FDE047';
+      ctx.font = '800 13px "Montserrat", "Inter", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(bText, badgeX + 90, badgeY + 26);
+      ctx.fillText(bText, badgeX + 95, badgeY + 26);
     }
 
     // Title text
@@ -4031,6 +4047,15 @@ export default function App() {
               emoji: '🎨',
               glow: 'rgba(16,185,129,0.95)',
               label: '4К Превью & Арт-цех'
+            },
+            {
+              id: 'editor' as TabId,
+              domId: 'tab-editor',
+              cls: 'nav-tab-editor',
+              iconCls: 'nav-icon-editor',
+              emoji: '🖼️',
+              glow: 'rgba(34,211,238,0.95)',
+              label: 'Арт-Редактор & Фон'
             }
           ].map(tabItem => {
             const isActive = activeTab === tabItem.id;
@@ -6361,6 +6386,34 @@ export default function App() {
             onThumbBadgeChange={setThumbBadge}
             externalFontStyle={externalThumbFontStyle}
             onConsumeExternalFontStyle={() => setExternalThumbFontStyle(null)}
+            externalCoverAImageUrl={editorEditedCoverAUrl}
+            onConsumeExternalCoverAImage={() => setEditorEditedCoverAUrl(null)}
+            onSendToArtEditor={(imageDataUrl, slotLabel) => {
+              setArtEditorIncomingAsset({
+                dataUrl: imageDataUrl,
+                label: slotLabel,
+                nonce: Date.now()
+              });
+              handleSelectTab('editor');
+            }}
+            onNotify={showToast}
+          />
+        </section>
+
+        {/* =========================================
+            ЦЕХ 3.5: АРТ-РЕДАКТОР & ФОН (УДАЛЕНИЕ ФОНА, ВОЛШЕБНАЯ ПАЛОЧКА, РЕСАЙЗ, ЭКСПОРТ)
+           ========================================= */}
+        <section
+          id="view-editor"
+          className={`studio-view space-y-6 ${activeTab === 'editor' ? '' : 'hidden'}`}
+        >
+          <ImageArtEditorView
+            incomingAsset={artEditorIncomingAsset}
+            onApplyToThumbnailCoverA={editedUrl => {
+              setEditorEditedCoverAUrl(editedUrl);
+              handleSelectTab('thumb');
+              showToast('🎨 Обработанный арт применён к Обложке A!', 'success');
+            }}
             onNotify={showToast}
           />
         </section>
