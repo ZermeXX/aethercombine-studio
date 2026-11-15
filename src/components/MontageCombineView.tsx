@@ -54,6 +54,9 @@ export interface NarrativeSceneItem {
     duration_sec: number;
   };
   text_overlay: string;
+  ai_video_prompt?: string;
+  prompt_ru?: string;
+  sfx?: string;
 }
 
 export interface MasterAudioConfig {
@@ -595,7 +598,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               type: transType,
               duration_sec: transType === 'cut' || transType === 'none' ? 0 : transDur
             },
-            text_overlay: overlayText
+            text_overlay: overlayText,
+            ...(typeof sc.ai_video_prompt === 'string' && sc.ai_video_prompt.trim()
+              ? { ai_video_prompt: sc.ai_video_prompt.trim() }
+              : {}),
+            ...(typeof sc.prompt_ru === 'string' && sc.prompt_ru.trim()
+              ? { prompt_ru: sc.prompt_ru.trim() }
+              : {}),
+            ...(typeof sc.sfx === 'string' && sc.sfx.trim()
+              ? { sfx: sc.sfx.trim() }
+              : {})
           };
         });
 
@@ -1296,7 +1308,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         start_time: sc.start_time,
         duration: Number(sc.duration) || 6,
         transition: sc.transition,
-        text_overlay: sc.text_overlay
+        text_overlay: sc.text_overlay,
+        ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
+        ...(sc.prompt_ru ? { prompt_ru: sc.prompt_ru } : {}),
+        ...(sc.sfx ? { sfx: sc.sfx } : {})
       }))
     }),
     [
@@ -2334,15 +2349,37 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     />
                   </div>
 
-                  {/* 2. Имя видеофайла (file_name) */}
+                  {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
                   <div className="col-span-4 flex items-center gap-1.5 min-w-0">
                     <input
                       type="text"
                       value={sc.file_name}
-                      placeholder="Имя файла (из JSON или Drag & Drop)"
+                      placeholder={
+                        sc.ai_video_prompt
+                          ? `Промт готов: ${sc.ai_video_prompt.slice(0, 38)}...`
+                          : 'Имя файла (из JSON или Drag & Drop)'
+                      }
+                      title={
+                        sc.ai_video_prompt
+                          ? `AI Prompt: ${sc.ai_video_prompt}${sc.sfx ? ` | SFX: ${sc.sfx}` : ''}`
+                          : undefined
+                      }
                       onChange={e => updateScene(idx, { file_name: e.target.value })}
                       className="w-full bg-slate-900 border border-slate-700/80 rounded px-2 py-1 text-[11px] font-mono text-amber-300 outline-none focus:border-amber-400"
                     />
+                    {sc.ai_video_prompt && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(sc.ai_video_prompt || '');
+                          onNotify(`Промт сцены #${idx + 1} скопирован!`, 'success');
+                        }}
+                        title={`Скопировать AI-промт: ${sc.ai_video_prompt}`}
+                        className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40 text-[10px] font-mono text-indigo-200 hover:bg-indigo-500/35 cursor-pointer"
+                      >
+                        AI
+                      </button>
+                    )}
                     {hasFile && (
                       <span title="Имя файла назначено" className="shrink-0 flex items-center">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />

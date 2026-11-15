@@ -159,6 +159,180 @@ Return JSON with:
   });
 
   // ==========================================================================
+  // 2.5. POST /api/gemini/verbaflow — Интеллектуальный цех VerbaFlow (Рерайт, Хуки, Сцены)
+  // ==========================================================================
+  app.post('/api/gemini/verbaflow', async (req, res) => {
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        res.status(503).json({
+          ok: false,
+          error: 'GEMINI_API_KEY not configured on server; using local fallback'
+        });
+        return;
+      }
+
+      const { action, text, tone, mode, preserveFacts, numbersToWords, hookStyle } = req.body as {
+        action?: 'rewrite' | 'hooks' | 'scenes';
+        text?: string;
+        tone?: string;
+        mode?: string;
+        preserveFacts?: boolean;
+        numbersToWords?: boolean;
+        hookStyle?: string;
+      };
+
+      const cleanText = (text || '').trim().slice(0, 6000);
+      if (!cleanText) {
+        res.status(400).json({ ok: false, error: 'Empty text payload' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+
+      if (action === 'rewrite') {
+        const prompt = `Ты опытный шеф-редактор документальных и YouTube-сценариев. Переработай исходный текст на естественном русском языке, полностью убирая ИИ-штампы («в современном мире», «не секрет, что», «играет ключевую роль», «стоит отметить», «важно понимать», «таким образом») и вводный балласт («на сегодняшний день», «как известно», «безусловно», «на самом деле»).
+Чередуй длину предложений для высокой ритмики (Burstiness). Восстанови букву «ё».
+
+Параметры:
+- Тональность: ${tone || 'doc'}
+- Режим переработки: ${mode || 'humanize'}
+- Сохранить 100% фактов (имена, даты, цифры контекста): ${preserveFacts ? 'ДА, строго сохранить все факты' : 'Допускается драматизация дат'}
+- Перевести все числа в слова прописью: ${numbersToWords ? 'ДА, без единой цифры' : 'НЕТ, можно оставлять числа'}
+
+Исходный текст:
+${cleanText}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                rewrittenText: { type: Type.STRING }
+              },
+              required: ['rewrittenText']
+            }
+          }
+        });
+
+        const parsed = JSON.parse((response.text ?? '{}').trim());
+        res.json({ ok: true, data: parsed });
+        return;
+      }
+
+      if (action === 'hooks') {
+        const prompt = `Ты сценарист удержания внимания для YouTube. На основе текста создай:
+1) Пак из 5 цепляющих 12-15 секундных хуков на русском языке строго по архетипам: paradox (парадокс), in_media_res (In Media Res), clue (улика), question (вопрос), contrast (контраст). Без приветствий и скучных дат.
+2) Переделанный основной сценарий в тональности "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), готовый для присоединения к хуку.
+
+Текст:
+${cleanText}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                hooks: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      archetype: { type: Type.STRING },
+                      archetypeLabel: { type: Type.STRING },
+                      durationSec: { type: Type.INTEGER },
+                      visualCue: { type: Type.STRING },
+                      hookText: { type: Type.STRING }
+                    },
+                    required: ['archetype', 'archetypeLabel', 'durationSec', 'visualCue', 'hookText']
+                  }
+                },
+                rewrittenBody: { type: Type.STRING }
+              },
+              required: ['hooks', 'rewrittenBody']
+            }
+          }
+        });
+
+        const parsed = JSON.parse((response.text ?? '{}').trim());
+        res.json({ ok: true, data: parsed });
+        return;
+      }
+
+      if (action === 'scenes') {
+        const prompt = `Разбей сценарий на покадровые сцены длительностью 4–7 секунд каждая для видеогенерации (Kling / Veo / Sora) и саунд-дизайна.
+Для каждой сцены верни:
+- sceneIndex (1, 2, ...)
+- startTime ("00:00", "00:05", ...)
+- timecodeRange ("00:00–00:05")
+- durationSec (целое число 4..8)
+- scriptLine (точная фраза диктора из текста)
+- promptEn (детальный кинематографичный видео-промт на английском: субъект, движение камеры, свет, стиль 4K)
+- promptRu (краткое режиссёрское описание кадра на русском)
+- sfx (конкретная рекомендация по звуковому оформлению и шумам на русском)
+
+Тональность: ${tone || 'doc'}
+Сценарий:
+${cleanText}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                scenes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      sceneIndex: { type: Type.INTEGER },
+                      startTime: { type: Type.STRING },
+                      timecodeRange: { type: Type.STRING },
+                      durationSec: { type: Type.INTEGER },
+                      scriptLine: { type: Type.STRING },
+                      promptEn: { type: Type.STRING },
+                      promptRu: { type: Type.STRING },
+                      sfx: { type: Type.STRING }
+                    },
+                    required: [
+                      'sceneIndex',
+                      'startTime',
+                      'timecodeRange',
+                      'durationSec',
+                      'scriptLine',
+                      'promptEn',
+                      'promptRu',
+                      'sfx'
+                    ]
+                  }
+                }
+              },
+              required: ['scenes']
+            }
+          }
+        });
+
+        const parsed = JSON.parse((response.text ?? '{}').trim());
+        res.json({ ok: true, data: parsed });
+        return;
+      }
+
+      res.status(400).json({ ok: false, error: 'Unsupported action' });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
+  // ==========================================================================
   // 3. GET /api/proxy-image — CORS-безопасный прокси для AI Horde R2/CDN картинок
   // ==========================================================================
   app.get('/api/proxy-image', async (req, res) => {

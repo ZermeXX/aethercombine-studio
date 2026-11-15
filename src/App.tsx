@@ -56,6 +56,7 @@ import {
   SubtitlesFlexibleConfig
 } from './components/MontageCombineView';
 import { VerbaFlowStudioView } from './components/VerbaFlowStudioView';
+import { VerbaFlowTextWorkbench } from './components/VerbaFlowTextWorkbench';
 import { ThumbnailStudioView } from './components/ThumbnailStudioView';
 import { VoiceStudioView } from './components/VoiceStudioView';
 import { YouTubeSeoView } from './components/YouTubeSeoView';
@@ -74,7 +75,7 @@ import {
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
 
-type TabId = 'combine' | 'loop' | 'hooks' | 'voice' | 'seo' | 'thumb';
+type TabId = 'combine' | 'loop' | 'verbaflow' | 'hooks' | 'voice' | 'seo' | 'thumb';
 
 type VerbaMode =
   | '15sec_rewrite'
@@ -4330,6 +4331,15 @@ export default function App() {
               label: 'Многочасовой Луп (N-Слотов)'
             },
             {
+              id: 'verbaflow' as TabId,
+              domId: 'tab-verbaflow',
+              cls: 'nav-tab-verbaflow',
+              iconCls: 'nav-icon-verbaflow',
+              emoji: '📝',
+              glow: 'rgba(56,189,248,0.95)',
+              label: 'VerbaFlow • Сценарии & Текст'
+            },
+            {
               id: 'hooks' as TabId,
               domId: 'tab-hooks',
               cls: 'nav-tab-hooks',
@@ -6687,6 +6697,36 @@ export default function App() {
             onThumbTitleChange={setThumbTitle}
             thumbBadge={thumbBadge}
             onThumbBadgeChange={setThumbBadge}
+            onNotify={showToast}
+          />
+        </section>
+
+        {/* =========================================
+            ЦЕХ 3.5: VERBAFLOW • СЦЕНАРИИ & ТЕКСТ (АНТИ-ИИ, ХУКИ, ДИКТОР, РЕНТГЕН, СЦЕНЫ)
+           ========================================= */}
+        <section
+          id="view-verbaflow"
+          className={`studio-view space-y-6 ${activeTab === 'verbaflow' ? '' : 'hidden'}`}
+        >
+          <VerbaFlowTextWorkbench
+            sourceText={sourceText}
+            onSourceTextChange={setSourceText}
+            onSendToVoiceStudio={ttsReadyText => {
+              setVoiceStudioScript(ttsReadyText);
+              setActiveTab('voice');
+              showToast('🎙️ Результат передан в Дикторский цех!', 'success');
+            }}
+            onSendScenesToTimeline={(newScenes, fullScript) => {
+              setExternalNarrativeScenes(newScenes);
+              setActiveNarrativeScenes(newScenes);
+              setTransferredScript(fullScript);
+              setSeoScriptText(fullScript);
+              setActiveTab('combine');
+              showToast(
+                `🎬 В Рендер-таймлайн / Ритм-карту передано ${newScenes.length} сцен с таймкодами и промптами для manifest.json!`,
+                'success'
+              );
+            }}
             onNotify={showToast}
           />
         </section>
