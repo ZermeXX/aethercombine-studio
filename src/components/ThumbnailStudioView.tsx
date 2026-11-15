@@ -1419,6 +1419,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         document.fonts.load('700 64px "Cinzel"'),
         document.fonts.load('700 64px "Cormorant Garamond"'),
         document.fonts.load('700 64px "Bebas Neue"'),
+        document.fonts.load('800 24px "Inter"'),
+        document.fonts.load('800 24px "Montserrat"'),
         document.fonts.load('700 24px "Inter"')
       ]).then(() => {
         if (!cancelled) {
@@ -1644,41 +1646,54 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу в аккуратном горизонтальном ряду (не перетаскивается и не мешает таймкоду)
+      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу в аккуратном горизонтальном ряду.
+      // Бейджи полностью отвязаны от селектора шрифтов: всегда единый строгий жирный гротеск (Inter / Montserrat, 800, uppercase, чёткий трекинг).
       const badgesToDraw = activeBadges
         .map(id => BADGE_LABEL_BY_ID[id])
         .filter((lbl): lbl is string => Boolean(lbl))
+        .map(lbl => lbl.toUpperCase())
         .slice(0, 3);
 
       if (badgesToDraw.length > 0) {
-        const badgeFontPx =
-          activeFontStyle === 'royal_gold_laurels' || activeFontStyle === 'gold_ice_magic'
-            ? 13 * scale
-            : activeFontStyle === 'medieval_serif'
-            ? 15 * scale
-            : activeFontStyle === 'minimal_clean'
-            ? 16 * scale
-            : 14 * scale;
+        const badgeFontPx = 13.5 * scale;
+        const badgeFontFamily = '"Inter", "Montserrat", sans-serif';
+        const badgeFontWeight = '800';
+        const baseTrackingPx = 1.4 * scale;
 
-        const badgeFontFamily =
-          activeFontStyle === 'gold_ice_magic'
-            ? '"Cinzel", "Cinzel Decorative", Georgia, serif'
-            : activeFontStyle === 'royal_gold_laurels'
-            ? '"Cinzel Decorative", "Cinzel", Georgia, serif'
-            : activeFontStyle === 'medieval_serif'
-            ? '"Cormorant Garamond", Georgia, serif'
-            : activeFontStyle === 'minimal_clean'
-            ? '"Bebas Neue", "Inter", sans-serif'
-            : '"Montserrat", "Inter", sans-serif';
+        const measureTrackedWidth = (text: string, trackingPx: number): number => {
+          const chars = Array.from(text);
+          if (chars.length === 0) return 0;
+          const glyphsW = chars.reduce((sum, ch) => sum + ctx.measureText(ch).width, 0);
+          return glyphsW + Math.max(0, chars.length - 1) * trackingPx;
+        };
 
-        const badgeFontWeight = activeFontStyle === 'minimal_clean' ? '700' : '800';
+        const drawTrackedCenteredText = (
+          text: string,
+          centerXPos: number,
+          centerYPos: number,
+          trackingPx: number
+        ) => {
+          const chars = Array.from(text);
+          if (chars.length === 0) return;
+          const totalW = measureTrackedWidth(text, trackingPx);
+          let charCursor = centerXPos - totalW / 2;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          for (let cIdx = 0; cIdx < chars.length; cIdx++) {
+            const ch = chars[cIdx];
+            const cw = ctx.measureText(ch).width;
+            ctx.fillText(ch, charCursor, centerYPos);
+            charCursor += cw + trackingPx;
+          }
+        };
+
         ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
 
         const horizontalPad = 36 * scale;
         const badgeGap = 12 * scale;
         const badgeH = 42 * scale;
         const rawWidths = badgesToDraw.map(lbl =>
-          Math.max(108 * scale, ctx.measureText(lbl).width + horizontalPad)
+          Math.max(112 * scale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
         );
         const totalRawW =
           rawWidths.reduce((sum, bw) => sum + bw, 0) +
@@ -1692,6 +1707,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
         const effectiveH = badgeH * fitFactor;
         const effectiveGap = badgeGap * fitFactor;
+        const effectiveTracking = baseTrackingPx * fitFactor;
         const widths = rawWidths.map(bw => bw * fitFactor);
         const topY = 28 * scale;
 
@@ -1702,67 +1718,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           const label = badgesToDraw[i];
 
           ctx.save();
-          ctx.fillStyle =
-            activeFontStyle === 'minimal_clean'
-              ? 'rgba(10, 14, 23, 0.82)'
-              : activeFontStyle === 'gold_ice_magic'
-              ? 'rgba(8, 14, 28, 0.86)'
-              : 'rgba(9, 13, 22, 0.88)';
-
-          if (activeFontStyle === 'gold_ice_magic') {
-            const borderGrad = ctx.createLinearGradient(bx, topY, bx + bw, topY + effectiveH);
-            borderGrad.addColorStop(0, '#FFE58F');
-            borderGrad.addColorStop(0.5, '#BCE6FF');
-            borderGrad.addColorStop(1, '#5B9BD5');
-            ctx.strokeStyle = borderGrad;
-          } else if (activeFontStyle === 'royal_gold_laurels') {
-            const borderGrad = ctx.createLinearGradient(bx, topY, bx, topY + effectiveH);
-            borderGrad.addColorStop(0, '#F6D365');
-            borderGrad.addColorStop(1, '#C59B27');
-            ctx.strokeStyle = borderGrad;
-          } else if (activeFontStyle === 'medieval_serif') {
-            ctx.strokeStyle = '#d97706';
-          } else if (activeFontStyle === 'minimal_clean') {
-            ctx.strokeStyle = 'rgba(248, 250, 252, 0.72)';
-          } else {
-            ctx.strokeStyle = '#f59e0b';
-          }
-
-          ctx.lineWidth = Math.max(1, (activeFontStyle === 'minimal_clean' ? 1.5 : 2) * scale);
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = Math.max(1, 2 * scale);
           ctx.beginPath();
-          ctx.roundRect(
-            bx,
-            topY,
-            bw,
-            effectiveH,
-            (activeFontStyle === 'minimal_clean' ? 5 : 9) * scale
-          );
+          ctx.roundRect(bx, topY, bw, effectiveH, 9 * scale);
           ctx.fill();
           ctx.stroke();
 
-          if (activeFontStyle === 'gold_ice_magic') {
-            const txtGrad = ctx.createLinearGradient(bx, topY + 6 * scale, bx, topY + effectiveH - 6 * scale);
-            txtGrad.addColorStop(0, '#FFF8DC');
-            txtGrad.addColorStop(0.5, '#FFE58F');
-            txtGrad.addColorStop(1, '#BCE6FF');
-            ctx.fillStyle = txtGrad;
-          } else if (activeFontStyle === 'royal_gold_laurels') {
-            const txtGrad = ctx.createLinearGradient(bx, topY + 6 * scale, bx, topY + effectiveH - 6 * scale);
-            txtGrad.addColorStop(0, '#FFF3B0');
-            txtGrad.addColorStop(0.5, '#F6D365');
-            txtGrad.addColorStop(1, '#C59B27');
-            ctx.fillStyle = txtGrad;
-          } else if (activeFontStyle === 'medieval_serif') {
-            ctx.fillStyle = '#FDE68A';
-          } else if (activeFontStyle === 'minimal_clean') {
-            ctx.fillStyle = '#F8FAFC';
-          } else {
-            ctx.fillStyle = '#fbbf24';
-          }
-
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(label, bx + bw / 2, topY + effectiveH * 0.53);
+          ctx.fillStyle = '#fbbf24';
+          drawTrackedCenteredText(label, bx + bw / 2, topY + effectiveH * 0.52, effectiveTracking);
           ctx.restore();
 
           cursorX = bx - effectiveGap;
@@ -3176,7 +3141,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 className="text-[11px] font-bold uppercase text-amber-300 flex items-center gap-1.5"
               >
                 <Type className="w-3.5 h-3.5 text-amber-400" />
-                Шрифт и декор (Обложка A &amp; B):
+                Шрифт и декор заголовка (Обложка A &amp; B):
               </label>
               <span className="text-[10px] font-mono text-slate-400">Google Fonts • 4K</span>
             </div>
