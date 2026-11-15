@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { motion } from 'motion/react';
 import {
   Sparkles,
   Download,
@@ -30,7 +31,8 @@ import {
   Type,
   Flame,
   RotateCcw,
-  Move
+  Move,
+  ChevronDown
 } from 'lucide-react';
 
 declare global {
@@ -1407,6 +1409,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [customFluxPrompt, setCustomFluxPrompt] = useState<string>('');
   const [isGeneratingCovers, setIsGeneratingCovers] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
+  const [showVideoExtractor, setShowVideoExtractor] = useState<boolean>(false);
+  const [showPromptGenerator, setShowPromptGenerator] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2831,25 +2835,25 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const lineCountHookB = splitHookLines(titleB, fontStyle === 'gold_ice_magic').length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* МОДАЛЬНОЕ ОКНО УВЕЛИЧЕНИЯ ВАРИАНТА ОБЛОЖКИ («🔍 Увеличить») */}
       {zoomedVariantIdx !== null && batchVariants[zoomedVariantIdx] && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-[#080c14]/90 backdrop-blur-xl flex items-center justify-center p-4"
           onClick={() => setZoomedVariantIdx(null)}
         >
           <div
-            className="bg-[#111622] border-2 border-cyan-400 rounded-2xl max-w-5xl w-full p-5 space-y-4 shadow-[0_0_25px_rgba(0,242,254,0.35)]"
+            className="aether-surface rounded-2xl max-w-5xl w-full p-5 space-y-4 border border-cyan-400/40 shadow-[0_24px_60px_rgba(0,0,0,0.85)]"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <ZoomIn className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
+                <h3 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
                   Детальный просмотр • Вариант #{zoomedVariantIdx + 1} (Flux.1-Schnell • 16:9)
                 </h3>
                 {selectedMasterVariantIdx === zoomedVariantIdx && (
-                  <span className="text-[11px] font-bold bg-cyan-500 text-black px-2.5 py-0.5 rounded-lg">
+                  <span className="text-[11px] font-mono font-bold bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 px-2.5 py-0.5 rounded-full">
                     ✓ Выбранный мастер-кадр
                   </span>
                 )}
@@ -2857,18 +2861,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setZoomedVariantIdx(null)}
-                className="text-slate-400 hover:text-white p-1.5 rounded-lg bg-slate-800/80 cursor-pointer"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center text-white/60 hover:text-white rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-700 bg-black">
-              <img
-                src={batchVariants[zoomedVariantIdx]}
-                alt={`Flux.1-Schnell Variant ${zoomedVariantIdx + 1}`}
-                className="w-full h-full object-contain"
-              />
+            <div className="aether-preview-frame">
+              <div className="aspect-video w-full rounded-[15px] overflow-hidden bg-[#080c14]">
+                <img
+                  src={batchVariants[zoomedVariantIdx]}
+                  alt={`Flux.1-Schnell Variant ${zoomedVariantIdx + 1}`}
+                  className="w-full h-full object-contain"
+                />
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -2878,7 +2884,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   handleAttachToYoutubeRelease(zoomedVariantIdx);
                   setZoomedVariantIdx(null);
                 }}
-                className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                className="min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-cyan-400/40 text-cyan-300 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
               >
                 <Link2 className="w-4 h-4" />
                 <span>Привязать к YouTube релизу</span>
@@ -2886,10 +2892,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleDownloadVariantFromGrid(zoomedVariantIdx)}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                className="min-h-[44px] btn-primary-action px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>📥 Скачать мастер-кадр</span>
+                <span>📥 Скачать мастер-кадр (3840×2160)</span>
               </button>
             </div>
           </div>
@@ -2897,58 +2903,64 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       )}
 
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Левая колонка: Настройки Обложки A / B, AI Horde / Cloudflare Flux.1-Schnell и переключатели */}
-        <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Sparkles className="text-emerald-400 w-5 h-5" /> 4K Превью &amp; Арт-цех
-            </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Левая колонка (5/12): Настройки Обложки A / B, AI Horde / Cloudflare Flux.1-Schnell и пилюли-переключатели */}
+        <div className="lg:col-span-5 aether-surface rounded-2xl p-5 sm:p-6 space-y-5 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3.5">
+            <div>
+              <h2 className="text-base font-bold text-[#f8fafc] flex items-center gap-2 tracking-tight">
+                <Sparkles className="text-emerald-400 w-5 h-5 shrink-0" />
+                <span>4K Превью &amp; Арт-цех</span>
+              </h2>
+              <p className="text-[11px] text-white/55 mt-0.5">
+                Интерактивный холст 3840×2160 • Drag &amp; Drop заголовка
+              </p>
+            </div>
             <span
-              className={`text-[10px] font-mono px-2 py-0.5 rounded border shrink-0 ${
+              className={`text-[10px] font-mono px-2.5 py-1 rounded-full border shrink-0 ${
                 isCloudflareConfigured
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                  : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                  ? 'bg-amber-500/15 border-amber-400/40 text-amber-300'
+                  : 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
               }`}
             >
-              {isCloudflareConfigured ? 'Cloudflare Flux (2×2) • 16:9' : 'Flux.1 AI Horde (2×2) • 16:9'}
+              {isCloudflareConfigured ? 'Cloudflare Flux • 16:9' : 'Flux.1 AI Horde • 16:9'}
             </span>
           </div>
 
           {/* Пакетная генерация 2x2 (4 варианта 16:9 без водяных знаков) */}
-          <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-[#0b0f17] border border-emerald-500/40 rounded-xl p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-emerald-300 uppercase flex items-center gap-1.5">
+          <div className="aether-card rounded-2xl p-4 space-y-3 border border-emerald-500/25 bg-gradient-to-br from-emerald-500/[0.08] via-[#0f1623]/90 to-cyan-500/[0.05]">
+            <div className="flex items-center justify-between text-[11px] gap-2">
+              <span className="font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-1.5">
                 {isCloudflareConfigured ? (
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 ) : (
-                  <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <Wand2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 )}
                 {isCloudflareConfigured
-                  ? 'Cloudflare Flux (2×2) • 16:9:'
-                  : 'Flux.1 AI Horde (2×2) • 16:9:'}
+                  ? 'Cloudflare Flux (2×2)'
+                  : 'Flux.1 AI Horde (2×2)'}
               </span>
-              <span className="font-mono text-[10px] text-slate-400">
-                1344×768 • No Watermark
+              <span className="font-mono text-[10px] text-white/55">
+                1344×768 → 4K UHD
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => handleGenerateFluxCover('A')}
                 disabled={isGeneratingCovers}
-                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition shadow-md shadow-emerald-500/20 disabled:opacity-75"
+                className="min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
                 {isGeneratingCovers && generatingTargetSlot === 'A' ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
                 ) : (
-                  <Wand2 className="w-3.5 h-3.5 shrink-0" />
+                  <Wand2 className="w-4 h-4 shrink-0" />
                 )}
                 <span className="truncate">
                   {isGeneratingCovers && generatingTargetSlot === 'A'
                     ? buttonQueueStatus || 'Ожидание...'
-                    : 'Flux.1 AI Horde (2×2) → A'}
+                    : 'Flux.1 (2×2) → Обложка A'}
                 </span>
               </button>
 
@@ -2956,56 +2968,61 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 type="button"
                 onClick={() => handleGenerateFluxCover('B')}
                 disabled={isGeneratingCovers}
-                className="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-75"
+                className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-emerald-400/35 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
                 {isGeneratingCovers && generatingTargetSlot === 'B' ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
                 ) : (
-                  <Wand2 className="w-3.5 h-3.5 shrink-0" />
+                  <Wand2 className="w-4 h-4 shrink-0" />
                 )}
                 <span className="truncate">
                   {isGeneratingCovers && generatingTargetSlot === 'B'
                     ? buttonQueueStatus || 'Ожидание...'
-                    : 'Flux.1 AI Horde (2×2) → B'}
+                    : 'Flux.1 (2×2) → Обложка B'}
                 </span>
               </button>
             </div>
 
             {isGeneratingCovers && (
-              <div className="bg-slate-950/80 border border-cyan-500/40 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+              <div className="bg-[#080c14]/90 border border-cyan-500/35 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
                 <span className="text-[11px] font-mono text-cyan-300 truncate">
                   {generationStatusText || 'Генерация Flux.1-Schnell...'}
                 </span>
                 <button
                   type="button"
                   onClick={handleCancelGeneration}
-                  className="text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 text-rose-200 px-2 py-0.5 rounded shrink-0 cursor-pointer"
+                  className="min-h-[32px] text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 text-rose-200 px-2.5 py-1 rounded-lg shrink-0 cursor-pointer"
                 >
                   Отмена
                 </button>
               </div>
             )}
 
-            {/* Настройки опционального Cloudflare Workers AI (localStorage) */}
-            <div className="pt-1 border-t border-slate-800/80">
+            {/* Аккордеон настроек Cloudflare Workers AI (localStorage) */}
+            <div className="pt-1.5 border-t border-white/[0.08]">
               <button
                 type="button"
                 onClick={() => setShowCfSettings(prev => !prev)}
-                className="w-full flex items-center justify-between text-[11px] text-slate-300 hover:text-amber-300 font-semibold py-1 cursor-pointer transition"
+                className="w-full min-h-[44px] flex items-center justify-between text-[11px] text-white/70 hover:text-amber-300 font-semibold px-2 rounded-xl hover:bg-white/[0.03] cursor-pointer"
               >
-                <span className="flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  Cloudflare Workers AI (опционально, без очереди)
+                <span className="flex items-center gap-2">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Параметры API Cloudflare Workers AI (без очереди)</span>
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {isCloudflareConfigured ? 'ACTIVE' : showCfSettings ? '▲' : '▼'}
+                <span className="flex items-center gap-1.5 text-[10px] font-mono text-white/55">
+                  <span>{isCloudflareConfigured ? 'ACTIVE' : 'OPTIONAL'}</span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                      showCfSettings ? 'rotate-180 text-amber-400' : ''
+                    }`}
+                  />
                 </span>
               </button>
 
               {showCfSettings && (
-                <div className="mt-2 space-y-2 bg-[#0b0f17] border border-slate-800 rounded-xl p-3">
+                <div className="mt-2 space-y-2.5 bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-3.5">
                   <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                    <label className="text-[10px] text-white/55 uppercase block mb-1">
                       Cloudflare Account ID:
                     </label>
                     <input
@@ -3013,11 +3030,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       value={cfAccountId}
                       onChange={e => setCfAccountId(e.target.value)}
                       placeholder="Например: 8a1b2c3d4e5f67890..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none focus:border-amber-500"
+                      className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                    <label className="text-[10px] text-white/55 uppercase block mb-1">
                       Cloudflare API Token (Workers AI):
                     </label>
                     <input
@@ -3025,12 +3042,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       value={cfApiToken}
                       onChange={e => setCfApiToken(e.target.value)}
                       placeholder="Bearer API Token"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none focus:border-amber-500"
+                      className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-0.5">
-                    <span className="text-[10px] text-slate-500 leading-tight">
-                      Хранится в localStorage. Модель: <code>@cf/black-forest-labs/flux-1-schnell</code>
+                    <span className="text-[10px] text-white/55 leading-tight font-mono">
+                      localStorage • @cf/black-forest-labs/flux-1-schnell
                     </span>
                     {(cfAccountId || cfApiToken) && (
                       <button
@@ -3054,14 +3071,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             {generationError && (
               <div
                 role="alert"
-                className="w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3 py-2 text-xs space-y-1 border bg-rose-950/80 border-rose-500/70 text-rose-200"
+                className="w-full rounded-xl px-3.5 py-2.5 text-xs space-y-2 border bg-rose-950/80 border-rose-500/60 text-rose-200"
               >
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
                   <div className="flex-1 min-w-0">
                     <p
                       title={generationError}
-                      className="text-[11px] font-semibold leading-snug line-clamp-2 overflow-hidden text-ellipsis text-rose-200"
+                      className="text-[11px] font-semibold leading-snug line-clamp-2 text-rose-200"
                     >
                       {generationError}
                     </p>
@@ -3069,7 +3086,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setGenerationError(null)}
-                    className="text-[10px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
+                    className="text-[10px] text-white/55 hover:text-white shrink-0 cursor-pointer"
                   >
                     ✕
                   </button>
@@ -3077,7 +3094,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <button
                   type="button"
                   onClick={() => handleGenerateProceduralBatchFallback('A')}
-                  className="bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-2 py-0.5 rounded text-[10px] cursor-pointer transition"
+                  className="min-h-[38px] bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer"
                 >
                   🎨 Сгенерировать 4 локальных 4K фона (Canvas 2×2)
                 </button>
@@ -3085,72 +3102,85 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             )}
           </div>
 
-          {/* Переключатели: YouTube UI Grid, A/B-тестер и Ч/Б фильтр контрастности */}
-          <div className="grid grid-cols-1 gap-2">
+          {/* Пилюли-переключатели режимов предпросмотра: YouTube UI Grid, A/B-тестер и Ч/Б фильтр контрастности */}
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setShowYoutubeOverlay(prev => !prev)}
-              className={`w-full px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                 showYoutubeOverlay
-                  ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                  ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+                  : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2">
-                <Eye className="w-4 h-4" /> Оверлей интерфейса YouTube (3:00:00 + Аватарка)
+              <span className="flex items-center gap-2 truncate">
+                <Eye className="w-4 h-4 shrink-0" />
+                <span className="truncate">YouTube UI</span>
               </span>
-              <span className="text-[10px] font-mono">{showYoutubeOverlay ? 'ON' : 'OFF'}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30">
+                {showYoutubeOverlay ? 'ON' : 'OFF'}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setAbModeEnabled(prev => !prev)}
-              className={`w-full px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                 abModeEnabled
-                  ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                  ? 'bg-amber-500/15 border-amber-400/50 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
+                  : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2">
-                <Columns className="w-4 h-4" /> A/B-тестер двух вариантов обложек
+              <span className="flex items-center gap-2 truncate">
+                <Columns className="w-4 h-4 shrink-0" />
+                <span className="truncate">A/B-тестер</span>
               </span>
-              <span className="text-[10px] font-mono">{abModeEnabled ? 'A vs B' : 'SINGLE'}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30">
+                {abModeEnabled ? 'A vs B' : '1x'}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setBwContrastFilter(prev => !prev)}
-              className={`w-full px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                 bwContrastFilter
-                  ? 'bg-indigo-500/20 border-indigo-400/60 text-indigo-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
+                  ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-200 shadow-[0_0_20px_rgba(6,182,212,0.15)]'
+                  : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2">
-                <Contrast className="w-4 h-4" /> Ч/Б фильтр проверки контрастности
+              <span className="flex items-center gap-2 truncate">
+                <Contrast className="w-4 h-4 shrink-0" />
+                <span className="truncate">Ч/Б Контраст</span>
               </span>
-              <span className="text-[10px] font-mono">{bwContrastFilter ? 'B&W 125%' : 'COLOR'}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30">
+                {bwContrastFilter ? 'B&W' : 'RGB'}
+              </span>
             </button>
           </div>
 
-          {/* Стиль шрифта и декоративная рамка (для Обложек A и B + экспорт 4K) */}
-          <div className="bg-[#0b0f17] border border-amber-500/25 rounded-xl p-3.5 space-y-2.5">
+          {/* Стиль шрифта и декоративные эффекты (современные пилюли-переключатели с янтарно-золотым акцентом) */}
+          <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
             <div className="flex items-center justify-between gap-2">
               <label
                 htmlFor="thumb-font-style-select"
-                className="text-[11px] font-bold uppercase text-amber-300 flex items-center gap-1.5"
+                className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2"
               >
-                <Type className="w-3.5 h-3.5 text-amber-400" />
-                Шрифт и декор заголовка (Обложка A &amp; B):
+                <Type className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Стиль шрифта заголовка</span>
               </label>
-              <span className="text-[10px] font-mono text-slate-400">Google Fonts • 4K</span>
+              <span className="text-[10px] font-mono text-amber-300/90 bg-amber-500/10 border border-amber-400/25 px-2 py-0.5 rounded-full">
+                3840×2160 Canvas
+              </span>
             </div>
 
+            {/* Скрытый синхронизированный select для обратной совместимости */}
             <select
               id="thumb-font-style-select"
               value={fontStyle}
               onChange={e => setFontStyle(e.target.value as ThumbnailFontStyleId)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-semibold outline-none focus:border-amber-500 cursor-pointer"
+              className="sr-only"
+              aria-label="Шрифт и декор заголовка"
             >
               {FONT_STYLE_OPTIONS.map(opt => (
                 <option key={opt.id} value={opt.id}>
@@ -3159,7 +3189,42 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               ))}
             </select>
 
-            <p className="text-[11px] text-slate-400">
+            {/* Интерактивные пилюли-переключатели стилей шрифта со скользящим индикатором */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {FONT_STYLE_OPTIONS.map(opt => {
+                const isSelected = fontStyle === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setFontStyle(opt.id)}
+                    className={`relative min-h-[44px] px-3 py-2 rounded-xl text-left text-xs font-bold flex items-center justify-between gap-2 cursor-pointer overflow-hidden border ${
+                      isSelected
+                        ? 'text-slate-950 border-amber-300/60 shadow-[0_8px_24px_-6px_rgba(245,158,11,0.45)]'
+                        : 'bg-[#080c14]/75 border-white/[0.08] text-white/75 hover:text-white hover:border-white/20'
+                    }`}
+                  >
+                    {isSelected && (
+                      <motion.div
+                        layoutId="activeThumbFontPill"
+                        className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 -z-0"
+                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                      />
+                    )}
+                    <span className="relative z-10 truncate">{opt.label}</span>
+                    {opt.id === 'gold_ice_magic' && (
+                      <Sparkles
+                        className={`relative z-10 w-3.5 h-3.5 shrink-0 ${
+                          isSelected ? 'text-slate-950' : 'text-amber-400'
+                        }`}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[11px] text-white/55 leading-relaxed">
               {FONT_STYLE_OPTIONS.find(o => o.id === fontStyle)?.subtitle}
             </p>
 
@@ -3167,17 +3232,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setMagicDecorEnabled(prev => !prev)}
-                className={`w-full px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center justify-between gap-2 cursor-pointer transition ${
+                className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                   magicDecorEnabled
-                    ? 'bg-sky-500/15 border-sky-400/60 text-sky-200'
-                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                    ? 'bg-gradient-to-r from-amber-500/20 via-sky-500/20 to-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]'
+                    : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
                 }`}
               >
-                <span className="flex items-center gap-1.5 text-left">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                  <span>Магическое сияние и снежинки (завитки, блики, снежинки)</span>
+                <span className="flex items-center gap-2 text-left">
+                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>Магическое сияние и снежинки (завитки, блики, иней)</span>
                 </span>
-                <span className="font-mono text-[10px] shrink-0">
+                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
                   {magicDecorEnabled ? 'ON' : 'OFF'}
                 </span>
               </button>
@@ -3187,17 +3252,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setRoyalDecorEnabled(prev => !prev)}
-                className={`w-full px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center justify-between gap-2 cursor-pointer transition ${
+                className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                   royalDecorEnabled
-                    ? 'bg-amber-500/15 border-amber-400/60 text-amber-200'
-                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                    ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
+                    : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
                 }`}
               >
-                <span className="flex items-center gap-1.5 text-left">
-                  <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="flex items-center gap-2 text-left">
+                  <Flame className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Декор: свеча сверху + золотые лавры по бокам</span>
                 </span>
-                <span className="font-mono text-[10px] shrink-0">
+                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
                   {royalDecorEnabled ? 'ON' : 'OFF'}
                 </span>
               </button>
@@ -3205,26 +3270,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
 
           {/* Настройки Обложки A */}
-          <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3.5 space-y-3">
-            <span className="text-[11px] font-bold uppercase text-amber-400 block">
-              Вариант A (Основная обложка)
-            </span>
+          <div className="aether-card rounded-2xl p-4 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                Вариант A (Основная обложка)
+              </span>
+              <span className="text-[10px] font-mono text-white/55">SLOT A</span>
+            </div>
+
             <div>
-              <label className="text-[10px] text-slate-400 uppercase block mb-1">
+              <label className="text-[11px] text-white/55 block mb-1.5">
                 Загрузить свой арт (Обложка A):
               </label>
               <input
                 type="file"
                 accept="image/*"
                 onChange={e => handleLoadImageForSlot(e, 'A')}
-                className="w-full text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-amber-400 hover:file:bg-slate-700 cursor-pointer"
+                className="w-full text-xs text-white/60 file:mr-3 file:min-h-[38px] file:py-1.5 file:px-3.5 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-white/[0.06] file:text-amber-300 hover:file:bg-white/[0.12] cursor-pointer"
               />
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] text-slate-400 uppercase">
-                  Текст-хук A (Enter — перенос строки):
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] text-white/55">
+                  Текст-хук A (Enter — на 2 строки):
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono text-amber-300 tabular-nums">
@@ -3234,7 +3304,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onThumbTitleChange('')}
-                      className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                      className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                       title="Очистить текст-хук (оставить чистый арт)"
                     >
                       Очистить
@@ -3247,19 +3317,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 value={thumbTitle}
                 onChange={e => handleThumbHookChange(e.target.value)}
                 placeholder="Введите заголовок (Enter для 2-й строки, пусто = чистый арт)"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-amber-500 resize-none leading-snug"
+                className="w-full bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2.5 text-xs text-[#f8fafc] font-bold outline-none focus:border-amber-400 resize-none leading-snug"
               />
             </div>
 
             {/* Размер шрифта и позиция текста-хука A */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-300 font-semibold">Размер шрифта A:</span>
+            <div className="bg-[#080c14]/75 border border-white/[0.08] rounded-xl p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[#f8fafc] font-semibold">Размер шрифта A:</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-slate-400 tabular-nums">
-                    X: {Math.round(hookLayoutA.xPct)}% • Y: {Math.round(hookLayoutA.yPct)}%
+                  <span className="text-[11px] font-mono text-white/55 tabular-nums">
+                    X:{Math.round(hookLayoutA.xPct)}% Y:{Math.round(hookLayoutA.yPct)}%
                   </span>
-                  <span className="text-[11px] font-mono font-bold text-amber-300 tabular-nums">
+                  <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
                     {hookLayoutA.fontScalePct}%
                   </span>
                 </div>
@@ -3276,14 +3346,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 }}
                 className="w-full accent-amber-400 cursor-pointer"
               />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-slate-500">60% – 150% • Drag &amp; Drop на превью</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] font-mono text-white/55">
+                  60% – 150% • Drag &amp; Drop на превью
+                </span>
                 <button
                   type="button"
                   onClick={() => setHookLayoutA({ ...DEFAULT_HOOK_LAYOUT })}
-                  className="text-[10px] font-semibold text-amber-300 hover:text-amber-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 cursor-pointer transition"
+                  className="min-h-[38px] text-[11px] font-semibold text-amber-300 hover:text-amber-200 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3.5 h-3.5" />
                   <span>Сбросить позицию текста</span>
                 </button>
               </div>
@@ -3291,25 +3363,25 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-[10px] text-slate-400 uppercase">
-                  Кинематографичные бейджи A (до 3):
+                <label className="text-[11px] text-white/55">
+                  Кинематографичные бейджи A (верхний правый угол, до 3):
                 </label>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-amber-300 tabular-nums">
+                  <span className="text-[11px] font-mono text-amber-300 tabular-nums">
                     {selectedBadgesA.length}/3
                   </span>
                   {selectedBadgesA.length > 0 && (
                     <button
                       type="button"
                       onClick={() => onThumbBadgeChange('none')}
-                      className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                      className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                     >
                       Сброс
                     </button>
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {CINEMATIC_BADGE_OPTIONS.map(badge => {
                   const isActive = selectedBadgesA.includes(badge.id);
                   return (
@@ -3318,10 +3390,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       type="button"
                       aria-pressed={isActive}
                       onClick={() => toggleBadgeA(badge.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold tracking-wide border transition cursor-pointer whitespace-nowrap ${
+                      className={`min-h-[44px] px-3 py-2 rounded-xl text-[11px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center ${
                         isActive
-                          ? 'bg-amber-500/20 border-amber-400 text-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
-                          : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                          ? 'btn-artistic-premium shadow-[0_0_16px_rgba(245,158,11,0.35)]'
+                          : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
                       }`}
                     >
                       {badge.label}
@@ -3334,26 +3406,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
           {/* Настройки Обложки B (если включен A/B-тестер) */}
           {abModeEnabled && (
-            <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-3.5 space-y-3">
-              <span className="text-[11px] font-bold uppercase text-emerald-400 block">
-                Вариант B (Конкурентный тест A/B)
-              </span>
+            <div className="aether-card rounded-2xl p-4 space-y-3.5 border border-emerald-400/25">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Вариант B (Конкурентный тест A/B)
+                </span>
+                <span className="text-[10px] font-mono text-white/55">SLOT B</span>
+              </div>
+
               <div>
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                <label className="text-[11px] text-white/55 block mb-1.5">
                   Исходный арт (Обложка B):
                 </label>
                 <input
                   type="file"
                   accept="image/*"
                   onChange={e => handleLoadImageForSlot(e, 'B')}
-                  className="w-full text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-emerald-400 hover:file:bg-slate-700 cursor-pointer"
+                  className="w-full text-xs text-white/60 file:mr-3 file:min-h-[38px] file:py-1.5 file:px-3.5 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-white/[0.06] file:text-emerald-300 hover:file:bg-white/[0.12] cursor-pointer"
                 />
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] text-slate-400 uppercase">
-                    Текст-хук B (Enter — перенос строки):
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] text-white/55">
+                    Текст-хук B (Enter — на 2 строки):
                   </label>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
@@ -3363,7 +3440,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setTitleB('')}
-                        className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                         title="Очистить текст-хук B (оставить чистый арт)"
                       >
                         Очистить
@@ -3376,19 +3453,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   value={titleB}
                   onChange={e => setTitleB(e.target.value)}
                   placeholder="Введите заголовок B (Enter для 2-й строки, пусто = чистый арт)"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-bold outline-none focus:border-emerald-500 resize-none leading-snug"
+                  className="w-full bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2.5 text-xs text-[#f8fafc] font-bold outline-none focus:border-emerald-400 resize-none leading-snug"
                 />
               </div>
 
               {/* Размер шрифта и позиция текста-хука B */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-300 font-semibold">Размер шрифта B:</span>
+              <div className="bg-[#080c14]/75 border border-white/[0.08] rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#f8fafc] font-semibold">Размер шрифта B:</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-400 tabular-nums">
-                      X: {Math.round(hookLayoutB.xPct)}% • Y: {Math.round(hookLayoutB.yPct)}%
+                    <span className="text-[11px] font-mono text-white/55 tabular-nums">
+                      X:{Math.round(hookLayoutB.xPct)}% Y:{Math.round(hookLayoutB.yPct)}%
                     </span>
-                    <span className="text-[11px] font-mono font-bold text-emerald-300 tabular-nums">
+                    <span className="text-xs font-mono font-bold text-emerald-300 tabular-nums">
                       {hookLayoutB.fontScalePct}%
                     </span>
                   </div>
@@ -3405,14 +3482,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   }}
                   className="w-full accent-emerald-400 cursor-pointer"
                 />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-slate-500">60% – 150% • Drag &amp; Drop на превью B</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono text-white/55">
+                    60% – 150% • Drag &amp; Drop на превью B
+                  </span>
                   <button
                     type="button"
                     onClick={() => setHookLayoutB({ ...DEFAULT_HOOK_LAYOUT })}
-                    className="text-[10px] font-semibold text-emerald-300 hover:text-emerald-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 cursor-pointer transition"
+                    className="min-h-[38px] text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
                   >
-                    <RotateCcw className="w-3 h-3" />
+                    <RotateCcw className="w-3.5 h-3.5" />
                     <span>Сбросить позицию текста</span>
                   </button>
                 </div>
@@ -3420,25 +3499,25 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-slate-400 uppercase">
+                  <label className="text-[11px] text-white/55">
                     Кинематографичные бейджи B (до 3):
                   </label>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
+                    <span className="text-[11px] font-mono text-emerald-300 tabular-nums">
                       {badgesB.length}/3
                     </span>
                     {badgesB.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setBadgesB([])}
-                        className="text-[10px] text-slate-400 hover:text-rose-300 underline cursor-pointer"
+                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                       >
                         Сброс
                       </button>
                     )}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {CINEMATIC_BADGE_OPTIONS.map(badge => {
                     const isActive = badgesB.includes(badge.id);
                     return (
@@ -3447,10 +3526,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         type="button"
                         aria-pressed={isActive}
                         onClick={() => toggleBadgeB(badge.id)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold tracking-wide border transition cursor-pointer whitespace-nowrap ${
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-[11px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center ${
                           isActive
-                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.25)]'
-                            : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                            ? 'btn-primary-action shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
                         }`}
                       >
                         {badge.label}
@@ -3462,120 +3541,126 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           )}
 
-          {/* Кнопка «📥 Скачать 4K обложку» */}
-          <div className="space-y-2">
+          {/* Главный экшен: экспорт 4K обложки (изумрудно-бирюзовый градиент) */}
+          <div className="space-y-2.5 pt-1">
             <button
               type="button"
               onClick={() => downloadCover4K('A')}
-              className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 px-4 rounded-xl transition text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20"
+              className="w-full min-h-[48px] btn-primary-action py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Download className="w-4 h-4" /> 📥 Скачать 4K обложку A (3840×2160 PNG)
+              <Download className="w-4 h-4 shrink-0" />
+              <span>📥 Экспорт 4K обложки A (3840×2160 PNG)</span>
             </button>
             {abModeEnabled && (
               <button
                 type="button"
                 onClick={() => downloadCover4K('B')}
-                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-300 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Download className="w-4 h-4 text-emerald-400" /> 📥 Скачать 4K обложку B (3840×2160 PNG)
+                <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>📥 Экспорт 4K обложки B (3840×2160 PNG)</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Правая область (2 колонки): Холст A (или A vs B) + YouTube UI Overlay + Мобильный масштаб 160x90 px */}
-        <div className="lg:col-span-2 bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-5 flex flex-col justify-between">
-          <div className={`grid gap-4 ${abModeEnabled ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+        {/* Правая зона (7/12): 4K Холст A (или A vs B) в аккуратной рамке с бликом + Мобильный масштаб 160x90 px */}
+        <div className="lg:col-span-7 aether-surface rounded-2xl p-5 sm:p-6 space-y-5 flex flex-col justify-between min-w-0">
+          <div className={`grid gap-5 ${abModeEnabled ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'}`}>
             {/* ХОЛСТ ОБЛОЖКИ A */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-amber-400 uppercase flex items-center gap-2">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981]" />
                   <span>
-                    Обложка A — Мастер-кадр #{selectedMasterVariantIdx + 1}{' '}
-                    {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
+                    Обложка A — Мастер #{selectedMasterVariantIdx + 1}{' '}
+                    {bwContrastFilter ? '(B&W Контраст)' : ''}
                   </span>
                   {attachedToYoutubeIdx === selectedMasterVariantIdx && (
-                    <span className="text-[10px] bg-cyan-500/15 border border-cyan-400/60 text-cyan-300 px-2 py-0.5 rounded font-mono">
-                      ✓ Привязан к YouTube релизу
+                    <span className="text-[10px] bg-emerald-500/15 border border-emerald-400/50 text-emerald-300 px-2.5 py-0.5 rounded-full font-mono">
+                      ✓ YouTube Release
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] font-mono text-slate-400">
-                  16:9 • Watermark-Free 4K
+                <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
+                  3840×2160 • 16:9
                 </span>
               </div>
 
-              <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-700 bg-black shadow-2xl">
-                <canvas
-                  ref={canvasARef}
-                  width={1280}
-                  height={720}
-                  className={`w-full h-full object-contain transition-all duration-200 ${
-                    bwContrastFilter ? 'grayscale contrast-125' : ''
-                  }`}
-                />
-
-                {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука A) */}
-                {hookBoxA && (
-                  <div
-                    role="button"
-                    aria-label="Перетащить заголовок обложки A"
-                    title="Зажмите и перетащите текст-хук в любую точку кадра"
-                    onPointerDown={e => startHookDrag(e, 'A')}
-                    onPointerEnter={() => setHoveredSlot('A')}
-                    onPointerLeave={() => setHoveredSlot(prev => (prev === 'A' ? null : prev))}
-                    style={{
-                      left: `${hookBoxA.leftPct}%`,
-                      top: `${hookBoxA.topPct}%`,
-                      width: `${hookBoxA.widthPct}%`,
-                      height: `${hookBoxA.heightPct}%`
-                    }}
-                    className={`absolute z-20 touch-none select-none rounded-md transition-colors ${
-                      draggingSlot === 'A'
-                        ? 'cursor-grabbing border-[1.5px] border-dashed border-amber-300 bg-amber-300/10'
-                        : hoveredSlot === 'A'
-                        ? 'cursor-grab border-[1.5px] border-dashed border-amber-300/85 bg-amber-300/5'
-                        : 'cursor-grab border border-dashed border-transparent'
+              {/* Рамка с тонким бликом по краю и плавным появлением элементов управления */}
+              <div className="aether-preview-frame group/previewA">
+                <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
+                  <canvas
+                    ref={canvasARef}
+                    width={1280}
+                    height={720}
+                    className={`w-full h-full object-contain transition-all duration-200 ${
+                      bwContrastFilter ? 'grayscale contrast-125' : ''
                     }`}
                   />
-                )}
 
-                {showYoutubeOverlay && (
-                  <>
-                    <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
-                      <div className="border-r border-b border-white/15" />
-                      <div className="border-r border-b border-white/15" />
-                      <div className="border-b border-white/15" />
-                      <div className="border-r border-b border-white/15" />
-                      <div className="border-r border-b border-white/15" />
-                      <div className="border-b border-white/15" />
-                      <div className="border-r border-white/15" />
-                      <div className="border-r border-white/15" />
-                      <div />
-                    </div>
+                  {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука A) */}
+                  {hookBoxA && (
+                    <div
+                      role="button"
+                      aria-label="Перетащить заголовок обложки A"
+                      title="Зажмите и перетащите текст-хук в любую точку кадра"
+                      onPointerDown={e => startHookDrag(e, 'A')}
+                      onPointerEnter={() => setHoveredSlot('A')}
+                      onPointerLeave={() => setHoveredSlot(prev => (prev === 'A' ? null : prev))}
+                      style={{
+                        left: `${hookBoxA.leftPct}%`,
+                        top: `${hookBoxA.topPct}%`,
+                        width: `${hookBoxA.widthPct}%`,
+                        height: `${hookBoxA.heightPct}%`
+                      }}
+                      className={`absolute z-20 touch-none select-none rounded-lg transition-all duration-150 ${
+                        draggingSlot === 'A'
+                          ? 'cursor-grabbing border-[1.5px] border-dashed border-amber-300 bg-amber-300/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]'
+                          : hoveredSlot === 'A'
+                          ? 'cursor-grab border-[1.5px] border-dashed border-amber-300/85 bg-amber-300/5'
+                          : 'cursor-grab border border-dashed border-transparent group-hover/previewA:border-white/20'
+                      }`}
+                    />
+                  )}
 
-                    <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-white font-mono font-bold text-xs px-2 py-0.5 rounded shadow-md border border-white/10">
-                      {youtubeDurationBadge || '3:00:00'}
-                    </div>
-                  </>
-                )}
+                  {showYoutubeOverlay && (
+                    <>
+                      <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewA:opacity-100 transition-opacity duration-300">
+                        <div className="border-r border-b border-white/10" />
+                        <div className="border-r border-b border-white/10" />
+                        <div className="border-b border-white/10" />
+                        <div className="border-r border-b border-white/10" />
+                        <div className="border-r border-b border-white/10" />
+                        <div className="border-b border-white/10" />
+                        <div className="border-r border-white/10" />
+                        <div className="border-r border-white/10" />
+                        <div />
+                      </div>
+
+                      <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
+                        {youtubeDurationBadge || '3:00:00'}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {hookBoxA && (
-                <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-                  <span className="flex items-center gap-1">
-                    <Move className="w-3 h-3 text-amber-400" />
-                    Наведите и перетащите заголовок A мышкой или пальцем
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
+                  <span className="flex items-center gap-1.5">
+                    <Move className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Перетащите заголовок мышью или пальцем по кадру</span>
                   </span>
-                  <span className="font-mono text-amber-300/80 tabular-nums">
-                    X: {Math.round(hookLayoutA.xPct)}% • Y: {Math.round(hookLayoutA.yPct)}% • {hookLayoutA.fontScalePct}%
+                  <span className="font-mono text-amber-300/90 tabular-nums">
+                    X:{Math.round(hookLayoutA.xPct)}% • Y:{Math.round(hookLayoutA.yPct)}% • {hookLayoutA.fontScalePct}%
                   </span>
                 </div>
               )}
 
               {showYoutubeOverlay && (
                 <div className="flex items-start gap-3 pt-1 px-1">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-indigo-600 flex items-center justify-center text-slate-950 font-black text-xs shrink-0 shadow-md">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
                     4K
                   </div>
                   <div className="space-y-0.5 min-w-0 flex-1">
@@ -3583,12 +3668,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       type="text"
                       value={youtubeVideoHeading}
                       onChange={e => setYoutubeVideoHeading(e.target.value)}
-                      className="w-full bg-transparent text-sm font-bold text-slate-100 outline-none focus:border-b focus:border-amber-400 truncate"
+                      className="w-full bg-transparent text-sm font-bold text-[#f8fafc] outline-none focus:border-b focus:border-emerald-400 truncate"
                     />
-                    <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                    <div className="text-xs text-white/55 flex items-center gap-1.5 flex-wrap">
                       <span>{youtubeChannelName}</span>
-                      <span className="text-[10px] bg-slate-700 text-slate-200 px-1 rounded">✓</span>
-                      <span>• 428K views • 2 hours ago</span>
+                      <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">✓</span>
+                      <span className="font-mono text-[11px]">• 428K views • 2h ago</span>
                     </div>
                   </div>
                 </div>
@@ -3597,78 +3682,80 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             {/* ХОЛСТ ОБЛОЖКИ B */}
             {abModeEnabled && (
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-emerald-400 uppercase">
-                    Обложка B {bwContrastFilter ? '(Ч/Б Фильтр Контраста)' : ''}
+                  <span className="font-bold text-emerald-300 uppercase tracking-wider">
+                    Обложка B {bwContrastFilter ? '(B&W Контраст)' : ''}
                   </span>
-                  <span className="text-[11px] font-mono text-slate-400">A/B Comparison</span>
+                  <span className="text-[11px] font-mono text-white/55">A/B Comparison</span>
                 </div>
 
-                <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-emerald-500/40 bg-black shadow-2xl">
-                  <canvas
-                    ref={canvasBRef}
-                    width={1280}
-                    height={720}
-                    className={`w-full h-full object-contain transition-all duration-200 ${
-                      bwContrastFilter ? 'grayscale contrast-125' : ''
-                    }`}
-                  />
-
-                  {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука B) */}
-                  {hookBoxB && (
-                    <div
-                      role="button"
-                      aria-label="Перетащить заголовок обложки B"
-                      title="Зажмите и перетащите текст-хук B в любую точку кадра"
-                      onPointerDown={e => startHookDrag(e, 'B')}
-                      onPointerEnter={() => setHoveredSlot('B')}
-                      onPointerLeave={() => setHoveredSlot(prev => (prev === 'B' ? null : prev))}
-                      style={{
-                        left: `${hookBoxB.leftPct}%`,
-                        top: `${hookBoxB.topPct}%`,
-                        width: `${hookBoxB.widthPct}%`,
-                        height: `${hookBoxB.heightPct}%`
-                      }}
-                      className={`absolute z-20 touch-none select-none rounded-md transition-colors ${
-                        draggingSlot === 'B'
-                          ? 'cursor-grabbing border-[1.5px] border-dashed border-emerald-300 bg-emerald-300/10'
-                          : hoveredSlot === 'B'
-                          ? 'cursor-grab border-[1.5px] border-dashed border-emerald-300/85 bg-emerald-300/5'
-                          : 'cursor-grab border border-dashed border-transparent'
+                <div className="aether-preview-frame group/previewB">
+                  <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
+                    <canvas
+                      ref={canvasBRef}
+                      width={1280}
+                      height={720}
+                      className={`w-full h-full object-contain transition-all duration-200 ${
+                        bwContrastFilter ? 'grayscale contrast-125' : ''
                       }`}
                     />
-                  )}
 
-                  {showYoutubeOverlay && (
-                    <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-white font-mono font-bold text-xs px-2 py-0.5 rounded shadow-md border border-white/10">
-                      {youtubeDurationBadge || '3:00:00'}
-                    </div>
-                  )}
+                    {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука B) */}
+                    {hookBoxB && (
+                      <div
+                        role="button"
+                        aria-label="Перетащить заголовок обложки B"
+                        title="Зажмите и перетащите текст-хук B в любую точку кадра"
+                        onPointerDown={e => startHookDrag(e, 'B')}
+                        onPointerEnter={() => setHoveredSlot('B')}
+                        onPointerLeave={() => setHoveredSlot(prev => (prev === 'B' ? null : prev))}
+                        style={{
+                          left: `${hookBoxB.leftPct}%`,
+                          top: `${hookBoxB.topPct}%`,
+                          width: `${hookBoxB.widthPct}%`,
+                          height: `${hookBoxB.heightPct}%`
+                        }}
+                        className={`absolute z-20 touch-none select-none rounded-lg transition-all duration-150 ${
+                          draggingSlot === 'B'
+                            ? 'cursor-grabbing border-[1.5px] border-dashed border-emerald-300 bg-emerald-300/10'
+                            : hoveredSlot === 'B'
+                            ? 'cursor-grab border-[1.5px] border-dashed border-emerald-300/85 bg-emerald-300/5'
+                            : 'cursor-grab border border-dashed border-transparent group-hover/previewB:border-white/20'
+                        }`}
+                      />
+                    )}
+
+                    {showYoutubeOverlay && (
+                      <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
+                        {youtubeDurationBadge || '3:00:00'}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {hookBoxB && (
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-                    <span className="flex items-center gap-1">
-                      <Move className="w-3 h-3 text-emerald-400" />
-                      Перетащите заголовок B мышкой или пальцем
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
+                    <span className="flex items-center gap-1.5">
+                      <Move className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Перетащите заголовок B мышью или пальцем</span>
                     </span>
-                    <span className="font-mono text-emerald-300/80 tabular-nums">
-                      X: {Math.round(hookLayoutB.xPct)}% • Y: {Math.round(hookLayoutB.yPct)}% • {hookLayoutB.fontScalePct}%
+                    <span className="font-mono text-emerald-300/90 tabular-nums">
+                      X:{Math.round(hookLayoutB.xPct)}% • Y:{Math.round(hookLayoutB.yPct)}% • {hookLayoutB.fontScalePct}%
                     </span>
                   </div>
                 )}
 
                 {showYoutubeOverlay && (
                   <div className="flex items-start gap-3 pt-1 px-1">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-sky-600 flex items-center justify-center text-slate-950 font-black text-xs shrink-0 shadow-md">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
                       4K
                     </div>
                     <div className="space-y-0.5 min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-100 truncate">
+                      <p className="text-sm font-bold text-[#f8fafc] truncate">
                         {youtubeVideoHeading}
                       </p>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-white/55">
                         {youtubeChannelName} ✓ • Variant B (A/B Readability Test)
                       </div>
                     </div>
@@ -3679,9 +3766,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
 
           {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ (160x90 PX) */}
-          <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="relative w-[160px] h-[90px] rounded-lg overflow-hidden border border-amber-500/50 bg-black shrink-0 shadow-lg">
+          <div className="aether-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-4">
+              <div className="relative w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/15 bg-black shrink-0 shadow-lg">
                 <canvas
                   ref={mobileCanvasRef}
                   width={320}
@@ -3696,41 +3783,42 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
 
               <div className="space-y-1">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                  <Smartphone className="w-4 h-4" /> Мобильный масштаб YouTube (160×90 px)
+                <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Мобильный масштаб YouTube (160×90 px)</span>
                 </span>
-                <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                  Проверка читаемости заголовка, бейджей в правом верхнем углу и таймкода{' '}
-                  <code>{youtubeDurationBadge}</code> в правом нижнем углу на экране смартфона.
+                <p className="text-xs text-white/55 max-w-md leading-relaxed">
+                  Контроль читаемости заголовка, верхнего ряда бейджей и таймкода{' '}
+                  <code className="font-mono text-amber-300">{youtubeDurationBadge}</code> в ленте смартфона.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Таймкод:</span>
+              <span className="text-white/55">Таймкод:</span>
               <input
                 type="text"
                 value={youtubeDurationBadge}
                 onChange={e => setYoutubeDurationBadge(e.target.value)}
-                className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-mono text-amber-300 outline-none"
+                className="w-24 min-h-[40px] bg-[#080c14] border border-white/[0.1] rounded-xl px-3 py-1.5 text-xs font-mono text-amber-300 outline-none focus:border-amber-400"
               />
             </div>
           </div>
         </div>
       </div>
 
-      {/* СЕТКА 2x2 FLUX.1-SCHNELL (grid grid-cols-2 gap-3 w-full my-4) */}
-      <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+      {/* СЕТКА 2x2 FLUX.1-SCHNELL */}
+      <div className="aether-surface rounded-2xl p-5 sm:p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3.5">
           <div className="flex items-center gap-2.5">
-            <Grid className="w-5 h-5 text-cyan-400" />
+            <Grid className="w-5 h-5 text-cyan-400 shrink-0" />
             <div>
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                Сетка 2×2 обложек: Flux.1 AI Horde (2×2) • 16:9
+              <h3 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+                Галерея сцен и обложек 2×2 (Flux.1 • 16:9)
               </h3>
-              <p className="text-xs text-slate-400">
-                Кликните по любой из 4-х карточек для выбора мастер-обложки (`window.selectedMasterThumbnail`)
-                {lastModelUsed ? ` • Движок: ${lastModelUsed}` : ''}
+              <p className="text-xs text-white/55">
+                Выберите любую карточку для установки в мастер-слот (`window.selectedMasterThumbnail`)
+                {lastModelUsed ? ` • ${lastModelUsed}` : ''}
               </p>
             </div>
           </div>
@@ -3747,21 +3835,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               type="button"
               onClick={() => localMediaInputRef.current?.click()}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
-              className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
+              className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-amber-400/40 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
             >
               {isSlicingLocalMedia ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
               ) : (
                 <Upload className="w-4 h-4" />
               )}
-              <span>Взять кадр из локального видео/арта</span>
+              <span>Кадр из локального видео/арта</span>
             </button>
 
             <button
               type="button"
               onClick={() => handleGenerateProceduralBatchFallback('A')}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
-              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-[#f8fafc] font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
             >
               <span>🎨 4 локальных фона</span>
             </button>
@@ -3770,7 +3858,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               type="button"
               onClick={() => handleGenerateFluxCover('A')}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
-              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-cyan-500/20 disabled:opacity-75"
+              className="min-h-[44px] btn-primary-action px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
             >
               {isGeneratingCovers ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -3781,8 +3869,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 {isGeneratingCovers
                   ? buttonQueueStatus || 'Ожидание AI Horde...'
                   : isCloudflareConfigured
-                    ? 'Cloudflare Flux (2×2) • 16:9'
-                    : 'Flux.1 AI Horde (2×2) • 16:9'}
+                    ? 'Cloudflare Flux (2×2)'
+                    : 'Flux.1 AI Horde (2×2)'}
               </span>
             </button>
           </div>
@@ -3791,7 +3879,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         {generationError && (
           <div
             role="alert"
-            className="w-full max-w-md max-h-24 overflow-hidden text-ellipsis rounded-xl px-3.5 py-2 text-xs flex items-center justify-between gap-2 border bg-rose-950/75 border-rose-500/60 text-rose-200"
+            className="w-full max-w-md rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 border bg-rose-950/75 border-rose-500/60 text-rose-200"
           >
             <div className="flex items-center gap-2 min-w-0">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -3802,19 +3890,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <button
               type="button"
               onClick={() => setGenerationError(null)}
-              className="text-[11px] text-slate-400 hover:text-white shrink-0 cursor-pointer"
+              className="text-[11px] text-white/55 hover:text-white shrink-0 cursor-pointer"
             >
               ✕
             </button>
           </div>
         )}
 
-        {/* Индикатор и 4 анимированных скелетона на время запроса к AI Horde / Cloudflare / нарезки медиа */}
+        {/* Индикатор и 4 анимированных скелетона на время запроса */}
         {isGeneratingCovers || isSlicingLocalMedia ? (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-400">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-300">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>
+              <span className="font-mono">
                 {isSlicingLocalMedia
                   ? 'Нарезка 4 вариантов превью (16:9) из локального видео/арта...'
                   : generationStatusText || 'Генерация 4 чистых 16:9 обложек (Flux.1-Schnell)...'}
@@ -3823,20 +3911,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <button
                   type="button"
                   onClick={handleCancelGeneration}
-                  className="bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/50 text-rose-200 px-2.5 py-0.5 rounded-lg text-[11px] cursor-pointer"
+                  className="min-h-[36px] bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/50 text-rose-200 px-3 py-1 rounded-lg text-[11px] cursor-pointer"
                 >
                   Отменить
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-3 w-full my-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4">
               {[0, 1, 2, 3].map(skeletonIdx => (
                 <div
                   key={`skeleton-${skeletonIdx}`}
-                  className="aspect-video w-full rounded-xl bg-slate-900/90 border-2 border-slate-700/60 animate-pulse flex flex-col items-center justify-center gap-2 p-4"
+                  className="aspect-video w-full rounded-2xl bg-[#080c14]/90 border border-white/[0.08] animate-pulse flex flex-col items-center justify-center gap-2 p-4"
                 >
                   <Wand2 className="w-6 h-6 text-cyan-400/60 animate-bounce" />
-                  <span className="text-[11px] font-mono text-slate-400 text-center">
+                  <span className="text-[11px] font-mono text-white/55 text-center">
                     {isSlicingLocalMedia
                       ? `Подготовка кадра #${skeletonIdx + 1}...`
                       : `Flux.1-Schnell 1344×768 • Вариант #${skeletonIdx + 1}...`}
@@ -3846,8 +3934,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
         ) : (
-          /* Контейнер превью: 2 колонки на 2 строки (grid grid-cols-2 gap-3 w-full my-4) */
-          <div id="flux-thumbnails-grid-container" className="grid grid-cols-2 gap-3 w-full my-4">
+          <div id="flux-thumbnails-grid-container" className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4">
             {batchVariants.map((imgSrc, index) => {
               const isMaster = selectedMasterVariantIdx === index;
               const isAttached = attachedToYoutubeIdx === index;
@@ -3862,10 +3949,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     if (target && target.tagName.toLowerCase() === 'a') return;
                     handleSelectBatchVariant(index, 'A');
                   }}
-                  className={`relative group rounded-xl overflow-hidden border-2 bg-slate-900 cursor-pointer transition-all duration-200 hover:border-cyan-400/80 hover:scale-[1.02] flex flex-col justify-between ${
+                  className={`scene-card-interactive relative group rounded-2xl overflow-hidden border bg-[#080c14]/90 cursor-pointer flex flex-col justify-between ${
                     isMaster
-                      ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_15px_rgba(0,242,254,0.4)]'
-                      : 'border-slate-700/60'
+                      ? 'border-cyan-400 ring-2 ring-cyan-400/40 shadow-[0_12px_32px_-8px_rgba(6,182,212,0.45)]'
+                      : 'border-white/[0.08] hover:border-cyan-400/60'
                   }`}
                 >
                   <div className="relative w-full aspect-video overflow-hidden">
@@ -3876,18 +3963,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         bwContrastFilter ? 'grayscale contrast-125' : ''
                       }`}
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2">
-                      <span className="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded truncate max-w-[60%]">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
+                      <span className="text-xs font-mono font-semibold text-white bg-black/70 px-2.5 py-1 rounded-lg truncate max-w-[55%]">
                         {sceneLabel}
                       </span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={e => {
                             e.stopPropagation();
                             setZoomedVariantIdx(index);
                           }}
-                          className="text-xs bg-slate-900/90 hover:bg-black text-cyan-300 border border-cyan-400/40 font-bold px-2 py-1 rounded shadow cursor-pointer"
+                          className="min-h-[36px] text-xs bg-slate-900/90 hover:bg-black text-cyan-300 border border-cyan-400/40 font-bold px-2.5 py-1 rounded-lg shadow cursor-pointer"
                         >
                           🔍 Увеличить
                         </button>
@@ -3895,7 +3982,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           href={imgSrc}
                           download={`thumbnail_${index + 1}.jpg`}
                           onClick={e => e.stopPropagation()}
-                          className="text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-2 py-1 rounded shadow"
+                          className="min-h-[36px] flex items-center text-xs bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-bold px-2.5 py-1 rounded-lg shadow"
                         >
                           Скачать
                         </a>
@@ -3904,37 +3991,37 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <div
                       className={`selection-indicator ${
                         isMaster ? '' : 'hidden'
-                      } absolute top-2 right-2 bg-cyan-500 text-black text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg`}
+                      } absolute top-2.5 right-2.5 bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950 text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg`}
                     >
                       ✓
                     </div>
                   </div>
 
                   {/* Панель действий под выбранной карточкой */}
-                  <div className="p-2.5 bg-[#0b0f17] border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs min-w-0">
-                      <span className="font-bold text-slate-200 shrink-0">#{index + 1}</span>
-                      <span className="text-[11px] text-slate-400 truncate max-w-[180px]" title={sceneLabel}>
+                  <div className="p-3 bg-[#0f1623]/90 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs min-w-0">
+                      <span className="font-mono font-bold text-[#f8fafc] shrink-0">#{index + 1}</span>
+                      <span className="text-[11px] text-white/55 truncate max-w-[180px]" title={sceneLabel}>
                         {sceneLabel}
                       </span>
                       {isMaster && (
-                        <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-2 py-0.5 rounded shrink-0">
-                          Мастер-кадр
+                        <span className="text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-400/35 px-2 py-0.5 rounded-full shrink-0">
+                          MASTER
                         </span>
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={e => {
                           e.stopPropagation();
                           handleDownloadVariantFromGrid(index);
                         }}
-                        className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition"
+                        className="min-h-[38px] btn-primary-action py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Download className="w-3 h-3" />
-                        <span>📥 Скачать мастер-кадр</span>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>📥 Скачать 4K</span>
                       </button>
 
                       <button
@@ -3943,15 +4030,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           e.stopPropagation();
                           handleAttachToYoutubeRelease(index);
                         }}
-                        className={`font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition border ${
+                        className={`min-h-[38px] font-bold py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer border ${
                           isAttached
                             ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                            : 'bg-slate-800 hover:bg-slate-700 border-cyan-400/40 text-cyan-300'
+                            : 'bg-white/[0.05] hover:bg-white/[0.1] border-white/[0.1] text-cyan-300'
                         }`}
                       >
-                        <CheckCircle2 className="w-3 h-3" />
+                        <CheckCircle2 className="w-3.5 h-3.5" />
                         <span>
-                          {isAttached ? '✓ Привязано к релизу' : 'Привязать к YouTube релизу'}
+                          {isAttached ? '✓ В релизе' : 'В релиз'}
                         </span>
                       </button>
                     </div>
@@ -3963,219 +4050,263 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         )}
       </div>
 
-      {/* НИЖНИЕ МОДУЛИ: 1. АВТО-ЭКСТРАКТОР 4K КАДРА ПО СЕКУНДЕ & 2. ГЕНЕРАТОР ПРОМПТА FLUX.1 AI HORDE / MIDJOURNEY / LEONARDO */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 1. АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
-        <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Camera className="w-5 h-5 text-amber-400" />
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                1. Авто-экстрактор 4K-кадра из видео по секунде (3840×2160)
-              </h3>
+      {/* ВТОРОСТЕПЕННЫЕ ИНСТРУМЕНТЫ ПОД ПЛАВНЫМИ АККОРДЕОНАМИ (УСТРАНЕНИЕ ВИЗУАЛЬНОГО ШУМА) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* АККОРДЕОН 1: АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
+        <div className="aether-surface rounded-2xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowVideoExtractor(prev => !prev)}
+            className="w-full min-h-[56px] p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center shrink-0">
+                <Camera className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-[#f8fafc] truncate">
+                  1. Авто-экстрактор 4K стоп-кадра из видео
+                </h3>
+                <p className="text-[11px] text-white/55 truncate">
+                  Точный захват кадра по секунде в честном разрешении 3840×2160
+                </p>
+              </div>
             </div>
-            <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded">
-              3840×2160 UHD
-            </span>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <input
-                type="file"
-                accept="video/*"
-                onChange={handleSelectVideoForExtraction}
-                className="text-xs text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400 cursor-pointer"
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-400/30 text-amber-300 px-2.5 py-0.5 rounded-full">
+                3840×2160
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                  showVideoExtractor ? 'rotate-180 text-amber-400' : ''
+                }`}
               />
-              {videoFileName && (
-                <span className="text-[11px] font-mono text-emerald-300 truncate max-w-xs">
-                  Файл: {videoFileName}
-                </span>
-              )}
             </div>
+          </button>
 
-            {videoUrl ? (
-              <div className="space-y-3">
-                <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-800">
-                  <video
-                    ref={videoRef}
-                    src={videoUrl}
-                    onLoadedMetadata={e => {
-                      setVideoDuration(e.currentTarget.duration || 10);
-                    }}
-                    className="w-full h-full object-contain"
-                    controls
-                    muted
-                  />
-                </div>
+          {showVideoExtractor && (
+            <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleSelectVideoForExtraction}
+                  className="text-xs text-white/60 file:mr-3 file:min-h-[40px] file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-gradient-to-r file:from-amber-400 file:to-orange-500 file:text-slate-950 cursor-pointer"
+                />
+                {videoFileName && (
+                  <span className="text-[11px] font-mono text-emerald-300 truncate max-w-xs">
+                    Файл: {videoFileName}
+                  </span>
+                )}
+              </div>
 
-                <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-300 font-semibold">
-                      Таймкод секунды стоп-кадра:
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={videoDuration || 3600}
-                        step={0.1}
-                        value={seekTimeSec}
-                        onChange={e => handleSeekVideo(Number(e.target.value) || 0)}
-                        className="w-20 bg-slate-900 border border-amber-500/40 rounded px-2 py-1 text-xs font-mono text-amber-300 text-center outline-none"
-                      />
-                      <span className="text-[11px] font-mono text-slate-400">
-                        / {videoDuration.toFixed(1)} сек
+              {videoUrl ? (
+                <div className="space-y-3">
+                  <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/[0.1]">
+                    <video
+                      ref={videoRef}
+                      src={videoUrl}
+                      onLoadedMetadata={e => {
+                        setVideoDuration(e.currentTarget.duration || 10);
+                      }}
+                      className="w-full h-full object-contain"
+                      controls
+                      muted
+                    />
+                  </div>
+
+                  <div className="bg-[#080c14]/80 border border-white/[0.08] rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-[#f8fafc] font-semibold">
+                        Таймкод секунды стоп-кадра:
                       </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={videoDuration || 3600}
+                          step={0.1}
+                          value={seekTimeSec}
+                          onChange={e => handleSeekVideo(Number(e.target.value) || 0)}
+                          className="w-20 min-h-[38px] bg-[#0f1623] border border-amber-400/40 rounded-lg px-2 py-1 text-xs font-mono text-amber-300 text-center outline-none"
+                        />
+                        <span className="text-[11px] font-mono text-white/55">
+                          / {videoDuration.toFixed(1)}s
+                        </span>
+                      </div>
+                    </div>
+
+                    <input
+                      type="range"
+                      min={0}
+                      max={videoDuration || 10}
+                      step={0.05}
+                      value={seekTimeSec}
+                      onChange={e => handleSeekVideo(Number(e.target.value))}
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('A')}
+                        className="min-h-[44px] btn-artistic-premium py-2 px-3 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Обложку A (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAbModeEnabled(true);
+                          capture4KKeyframe('B');
+                        }}
+                        className="min-h-[44px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 font-bold py-2 px-3 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Обложку B (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('download')}
+                        className="min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[#f8fafc] font-semibold py-2 px-3 rounded-xl text-xs cursor-pointer"
+                      >
+                        💾 Скачать 4K кадр
+                      </button>
                     </div>
                   </div>
-
-                  <input
-                    type="range"
-                    min={0}
-                    max={videoDuration || 10}
-                    step={0.05}
-                    value={seekTimeSec}
-                    onChange={e => handleSeekVideo(Number(e.target.value))}
-                    className="w-full accent-amber-500 cursor-pointer"
-                  />
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => capture4KKeyframe('A')}
-                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 px-3 rounded-lg text-xs cursor-pointer transition"
-                    >
-                      📸 В Обложку A (4K)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAbModeEnabled(true);
-                        capture4KKeyframe('B');
-                      }}
-                      className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold py-2 px-3 rounded-lg text-xs cursor-pointer transition"
-                    >
-                      📸 В Обложку B (4K)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => capture4KKeyframe('download')}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2 px-3 rounded-lg text-xs cursor-pointer transition"
-                    >
-                      💾 Скачать 4K кадр
-                    </button>
-                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="bg-[#0b0f17] border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-400 space-y-1">
-                <Film className="w-7 h-7 text-amber-400/70 mx-auto mb-1" />
-                <p className="text-xs font-semibold text-slate-300">
-                  Загрузите видеофайл (.mp4 / .mov / .webm) для авто-экстракта 4K стоп-кадра
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Точный выбор секунды и мгновенный захват кадра в 3840×2160 без потери четкости
-                </p>
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="bg-[#080c14]/70 border border-dashed border-white/[0.1] rounded-xl p-6 text-center space-y-1">
+                  <Film className="w-7 h-7 text-amber-400/70 mx-auto mb-1" />
+                  <p className="text-xs font-semibold text-[#f8fafc]">
+                    Загрузите видеофайл (.mp4 / .mov / .webm) для авто-экстракта 4K стоп-кадра
+                  </p>
+                  <p className="text-[11px] text-white/55">
+                    Точный выбор секунды и мгновенный захват кадра в 3840×2160 без потери четкости
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* 2. ВИЗУАЛЬНЫЙ ПРОМПТ ДЛЯ FLUX.1-SCHNELL / AI HORDE / CLOUDFLARE WORKERS AI */}
-        <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-                  2. Генератор визуального промпта (Flux.1-Schnell / Midjourney / Leonardo.ai)
-                </h3>
+        {/* АККОРДЕОН 2: ГЕНЕРАТОР ВИЗУАЛЬНОГО ПРОМПТА (FLUX.1 / MIDJOURNEY / LEONARDO) */}
+        <div className="aether-surface rounded-2xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowPromptGenerator(prev => !prev)}
+            className="w-full min-h-[56px] p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center shrink-0">
+                <Layers className="w-4 h-4 text-emerald-400" />
               </div>
-              <span className="text-[10px] font-mono bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 px-2 py-0.5 rounded">
-                16:9 English Prompt
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-[#f8fafc] truncate">
+                  2. Конструктор визуального промпта (Flux.1 / Midjourney)
+                </h3>
+                <p className="text-[11px] text-white/55 truncate">
+                  Пресеты атмосферы и тонкая настройка English-промпта 16:9
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 px-2.5 py-0.5 rounded-full">
+                PROMPT LAB
               </span>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase block">
-                Визуальный стиль (Свет, план, атмосфера):
-              </label>
-              <select
-                value={promptStylePreset}
-                onChange={e => {
-                  setPromptStylePreset(
-                    e.target.value as
-                      | 'mystery_dark'
-                      | 'ambient_4k'
-                      | 'truecrime_contrast'
-                      | 'scifi_neon'
-                  );
-                  setCustomFluxPrompt('');
-                }}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-500"
-              >
-                <option value="mystery_dark">
-                  🕵️ Dark Mystery (Высокий контраст, фокус на улике, chiaroscuro)
-                </option>
-                <option value="ambient_4k">
-                  ❄️ Cozy Ambient 4K (Тёплый свет внутри vs ледяная стихия)
-                </option>
-                <option value="truecrime_contrast">
-                  📁 Investigative / True Crime (Драматический свет, гриф SECRET)
-                </option>
-                <option value="scifi_neon">
-                  📡 Anomalous Signal (Осциллограф, объёмные лучи в темноте)
-                </option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                Промпт для Flux.1-Schnell (AI Horde 1344×768 / Cloudflare Workers AI):
-              </label>
-              <textarea
-                rows={5}
-                value={activePromptText}
-                onChange={e => setCustomFluxPrompt(e.target.value)}
-                className="w-full bg-[#0b0f17] border border-slate-800 focus:border-indigo-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
+              <ChevronDown
+                className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                  showPromptGenerator ? 'rotate-180 text-emerald-400' : ''
+                }`}
               />
             </div>
-          </div>
+          </button>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleGenerateFluxCover('A')}
-              disabled={isGeneratingCovers}
-              className="bg-cyan-500 hover:bg-cyan-400 text-black font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-cyan-500/20 disabled:opacity-60"
-            >
-              <Wand2 className="w-4 h-4" />
-              <span>
-                {isGeneratingCovers
-                  ? buttonQueueStatus || 'Ожидание AI Horde...'
-                  : isCloudflareConfigured
-                    ? 'Cloudflare Flux (2×2) • 16:9'
-                    : 'Flux.1 AI Horde (2×2) • 16:9'}
-              </span>
-            </button>
+          {showPromptGenerator && (
+            <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/55 uppercase block">
+                  Визуальный стиль (пилюли-пресеты):
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { id: 'mystery_dark', label: '🕵️ Dark Mystery (Chiaroscuro)' },
+                    { id: 'ambient_4k', label: '❄️ Cozy Ambient 4K (Огонь vs Лёд)' },
+                    { id: 'truecrime_contrast', label: '📁 True Crime (Гриф SECRET)' },
+                    { id: 'scifi_neon', label: '📡 Anomalous Signal (Неон)' }
+                  ].map(preset => {
+                    const active = promptStylePreset === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setPromptStylePreset(
+                            preset.id as
+                              | 'mystery_dark'
+                              | 'ambient_4k'
+                              | 'truecrime_contrast'
+                              | 'scifi_neon'
+                          );
+                          setCustomFluxPrompt('');
+                        }}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold text-left border cursor-pointer ${
+                          active
+                            ? 'btn-artistic-premium'
+                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/70 hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-            <button
-              type="button"
-              onClick={copyCoverPromptForWebGenerator}
-              className="bg-gradient-to-r from-indigo-500 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 font-bold py-3 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-500/20"
-            >
-              {copiedPrompt ? (
-                <>
-                  <Check className="w-4 h-4" /> Промпт скопирован!
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4" /> 📋 Скопировать промпт для веб-генератора
-                </>
-              )}
-            </button>
-          </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono text-white/55 uppercase block">
+                  Промпт для Flux.1-Schnell (1344×768 / 16:9):
+                </label>
+                <textarea
+                  rows={4}
+                  value={activePromptText}
+                  onChange={e => setCustomFluxPrompt(e.target.value)}
+                  className="w-full bg-[#080c14]/90 border border-white/[0.1] focus:border-emerald-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleGenerateFluxCover('A')}
+                  disabled={isGeneratingCovers}
+                  className="min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>
+                    {isGeneratingCovers
+                      ? buttonQueueStatus || 'Ожидание AI Horde...'
+                      : 'Сгенерировать 2×2 по промпту'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={copyCoverPromptForWebGenerator}
+                  className="min-h-[44px] btn-artistic-premium py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {copiedPrompt ? (
+                    <>
+                      <Check className="w-4 h-4" /> Промпт скопирован!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" /> 📋 Скопировать промпт
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

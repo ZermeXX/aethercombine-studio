@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { motion } from 'motion/react';
 import {
   Layers,
   Clapperboard,
@@ -43,7 +44,8 @@ import {
   Flag,
   ListOrdered,
   Trash2,
-  Clock
+  Clock,
+  ChevronDown
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { initDriveAuth } from './googleDriveAuth';
@@ -1150,6 +1152,7 @@ export default function App() {
   const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'>('en');
   const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>('');
   const [shortsFactoryEnabled, setShortsFactoryEnabled] = useState<boolean>(false);
+  const [showLoopAdvancedAccordion, setShowLoopAdvancedAccordion] = useState<boolean>(false);
 
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
@@ -4247,36 +4250,36 @@ export default function App() {
   const estimatedGb = estimateLoopSizeGb();
 
   return (
-    <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#0b0f17] text-[#e2e8f0]">
-      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Navbar: двухрядная без перекрытий, скролл на мобильных <768px и wrap на десктопе) */}
-      <header className="relative w-full border-b border-slate-800/80 bg-[#0B0F19]/95 backdrop-blur-md px-4 py-3 shadow-lg shadow-black/40">
+    <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#080c14] text-[#f8fafc] overflow-x-hidden">
+      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Segmented Tabs со скользящим индикатором layoutId) */}
+      <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#080c14]/85 backdrop-blur-xl px-4 py-3 shadow-[0_16px_40px_-15px_rgba(0,0,0,0.85)]">
         {/* Верхний ряд: Логотип и статус подключения */}
         <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {/* Иконка и заголовок AETHER COMBINE */}
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20">
-              <Layers className="w-6 h-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 shadow-[0_8px_20px_-4px_rgba(245,158,11,0.45)]">
+              <Layers className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base sm:text-lg font-bold tracking-wide text-white whitespace-nowrap">
-                  AETHER <span className="text-amber-400">COMBINE</span>
+                <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-[#f8fafc] whitespace-nowrap">
+                  AETHER <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">COMBINE</span>
                 </h1>
-                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300 whitespace-nowrap">
-                  PRO 4K • HYDROGEN
+                <span className="rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-300 whitespace-nowrap">
+                  PRO 4K • STUDIO
                 </span>
               </div>
-              <p className="hidden md:block text-xs text-slate-400 truncate">
+              <p className="hidden md:block text-xs text-white/55 truncate">
                 Автономный облачный видеокомбайн &amp; универсальный парсер N-слотов (GitHub Actions → Google Drive)
               </p>
             </div>
           </div>
 
-          {/* Правый бейдж статуса (больше не наезжает на вкладки) */}
+          {/* Правый бейдж статуса */}
           <button
             type="button"
             onClick={openConfigModal}
-            className="flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800/90 hover:border-amber-500/40 px-2.5 sm:px-3.5 py-2 text-xs transition cursor-pointer"
+            className="min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/80 hover:bg-[#0f1623] hover:border-amber-400/40 px-3 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
           >
             <span
               id="gh-status-indicator"
@@ -4286,11 +4289,11 @@ export default function App() {
                   : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
               }`}
             />
-            <span id="gh-status-text" className="font-mono text-amber-400 truncate max-w-[130px] sm:max-w-none">
+            <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[130px] sm:max-w-none">
               {ghRepo || 'ZermeXX/aetherflow-render'}
             </span>
-            <span className="h-4 w-px bg-slate-800 hidden sm:inline-block" />
-            <span className="hidden sm:flex items-center gap-1.5 font-medium text-emerald-400">
+            <span className="h-4 w-px bg-white/[0.1] hidden sm:inline-block" />
+            <span className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] font-medium text-emerald-400">
               <HardDrive
                 className={`w-3.5 h-3.5 ${
                   isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
@@ -4301,166 +4304,111 @@ export default function App() {
           </button>
         </div>
 
-        {/* Нижний ряд: Все 6 вкладок — flex-wrap gap-2 на десктопе (md+) и overflow-x-auto на мобильных (<768px) */}
+        {/* Нижний ряд: Сегментированные вкладки со скользящим индикатором (flex-wrap для комфортного нажатия на смартфонах и десктопах) */}
         <nav
           role="tablist"
           aria-label="Цехи продакшна AetherCombine"
-          className="mx-auto mt-3 flex max-w-[1600px] flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto md:overflow-visible custom-scroll rounded-2xl border border-slate-800/80 bg-slate-900/60 p-1.5"
+          className="mx-auto mt-3 flex max-w-[1600px] flex-wrap items-center gap-1.5 rounded-2xl border border-white/[0.08] bg-[#0f1623]/85 backdrop-blur-md p-1.5"
         >
-          {/* 1. 🎬 Повествовательный монтаж */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'combine'}
-            onClick={() => handleSelectTab('combine')}
-            id="tab-combine"
-            className={`group nav-tab nav-tab-combine flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'combine'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'combine' ? `combine-active-${tabPulseKey}` : 'combine-idle'}
-              className="icon-container nav-icon-box nav-icon-combine"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_8px_rgba(147,51,234,0.95)]">
-                🎬
-              </span>
-            </span>
-            <span>Повествовательный монтаж</span>
-          </button>
-
-          {/* 2. 🔁 Многочасовой Луп (N-Слотов) */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'loop'}
-            onClick={() => handleSelectTab('loop')}
-            id="tab-loop"
-            className={`group nav-tab nav-tab-loop flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'loop'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'loop' ? `loop-active-${tabPulseKey}` : 'loop-idle'}
-              className="icon-container nav-icon-box nav-icon-loop"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_8px_rgba(245,158,11,0.95)]">
-                🔁
-              </span>
-            </span>
-            <span>Многочасовой Луп (N-Слотов)</span>
-          </button>
-
-          {/* 3. ⚡ Сценарий и Хуки */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'hooks'}
-            onClick={() => handleSelectTab('hooks')}
-            id="tab-hooks"
-            className={`group nav-tab nav-tab-hooks flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'hooks'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'hooks' ? `hooks-active-${tabPulseKey}` : 'hooks-idle'}
-              className="icon-container nav-icon-box nav-icon-hooks"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
-                ⚡
-              </span>
-            </span>
-            <span>Сценарий и Хуки</span>
-          </button>
-
-          {/* 4. 🎙️ Дикторский цех */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'voice'}
-            onClick={() => handleSelectTab('voice')}
-            id="tab-voice"
-            className={`group nav-tab nav-tab-voice flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'voice'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'voice' ? `voice-active-${tabPulseKey}` : 'voice-idle'}
-              className="icon-container nav-icon-box nav-icon-voice"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(236,72,153,0.95)]">
-                🎙️
-              </span>
-            </span>
-            <span>Дикторский цех</span>
-          </button>
-
-          {/* 5. 📦 YouTube SEO */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'seo'}
-            onClick={() => handleSelectTab('seo')}
-            id="tab-seo"
-            className={`group nav-tab nav-tab-seo flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'seo'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'seo' ? `seo-active-${tabPulseKey}` : 'seo-idle'}
-              className="icon-container nav-icon-box nav-icon-seo"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(14,165,233,0.95)]">
-                📦
-              </span>
-            </span>
-            <span>YouTube SEO</span>
-          </button>
-
-          {/* 6. 🎨 4K Превью и Арт-цех */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'thumb'}
-            onClick={() => handleSelectTab('thumb')}
-            id="tab-thumb"
-            className={`group nav-tab nav-tab-thumb flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'thumb'
-                ? 'active border border-amber-500/50 bg-amber-500/15 text-white shadow-sm'
-                : 'border border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
-            }`}
-          >
-            <span
-              key={activeTab === 'thumb' ? `thumb-active-${tabPulseKey}` : 'thumb-idle'}
-              className="icon-container nav-icon-box nav-icon-thumb"
-              aria-hidden="true"
-            >
-              <span className="text-[16px] leading-none select-none drop-shadow-[0_0_9px_rgba(16,185,129,0.95)]">
-                🎨
-              </span>
-            </span>
-            <span>4K Превью и Арт-цех</span>
-          </button>
+          {[
+            {
+              id: 'combine' as TabId,
+              domId: 'tab-combine',
+              cls: 'nav-tab-combine',
+              iconCls: 'nav-icon-combine',
+              emoji: '🎬',
+              glow: 'rgba(147,51,234,0.95)',
+              label: 'Повествовательный монтаж'
+            },
+            {
+              id: 'loop' as TabId,
+              domId: 'tab-loop',
+              cls: 'nav-tab-loop',
+              iconCls: 'nav-icon-loop',
+              emoji: '🔁',
+              glow: 'rgba(245,158,11,0.95)',
+              label: 'Многочасовой Луп (N-Слотов)'
+            },
+            {
+              id: 'hooks' as TabId,
+              domId: 'tab-hooks',
+              cls: 'nav-tab-hooks',
+              iconCls: 'nav-icon-hooks',
+              emoji: '⚡',
+              glow: 'rgba(250,204,21,0.95)',
+              label: 'Сценарий и Хуки'
+            },
+            {
+              id: 'voice' as TabId,
+              domId: 'tab-voice',
+              cls: 'nav-tab-voice',
+              iconCls: 'nav-icon-voice',
+              emoji: '🎙️',
+              glow: 'rgba(236,72,153,0.95)',
+              label: 'Дикторский цех'
+            },
+            {
+              id: 'seo' as TabId,
+              domId: 'tab-seo',
+              cls: 'nav-tab-seo',
+              iconCls: 'nav-icon-seo',
+              emoji: '📦',
+              glow: 'rgba(14,165,233,0.95)',
+              label: 'YouTube SEO'
+            },
+            {
+              id: 'thumb' as TabId,
+              domId: 'tab-thumb',
+              cls: 'nav-tab-thumb',
+              iconCls: 'nav-icon-thumb',
+              emoji: '🎨',
+              glow: 'rgba(16,185,129,0.95)',
+              label: '4K Превью и Арт-цех'
+            }
+          ].map(tabItem => {
+            const isActive = activeTab === tabItem.id;
+            return (
+              <button
+                key={tabItem.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => handleSelectTab(tabItem.id)}
+                id={tabItem.domId}
+                className={`relative group nav-tab ${tabItem.cls} min-h-[44px] flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold whitespace-nowrap cursor-pointer overflow-hidden ${
+                  isActive
+                    ? 'active text-[#f8fafc] border border-amber-400/45 shadow-[0_6px_20px_-4px_rgba(245,158,11,0.28)]'
+                    : 'border border-transparent text-white/60 hover:bg-white/[0.04] hover:text-white'
+                }`}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="activeStudioTabIndicator"
+                    className="absolute inset-0 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-emerald-500/15 -z-0"
+                    transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                  />
+                )}
+                <span
+                  key={isActive ? `${tabItem.id}-active-${tabPulseKey}` : `${tabItem.id}-idle`}
+                  className={`relative z-10 icon-container nav-icon-box ${tabItem.iconCls}`}
+                  aria-hidden="true"
+                >
+                  <span
+                    style={{ filter: `drop-shadow(0 0 8px ${tabItem.glow})` }}
+                    className="text-[16px] leading-none select-none"
+                  >
+                    {tabItem.emoji}
+                  </span>
+                </span>
+                <span className="relative z-10">{tabItem.label}</span>
+              </button>
+            );
+          })}
         </nav>
       </header>
 
       {/* ОСНОВНОЙ КОНТЕНТ */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 overflow-x-hidden">
         {/* =========================================
             ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
            ========================================= */}
@@ -4513,14 +4461,15 @@ export default function App() {
           id="view-loop"
           className={`studio-view space-y-6 ${activeTab === 'loop' ? '' : 'hidden'}`}
         >
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div className="space-y-2 flex-1 min-w-[280px]">
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <Repeat className="text-amber-500 w-5 h-5" /> Многочасовой Луп (N-Слотов) — Динамический конструктор 4K
+          <div className="aether-surface rounded-2xl p-5 sm:p-6 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
+              <div className="space-y-2 flex-1 min-w-[260px]">
+                <h2 className="text-lg font-bold text-[#f8fafc] flex items-center gap-2">
+                  <Repeat className="text-amber-400 w-5 h-5 shrink-0" />
+                  <span>Многочасовой Луп (N-Слотов) — Конструктор 4K</span>
                 </h2>
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
                     Project Name:
                   </label>
                   <input
@@ -4528,37 +4477,34 @@ export default function App() {
                     value={loopProjectName}
                     onChange={e => setLoopProjectName(e.target.value)}
                     placeholder="Ambient Loop 4K"
-                    className="bg-slate-900 border border-amber-500/40 focus:border-amber-400 rounded-lg px-3 py-1 text-xs font-semibold text-slate-100 w-64 sm:w-80 outline-none"
+                    className="min-h-[38px] bg-[#080c14]/90 border border-white/[0.12] focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs font-semibold text-[#f8fafc] w-full sm:w-80 outline-none"
                   />
                 </div>
-                <p className="text-xs text-slate-400">
-                  Экспорт <code className="text-amber-400">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с) • Асимметричные <code className="text-emerald-400">inserts[]</code> • <code className="text-sky-400">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
+                <p className="text-xs text-white/55">
+                  Экспорт <code className="font-mono text-amber-300">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с) • <code className="font-mono text-emerald-300">inserts[]</code>
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] bg-sky-500/10 border border-sky-500/30 text-sky-300 px-3 py-1 rounded-lg font-semibold font-mono">
-                  {videoCodec === 'libx265' ? 'H.265 (libx265)' : 'H.264 (libx264)'} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
+                <span className="text-[11px] bg-white/[0.04] border border-white/[0.08] text-cyan-300 px-3 py-1 rounded-full font-mono">
+                  {videoCodec === 'libx265' ? 'H.265' : 'H.264'} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
                 </span>
-                <span className="text-[11px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg font-semibold">
-                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • Чистый хронометраж: {calculatedProjectDurationSec}s
-                </span>
-                <span className="text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1 rounded-lg font-semibold">
-                  Direct GDrive Stream
+                <span className="text-[11px] bg-emerald-500/10 border border-emerald-400/30 text-emerald-300 px-3 py-1 rounded-full font-mono">
+                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • {formatTimeHMS(calculatedProjectDurationSec)}
                 </span>
               </div>
             </div>
 
             {/* МОДУЛЬ ИМПОРТА И ЭКСПОРТА JSON-МАНИФЕСТА (УНИВЕРСАЛЬНЫЙ ПАРСЕР N-СЛОТОВ) */}
-            <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-4 space-y-3">
+            <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <FileText className="w-4 h-4 text-amber-500" />
+                  <FileText className="w-4 h-4 text-amber-400 shrink-0" />
                   <div>
-                    <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                      JSON-манифест сборки • Проект «{loopProjectName || 'Ambient Loop 4K'}» (Универсальный парсер N-Слотов)
+                    <h3 className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider">
+                      JSON-манифест сборки • Проект «{loopProjectName || 'Ambient Loop 4K'}»
                     </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Парсит любое число слотов <code className="text-amber-300">timeline_slots</code> (1–50+), кривые <code className="text-amber-300">transition_in / transition_out</code> и мастеринг <code className="text-emerald-300">audio_mastering</code>
+                    <p className="text-[11px] text-white/55">
+                      Универсальный парсер слотов <code className="font-mono text-amber-300">timeline_slots</code> (1–50+), кривых <code className="font-mono text-amber-300">transition_in/out</code> и <code className="font-mono text-emerald-300">audio_mastering</code>
                     </p>
                   </div>
                 </div>
@@ -4574,31 +4520,33 @@ export default function App() {
                   <button
                     type="button"
                     onClick={applyBlizzard3HSpecPreset}
-                    className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-sky-200 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-sky-500/10"
+                    className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-cyan-400/40 text-cyan-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
                   >
-                    ⚡ [ Сбросить к 6 актам (3:00:00) ]
+                    ⚡ Сбросить к 6 актам (3:00:00)
                   </button>
                   <button
                     type="button"
                     onClick={() => manifestInputRef.current?.click()}
-                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
+                    className="min-h-[44px] btn-artistic-premium px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
                   >
-                    <FolderUp className="w-3.5 h-3.5" /> [ 📄 Импортировать JSON-рецепт сборки ]
+                    <FolderUp className="w-4 h-4" />
+                    <span>📄 Импортировать JSON-манифест</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleExportManifestFile}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+                    className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-[#f8fafc] font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5 text-amber-400" /> [ 💾 Экспортировать в JSON ]
+                    <Download className="w-4 h-4 text-amber-400" />
+                    <span>💾 Экспорт JSON</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => generateNSlotsPreset(10)}
-                    className="bg-slate-900 hover:bg-slate-800 border border-amber-500/30 text-amber-300 px-3 py-2 rounded-xl text-[11px] font-medium transition cursor-pointer"
+                    className="min-h-[44px] bg-white/[0.04] hover:bg-white/[0.08] border border-amber-400/30 text-amber-300 px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer"
                     title="Сгенерировать 10 слотов с динамическими массивами inserts: []"
                   >
-                    Пресет 10 слотов (N-сцен)
+                    Пресет 10 слотов
                   </button>
                 </div>
               </div>
@@ -4821,327 +4769,358 @@ export default function App() {
               </div>
             </div>
 
-            {/* РАНДОМИЗАТОР ШВОВ И ИНТЕРВАЛОВ (SEAMLESS ASYMMETRY • random_interval: [1200, 2400]) */}
-            <div className="bg-[#0b0f17] border border-emerald-500/30 rounded-xl p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-emerald-400" />
-                  <div>
-                    <span className="text-xs font-bold text-slate-100 uppercase tracking-wider block">
-                      Рандомизатор швов и интервалов (Seamless Asymmetry • Защита от Reused Content)
+            {/* ПЛАВНЫЙ АККОРДЕОН ПРОДВИНУТЫХ НАСТРОЕК ЛУПА (SEAMLESS ASYMMETRY, СТЫКИ АКТОВ & LOUDNORM E3) */}
+            <div className="aether-card rounded-2xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowLoopAdvancedAccordion(prev => !prev)}
+                className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider block truncate">
+                      Продвинутая инженерия петли (Seamless Asymmetry • Стыки 90с • Мастеринг Loudnorm)
                     </span>
-                    <span className="text-[11px] text-slate-400">
-                      Непериодическое наложение микровставок каждые 20–40 минут (<code className="text-emerald-300 font-mono">random_interval: [{seamlessAsymmetry.random_interval[0]}, {seamlessAsymmetry.random_interval[1]}]</code> сек) с мягким кроссфейдом 1.5 сек
+                    <span className="text-[11px] text-white/55 block truncate font-mono">
+                      random_interval: [{seamlessAsymmetry.random_interval[0]}..{seamlessAsymmetry.random_interval[1]}s] • Crossfade {actCrossfadeSec}s • loudnorm I={audioMastering.integrated_lufs} LUFS
                     </span>
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-xs font-bold text-emerald-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={seamlessAsymmetry.enabled}
-                    onChange={e =>
-                      setSeamlessAsymmetry(prev => ({ ...prev, enabled: e.target.checked }))
-                    }
-                    className="accent-emerald-500 w-4 h-4"
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 px-2.5 py-0.5 rounded-full">
+                    {showLoopAdvancedAccordion ? 'СВЕРНУТЬ' : 'НАСТРОИТЬ'}
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                      showLoopAdvancedAccordion ? 'rotate-180 text-emerald-400' : ''
+                    }`}
                   />
-                  <span>Seamless Asymmetry активен</span>
-                </label>
-              </div>
+                </div>
+              </button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div>
-                  <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                    Мин. интервал микровставки (сек):
-                  </label>
-                  <input
-                    type="number"
-                    min={60}
-                    max={3600}
-                    step={60}
-                    value={seamlessAsymmetry.random_interval[0]}
-                    onChange={e => {
-                      const v = Math.max(60, Number(e.target.value) || 1200);
-                      setSeamlessAsymmetry(prev => ({
-                        ...prev,
-                        random_interval: [v, Math.max(v, prev.random_interval[1])]
-                      }));
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-emerald-300 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                    Макс. интервал микровставки (сек):
-                  </label>
-                  <input
-                    type="number"
-                    min={120}
-                    max={7200}
-                    step={60}
-                    value={seamlessAsymmetry.random_interval[1]}
-                    onChange={e => {
-                      const v = Math.max(seamlessAsymmetry.random_interval[0], Number(e.target.value) || 2400);
-                      setSeamlessAsymmetry(prev => ({
-                        ...prev,
-                        random_interval: [prev.random_interval[0], v]
-                      }));
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-emerald-300 outline-none"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTimelineSlots(prev =>
-                        prev.map((sl, idx) => {
-                          if (!sl.inserts.length) return sl;
-                          return {
-                            ...sl,
-                            inserts: sl.inserts.map((ins, iIdx) => {
-                              const minI = seamlessAsymmetry.random_interval[0];
-                              const maxI = seamlessAsymmetry.random_interval[1];
-                              const randTrig = Math.min(
-                                Math.max(30, sl.slot_duration_sec - 20),
-                                Math.round(minI / 3 + ((idx + 1) * (iIdx + 1) * 173) % Math.max(120, maxI - minI))
+              {showLoopAdvancedAccordion && (
+                <div className="p-4 border-t border-white/[0.08] space-y-4">
+                  {/* РАНДОМИЗАТОР ШВОВ И ИНТЕРВАЛОВ (SEAMLESS ASYMMETRY • random_interval: [1200, 2400]) */}
+                  <div className="bg-[#080c14]/80 border border-emerald-500/25 rounded-xl p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-400" />
+                        <div>
+                          <span className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider block">
+                            Рандомизатор швов и интервалов (Seamless Asymmetry • Защита от Reused Content)
+                          </span>
+                          <span className="text-[11px] text-white/55">
+                            Непериодическое наложение микровставок каждые 20–40 минут (<code className="text-emerald-300 font-mono">random_interval: [{seamlessAsymmetry.random_interval[0]}, {seamlessAsymmetry.random_interval[1]}]</code> сек) с мягким кроссфейдом 1.5 сек
+                          </span>
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-bold text-emerald-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={seamlessAsymmetry.enabled}
+                          onChange={e =>
+                            setSeamlessAsymmetry(prev => ({ ...prev, enabled: e.target.checked }))
+                          }
+                          className="accent-emerald-500 w-4 h-4"
+                        />
+                        <span>Seamless Asymmetry активен</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div>
+                        <label className="text-[10px] text-white/55 uppercase block mb-1">
+                          Мин. интервал микровставки (сек):
+                        </label>
+                        <input
+                          type="number"
+                          min={60}
+                          max={3600}
+                          step={60}
+                          value={seamlessAsymmetry.random_interval[0]}
+                          onChange={e => {
+                            const v = Math.max(60, Number(e.target.value) || 1200);
+                            setSeamlessAsymmetry(prev => ({
+                              ...prev,
+                              random_interval: [v, Math.max(v, prev.random_interval[1])]
+                            }));
+                          }}
+                          className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-1.5 font-mono text-emerald-300 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-white/55 uppercase block mb-1">
+                          Макс. интервал микровставки (сек):
+                        </label>
+                        <input
+                          type="number"
+                          min={120}
+                          max={7200}
+                          step={60}
+                          value={seamlessAsymmetry.random_interval[1]}
+                          onChange={e => {
+                            const v = Math.max(seamlessAsymmetry.random_interval[0], Number(e.target.value) || 2400);
+                            setSeamlessAsymmetry(prev => ({
+                              ...prev,
+                              random_interval: [prev.random_interval[0], v]
+                            }));
+                          }}
+                          className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-1.5 font-mono text-emerald-300 outline-none"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTimelineSlots(prev =>
+                              prev.map((sl, idx) => {
+                                if (!sl.inserts.length) return sl;
+                                return {
+                                  ...sl,
+                                  inserts: sl.inserts.map((ins, iIdx) => {
+                                    const minI = seamlessAsymmetry.random_interval[0];
+                                    const maxI = seamlessAsymmetry.random_interval[1];
+                                    const randTrig = Math.min(
+                                      Math.max(30, sl.slot_duration_sec - 20),
+                                      Math.round(minI / 3 + ((idx + 1) * (iIdx + 1) * 173) % Math.max(120, maxI - minI))
+                                    );
+                                    return {
+                                      ...ins,
+                                      trigger_at_sec: randTrig,
+                                      transition_in: { ...ins.transition_in, duration_sec: 1.5 }
+                                    };
+                                  })
+                                };
+                              })
+                            );
+                            showToast(
+                              `Интервалы микровставок рандомизированы по окну [${seamlessAsymmetry.random_interval[0]}, ${seamlessAsymmetry.random_interval[1]}] сек!`,
+                              'success'
+                            );
+                          }}
+                          className="w-full min-h-[44px] bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-2 px-3 rounded-xl text-xs cursor-pointer"
+                        >
+                          🎲 Перемешать таймкоды микровставок
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* БЛОК ПАРАМЕТРОВ СТЫКОВ АКТОВ (90 СЕК), ШВА ПЕТЛИ (1.0 СЕК), ЧЕРНОГО ЭКРАНА (2 СЕК) И НОРМАЛИЗАЦИИ LOUDNORM */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="bg-[#080c14]/80 border border-white/[0.08] rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
+                        <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                          Стыки актов (90 сек) &amp; Бесшовная петля 10с (1.0 сек)
+                        </span>
+                        <span className="text-[10px] font-mono text-white/55">
+                          0:30 • 1:00 • 1:40 • 2:00 • 2:40
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            Crossfade между актами (сек):
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={180}
+                            step={5}
+                            value={actCrossfadeSec}
+                            onChange={e => {
+                              const val = Math.max(1, Number(e.target.value) || 90);
+                              setActCrossfadeSec(val);
+                              setTimelineSlots(prev =>
+                                prev.map((s, idx) =>
+                                  idx === prev.length - 1
+                                    ? s
+                                    : {
+                                        ...s,
+                                        slot_transition_out: {
+                                          ...s.slot_transition_out,
+                                          duration_sec: val
+                                        }
+                                      }
+                                )
                               );
-                              return {
-                                ...ins,
-                                trigger_at_sec: randTrig,
-                                transition_in: { ...ins.transition_in, duration_sec: 1.5 }
-                              };
-                            })
-                          };
-                        })
-                      );
-                      showToast(
-                        `Интервалы микровставок рандомизированы по окну [${seamlessAsymmetry.random_interval[0]}, ${seamlessAsymmetry.random_interval[1]}] сек!`,
-                        'success'
-                      );
-                    }}
-                    className="w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-1.5 px-3 rounded-lg text-xs cursor-pointer transition"
-                  >
-                    🎲 Перемешать таймкоды микровставок
-                  </button>
-                </div>
-              </div>
-            </div>
+                            }}
+                            className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-amber-300 font-bold outline-none focus:border-amber-400"
+                          />
+                        </div>
 
-            {/* БЛОК ПАРАМЕТРОВ СТЫКОВ АКТОВ (90 СЕК), ШВА ПЕТЛИ (1.0 СЕК), ЧЕРНОГО ЭКРАНА (2 СЕК) И НОРМАЛИЗАЦИИ LOUDNORM */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Стыки актов 90с + Внутренний шов 10с исходника (1.0с) + Финальный черный экран 2с */}
-              <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                    Стыки актов (90 сек) &amp; Бесшовная петля 10с исходников (1.0 сек)
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    Точки стыков: 0:30 • 1:00 • 1:40 • 2:00 • 2:40
-                  </span>
-                </div>
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            Шов петли 10с исходника (сек):
+                          </label>
+                          <input
+                            type="number"
+                            min={0.2}
+                            max={4.0}
+                            step={0.1}
+                            value={internalLoopCrossfadeSec}
+                            onChange={e => {
+                              const val = Math.max(0.2, Math.min(4.0, Number(e.target.value) || 1.0));
+                              setInternalLoopCrossfadeSec(val);
+                              setTimelineSlots(prev =>
+                                prev.map(s => ({ ...s, internal_loop_crossfade_sec: val }))
+                              );
+                            }}
+                            className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-emerald-300 font-bold outline-none focus:border-amber-400"
+                          />
+                        </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Crossfade между актами (сек):
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={180}
-                      step={5}
-                      value={actCrossfadeSec}
-                      onChange={e => {
-                        const val = Math.max(1, Number(e.target.value) || 90);
-                        setActCrossfadeSec(val);
-                        setTimelineSlots(prev =>
-                          prev.map((s, idx) =>
-                            idx === prev.length - 1
-                              ? s
-                              : {
-                                  ...s,
-                                  slot_transition_out: {
-                                    ...s.slot_transition_out,
-                                    duration_sec: val
-                                  }
-                                }
-                          )
-                        );
-                      }}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-400 font-bold outline-none focus:border-amber-500"
-                    />
-                  </div>
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            Черный экран в финале (сек):
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={finalBlackScreenEnabled}
+                              onChange={e => setFinalBlackScreenEnabled(e.target.checked)}
+                              className="accent-amber-500 w-4 h-4"
+                            />
+                            <input
+                              type="number"
+                              min={0.5}
+                              max={10}
+                              step={0.5}
+                              disabled={!finalBlackScreenEnabled}
+                              value={finalBlackScreenSec}
+                              onChange={e =>
+                                setFinalBlackScreenSec(Math.max(0.5, Number(e.target.value) || 2.0))
+                              }
+                              className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-[#f8fafc] outline-none disabled:opacity-50"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Шов петли 10с исходника (сек):
-                    </label>
-                    <input
-                      type="number"
-                      min={0.2}
-                      max={4.0}
-                      step={0.1}
-                      value={internalLoopCrossfadeSec}
-                      onChange={e => {
-                        const val = Math.max(0.2, Math.min(4.0, Number(e.target.value) || 1.0));
-                        setInternalLoopCrossfadeSec(val);
-                        setTimelineSlots(prev =>
-                          prev.map(s => ({ ...s, internal_loop_crossfade_sec: val }))
-                        );
-                      }}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold outline-none focus:border-amber-500"
-                    />
-                  </div>
+                    <div className="bg-[#080c14]/80 border border-sky-500/25 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
+                        <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+                          Нормализация Loudnorm &amp; Лимитер E3
+                        </span>
+                        <label className="flex items-center gap-1.5 text-[11px] text-sky-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={audioMastering.loudnorm_enabled}
+                            onChange={e =>
+                              setAudioMastering(prev => ({
+                                ...prev,
+                                loudnorm_enabled: e.target.checked
+                              }))
+                            }
+                            className="accent-sky-400"
+                          />
+                          <span className="font-mono">
+                            I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}
+                          </span>
+                        </label>
+                      </div>
 
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Черный экран в финале (сек):
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={finalBlackScreenEnabled}
-                        onChange={e => setFinalBlackScreenEnabled(e.target.checked)}
-                        className="accent-amber-500 w-4 h-4"
-                        title="Добавить финальный черный экран после затухания трещины"
-                      />
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={10}
-                        step={0.5}
-                        disabled={!finalBlackScreenEnabled}
-                        value={finalBlackScreenSec}
-                        onChange={e =>
-                          setFinalBlackScreenSec(Math.max(0.5, Number(e.target.value) || 2.0))
-                        }
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 outline-none disabled:opacity-50"
-                      />
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            Target LUFS:
+                          </label>
+                          <input
+                            type="number"
+                            min={-18}
+                            max={-14}
+                            step={0.5}
+                            value={audioMastering.integrated_lufs}
+                            onChange={e =>
+                              setAudioMastering(prev => ({
+                                ...prev,
+                                integrated_lufs: Math.max(-18, Math.min(-14, Number(e.target.value) || -16))
+                              }))
+                            }
+                            className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            True-Peak (dBTP):
+                          </label>
+                          <input
+                            type="number"
+                            min={-9}
+                            max={-3}
+                            step={0.5}
+                            value={audioMastering.true_peak_dbtp}
+                            onChange={e =>
+                              setAudioMastering(prev => ({
+                                ...prev,
+                                true_peak_dbtp: Math.min(-3, Number(e.target.value) || -3)
+                              }))
+                            }
+                            className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            LRA:
+                          </label>
+                          <input
+                            type="number"
+                            min={5}
+                            max={20}
+                            step={1}
+                            value={audioMastering.lra}
+                            onChange={e =>
+                              setAudioMastering(prev => ({
+                                ...prev,
+                                lra: Math.max(5, Math.min(20, Number(e.target.value) || 11))
+                              }))
+                            }
+                            className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-[#f8fafc] outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-white/55 uppercase block mb-1">
+                            Пик E3 (дБ):
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="checkbox"
+                              checked={audioMastering.e3_soft_attack_compressor}
+                              onChange={e =>
+                                setAudioMastering(prev => ({
+                                  ...prev,
+                                  e3_soft_attack_compressor: e.target.checked
+                                }))
+                              }
+                              className="accent-emerald-500"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              max={6}
+                              step={0.5}
+                              value={audioMastering.e3_max_peak_over_bed_db}
+                              onChange={e =>
+                                setAudioMastering(prev => ({
+                                  ...prev,
+                                  e3_max_peak_over_bed_db: Math.min(6, Math.max(1, Number(e.target.value) || 6))
+                                }))
+                              }
+                              className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-emerald-300 font-bold outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Нормализация звука loudnorm=I=-16:TP=-3:LRA=11 и лимитер треска E3 (+6 дБ) */}
-              <div className="bg-[#0b0f17] border border-sky-500/30 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">
-                    Нормализация звука (Loudnorm) &amp; Лимитер треска E3
-                  </span>
-                  <label className="flex items-center gap-1.5 text-[11px] text-sky-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={audioMastering.loudnorm_enabled}
-                      onChange={e =>
-                        setAudioMastering(prev => ({
-                          ...prev,
-                          loudnorm_enabled: e.target.checked
-                        }))
-                      }
-                      className="accent-sky-400"
-                    />
-                    <span className="font-mono">
-                      loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}
-                    </span>
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Target LUFS (-18..-14):
-                    </label>
-                    <input
-                      type="number"
-                      min={-18}
-                      max={-14}
-                      step={0.5}
-                      value={audioMastering.integrated_lufs}
-                      onChange={e =>
-                        setAudioMastering(prev => ({
-                          ...prev,
-                          integrated_lufs: Math.max(-18, Math.min(-14, Number(e.target.value) || -16))
-                        }))
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      True-Peak (&le; -3 dBTP):
-                    </label>
-                    <input
-                      type="number"
-                      min={-9}
-                      max={-3}
-                      step={0.5}
-                      value={audioMastering.true_peak_dbtp}
-                      onChange={e =>
-                        setAudioMastering(prev => ({
-                          ...prev,
-                          true_peak_dbtp: Math.min(-3, Number(e.target.value) || -3)
-                        }))
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      LRA (Loudness Range):
-                    </label>
-                    <input
-                      type="number"
-                      min={5}
-                      max={20}
-                      step={1}
-                      value={audioMastering.lra}
-                      onChange={e =>
-                        setAudioMastering(prev => ({
-                          ...prev,
-                          lra: Math.max(5, Math.min(20, Number(e.target.value) || 11))
-                        }))
-                      }
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-200 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                      Пик E3 над фоном (дБ):
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={audioMastering.e3_soft_attack_compressor}
-                        onChange={e =>
-                          setAudioMastering(prev => ({
-                            ...prev,
-                            e3_soft_attack_compressor: e.target.checked
-                          }))
-                        }
-                        className="accent-emerald-500"
-                        title="Мягкая компрессия по атаке (soft attack) для треска E3"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        max={6}
-                        step={0.5}
-                        value={audioMastering.e3_max_peak_over_bed_db}
-                        onChange={e =>
-                          setAudioMastering(prev => ({
-                            ...prev,
-                            e3_max_peak_over_bed_db: Math.min(6, Math.max(1, Number(e.target.value) || 6))
-                          }))
-                        }
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-emerald-400 font-bold outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* КОНСТРУКТОР АКТОВ И СЛОТОВ (TIMELINE_SLOTS: 1..50+ СЦЕН) И АСИММЕТРИЧНЫХ ВСТАВОК (INSERTS: []) */}
@@ -6177,61 +6156,91 @@ export default function App() {
               )}
             </div>
 
-            {/* 5. ПАРАМЕТРЫ ЭКСПОРТА И СЕЛЕКТОР КОДЕКА (H.264 ПРОТИВ H.265) */}
+            {/* 5. ПАРАМЕТРЫ ЭКСПОРТА И ПИЛЮЛИ-ПЕРЕКЛЮЧАТЕЛИ КОДЕКА (H.264 / H.265) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-1">
-              <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-5 space-y-4">
+              <div className="aether-card rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-amber-500" /> 5. Настройки экспорта и выбор видеокодека (H.264 / H.265)
+                  <span className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-amber-400" /> 5. Настройки экспорта и видеокодека
                   </span>
-                  <span className="text-[11px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                  <span className="text-[11px] font-mono text-amber-300 bg-amber-500/10 border border-amber-400/30 px-2.5 py-0.5 rounded-full">
                     {videoCodec} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
                   </span>
                 </div>
 
-                <div className="space-y-3">
-                  {/* Селектор кодека (H.264 по умолчанию CRF 20 против H.265 CRF 22) */}
-                  <div>
-                    <label className="text-[11px] font-semibold text-amber-400 uppercase block mb-1">
-                      Видеокодек (передается в currentManifest.export_settings.video_codec):
+                <div className="space-y-4">
+                  {/* Пилюли-переключатели кодека (H.264 против H.265) */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-white/55 uppercase block">
+                      Видеокодек (<code className="font-mono text-amber-300">export_settings.video_codec</code>):
                     </label>
-                    <select
-                      value={videoCodec}
-                      onChange={e => {
-                        const nextCodec = e.target.value as 'libx264' | 'libx265';
-                        setVideoCodec(nextCodec);
-                        setVideoCrf(nextCodec === 'libx264' ? 20 : 22);
-                      }}
-                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-semibold outline-none focus:border-amber-400"
-                    >
-                      <option value="libx264">
-                        H.264 (libx264, preset veryfast, CRF 20) — Скоростной монтаж (рекомендуется для YouTube 4K)
-                      </option>
-                      <option value="libx265">
-                        H.265 (libx265, preset medium, CRF 22) — Архивное сжатие
-                      </option>
-                    </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        {
+                          id: 'libx264' as const,
+                          title: 'H.264 (libx264 • CRF 20)',
+                          sub: 'Скоростной рендер YouTube 4K'
+                        },
+                        {
+                          id: 'libx265' as const,
+                          title: 'H.265 (libx265 • CRF 22)',
+                          sub: 'Архивное HEVC сжатие'
+                        }
+                      ].map(codecOpt => {
+                        const active = videoCodec === codecOpt.id;
+                        return (
+                          <button
+                            key={codecOpt.id}
+                            type="button"
+                            onClick={() => {
+                              setVideoCodec(codecOpt.id);
+                              setVideoCrf(codecOpt.id === 'libx264' ? 20 : 22);
+                            }}
+                            className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-left cursor-pointer flex flex-col justify-center ${
+                              active
+                                ? 'btn-artistic-premium'
+                                : 'bg-[#080c14]/80 border-white/[0.08] text-white/70 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-xs font-extrabold">{codecOpt.title}</span>
+                            <span className={`text-[10px] ${active ? 'text-slate-900/80 font-medium' : 'text-white/50'}`}>
+                              {codecOpt.sub}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* FPS, CRF и Битрейт аудио */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* FPS (пилюли), CRF и Битрейт аудио (пилюли) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
+                      <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
                         Частота кадров (FPS):
                       </label>
-                      <select
-                        value={videoFps}
-                        onChange={e => setVideoFps(Number(e.target.value) as 24 | 30 | 60)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-slate-200 font-mono outline-none focus:border-amber-500"
-                      >
-                        <option value={24}>24 fps (Киностандарт)</option>
-                        <option value={30}>30 fps</option>
-                        <option value={60}>60 fps</option>
-                      </select>
+                      <div className="flex gap-1.5">
+                        {([24, 30, 60] as const).map(fpsVal => {
+                          const active = videoFps === fpsVal;
+                          return (
+                            <button
+                              key={fpsVal}
+                              type="button"
+                              onClick={() => setVideoFps(fpsVal)}
+                              className={`min-h-[44px] flex-1 rounded-xl font-mono text-xs font-bold border cursor-pointer ${
+                                active
+                                  ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                                  : 'bg-[#080c14]/80 border-white/[0.08] text-white/60 hover:text-white'
+                              }`}
+                            >
+                              {fpsVal}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
+                      <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
                         Качество (CRF):
                       </label>
                       <input
@@ -6244,35 +6253,43 @@ export default function App() {
                             Math.max(14, Math.min(30, Number(e.target.value) || (videoCodec === 'libx264' ? 20 : 22)))
                           )
                         }
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-500"
+                        className="w-full min-h-[44px] bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3 py-2 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-400"
                       />
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">
-                        Битрейт аудио:
+                      <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
+                        Аудио AAC (kbps):
                       </label>
-                      <select
-                        value={audioBitrateKbps}
-                        onChange={e =>
-                          setAudioBitrateKbps(Number(e.target.value) as 320 | 256 | 192)
-                        }
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-emerald-300 font-mono outline-none focus:border-amber-500"
-                      >
-                        <option value={320}>AAC 320 kbps (Master)</option>
-                        <option value={256}>AAC 256 kbps</option>
-                        <option value={192}>AAC 192 kbps</option>
-                      </select>
+                      <div className="flex gap-1.5">
+                        {([320, 256, 192] as const).map(brVal => {
+                          const active = audioBitrateKbps === brVal;
+                          return (
+                            <button
+                              key={brVal}
+                              type="button"
+                              onClick={() => setAudioBitrateKbps(brVal)}
+                              className={`min-h-[44px] flex-1 rounded-xl font-mono text-[11px] font-bold border cursor-pointer ${
+                                active
+                                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300'
+                                  : 'bg-[#080c14]/80 border-white/[0.08] text-white/60 hover:text-white'
+                              }`}
+                            >
+                              {brVal}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Выпадающий список разрешения + Черновик Draft 720p ultrafast */}
+                  {/* Пилюли выбора разрешения + Черновик Draft 720p ultrafast */}
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-[11px] font-semibold text-slate-400 uppercase block">
+                      <label className="text-[11px] font-semibold text-white/55 uppercase block">
                         Разрешение рендера:
                       </label>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg cursor-pointer">
+                      <label className="min-h-[38px] flex items-center gap-1.5 text-[11px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 px-3 py-1 rounded-xl cursor-pointer">
                         <input
                           type="checkbox"
                           checked={loopDraftMode || loopResolution === '720p'}
@@ -6286,78 +6303,85 @@ export default function App() {
                               setLoopResolution('4k');
                             }
                           }}
-                          className="accent-amber-500 w-3.5 h-3.5"
+                          className="accent-amber-400 w-3.5 h-3.5"
                         />
                         <span>⚡ Черновик Draft 720p ultrafast (проверка за 1 мин)</span>
                       </label>
                     </div>
-                    <select
-                      value={loopResolution}
-                      onChange={e => {
-                        const nextRes = e.target.value as '720p' | '1080p' | '2k' | '4k';
-                        setLoopResolution(nextRes);
-                        setLoopDraftMode(nextRes === '720p');
-                      }}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
-                    >
-                      <option value="720p">
-                        [ Черновик Draft 720p (1280x720, preset ultrafast) ] — тестовый прогон склеек за 1 минуту
-                      </option>
-                      <option value="1080p">
-                        [ 1080p Full HD (1920x1080) ] — быстрый рендер, меньший объем диска
-                      </option>
-                      <option value="2k">
-                        [ 2K Quad HD (2560x1440) ] — компромисс для стабильного битрейта YouTube
-                      </option>
-                      <option value="4k">
-                        [ 4K Ultra HD (3840x2160) ] — максимальная четкость и кинематографичный апскейл
-                      </option>
-                    </select>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { id: '720p' as const, label: '720p Draft', dim: '1280×720' },
+                        { id: '1080p' as const, label: '1080p FHD', dim: '1920×1080' },
+                        { id: '2k' as const, label: '2K QHD', dim: '2560×1440' },
+                        { id: '4k' as const, label: '4K UHD', dim: '3840×2160' }
+                      ].map(resOpt => {
+                        const active = loopResolution === resOpt.id;
+                        return (
+                          <button
+                            key={resOpt.id}
+                            type="button"
+                            onClick={() => {
+                              setLoopResolution(resOpt.id);
+                              setLoopDraftMode(resOpt.id === '720p');
+                            }}
+                            className={`min-h-[44px] px-3 py-2 rounded-xl border text-left cursor-pointer flex flex-col justify-center ${
+                              active
+                                ? 'bg-emerald-500/20 border-emerald-400 text-[#f8fafc] shadow-[0_0_16px_rgba(16,185,129,0.25)]'
+                                : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-xs font-extrabold">{resOpt.label}</span>
+                            <span className="text-[10px] font-mono text-white/55">{resOpt.dim}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
                 {/* ДИНАМИЧЕСКИЙ КАЛЬКУЛЯТОР ИТОГОВОГО ВЕСА */}
-                <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-slate-900 border border-amber-500/40 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-[#080c14] border border-amber-400/35 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <span className="text-[10px] font-bold uppercase text-amber-400 block">
+                    <span className="text-[10px] font-bold uppercase text-amber-300 block">
                       Динамический калькулятор итогового веса ({videoCodec.toUpperCase()} {videoFps}fps):
                     </span>
-                    <span className="text-sm font-bold text-slate-100">
+                    <span className="text-sm font-bold text-[#f8fafc]">
                       «{getResolutionLabel(loopResolution)} • {loopDraftMode || loopResolution === '720p' ? 'H.264 Ultrafast' : videoCodec === 'libx264' ? 'H.264 Fast' : getPresetShortLabel(bitratePreset)} •{' '}
                       {loopHours} {loopHours >= 5 ? 'часов' : 'часа'} ~ {estimatedGb} ГБ»
                     </span>
                   </div>
-                  <span className="text-[11px] font-mono text-amber-300 bg-slate-950/80 px-2.5 py-1 rounded border border-amber-500/30">
+                  <span className="text-[11px] font-mono text-amber-300 bg-[#080c14]/90 px-2.5 py-1 rounded-lg border border-amber-400/30">
                     CRF {videoCrf} • AAC {audioBitrateKbps}k
                   </span>
                 </div>
 
-                {/* ГИБКИЕ РЕЖИМЫ СУБТИТРОВ В ЦЕХЕ ЛУПОВ (currentManifest.export_settings.subtitles / subtitles) */}
-                <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                {/* ГИБКИЕ РЕЖИМЫ СУБТИТРОВ В ЦЕХЕ ЛУПОВ */}
+                <div className="pt-2 border-t border-white/[0.08] space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-                      <Subtitles className="w-3.5 h-3.5 text-indigo-400" /> Настройки субтитров (Hardsub / Softsub / .SRT):
+                      <Subtitles className="w-3.5 h-3.5 text-indigo-400" /> Настройки субтитров (Hardsub / .SRT):
                     </span>
-                    <select
-                      value={loopSubtitleLanguage}
-                      onChange={e =>
-                        setLoopSubtitleLanguage(
-                          e.target.value as 'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'
-                        )
-                      }
-                      className="bg-slate-900 border border-indigo-500/40 rounded-lg px-2 py-1 text-[11px] font-mono text-indigo-200 outline-none"
-                    >
-                      <option value="en">Lang: en (US English)</option>
-                      <option value="ru">Lang: ru (Русский)</option>
-                      <option value="de">Lang: de (Deutsch)</option>
-                      <option value="es">Lang: es (Español)</option>
-                      <option value="fr">Lang: fr (Français)</option>
-                      <option value="original">Lang: original</option>
-                    </select>
+                    <div className="flex flex-wrap gap-1">
+                      {(['en', 'ru', 'de', 'es', 'fr', 'original'] as const).map(lang => (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => setLoopSubtitleLanguage(lang)}
+                          className={`min-h-[34px] px-2.5 py-1 rounded-lg font-mono text-[10px] font-bold uppercase border cursor-pointer ${
+                            loopSubtitleLanguage === lang
+                              ? 'bg-indigo-500/25 border-indigo-400 text-indigo-200'
+                              : 'bg-[#080c14]/80 border-white/[0.08] text-white/55 hover:text-white'
+                          }`}
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-indigo-200 cursor-pointer select-none">
+                    <label className="min-h-[44px] flex items-center gap-2 bg-[#080c14]/80 border border-white/[0.08] rounded-xl px-3 py-2 text-[11px] font-semibold text-indigo-200 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={loopBurnInSubtitles}
@@ -6367,7 +6391,7 @@ export default function App() {
                       <span>Вшить субтитры в видеоряд (Hardsub)</span>
                     </label>
 
-                    <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] font-semibold text-emerald-300 cursor-pointer select-none">
+                    <label className="min-h-[44px] flex items-center gap-2 bg-[#080c14]/80 border border-white/[0.08] rounded-xl px-3 py-2 text-[11px] font-semibold text-emerald-300 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={loopUploadSrtToDrive}
@@ -6379,7 +6403,7 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono text-slate-400">
+                    <span className="text-[10px] font-mono text-white/55">
                       {loopBurnInSubtitles
                         ? 'FFmpeg: -vf "subtitles=subtitles.srt:..."'
                         : 'Чистый рендер без вшивания титров'}{' '}
@@ -6388,7 +6412,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleDownloadLoopSrtFile}
-                      className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                      className="min-h-[38px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
                     >
                       📥 Скачать .SRT файл
                     </button>
@@ -6396,8 +6420,8 @@ export default function App() {
                 </div>
 
                 {/* ПЕРЕКЛЮЧАТЕЛЬ «ГЕНЕРИРОВАТЬ ПАКЕТ ВЕРТИКАЛЬНЫХ SHORTS (9:16)» */}
-                <div className="pt-2 border-t border-slate-800/80 space-y-2">
-                  <label className="flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/10 via-slate-900 to-slate-900 border border-purple-500/40 hover:border-purple-400/70 rounded-xl px-3 py-2.5 cursor-pointer select-none transition">
+                <div className="pt-2 border-t border-white/[0.08] space-y-2">
+                  <label className="flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/10 via-[#080c14] to-[#080c14] border border-purple-500/35 hover:border-purple-400/70 rounded-xl px-3.5 py-3 cursor-pointer select-none">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <input
                         type="checkbox"
@@ -6409,37 +6433,32 @@ export default function App() {
                         <span className="text-xs font-bold text-purple-200 block">
                           📱 Генерировать пакет вертикальных Shorts (9:16)
                         </span>
-                        <span className="text-[10px] text-slate-400 block">
-                          Автоматическая нарезка до 4 тизеров 1080×1920 (38с) по таймкодам врезок → папка <code className="text-purple-300">Shorts/</code> на GDrive
+                        <span className="text-[10px] text-white/55 block">
+                          Автоматическая нарезка до 4 тизеров 1080×1920 (38с) по таймкодам врезок → папка <code className="font-mono text-purple-300">Shorts/</code> на GDrive
                         </span>
                       </div>
                     </div>
                     <span
-                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border shrink-0 ${
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shrink-0 ${
                         shortsFactoryEnabled
                           ? 'bg-purple-500/25 border-purple-400/60 text-purple-200'
-                          : 'bg-slate-950 border-slate-700 text-slate-500'
+                          : 'bg-[#080c14] border-white/[0.1] text-white/50'
                       }`}
                     >
                       {shortsFactoryEnabled ? '9:16 • 38s ON' : 'OFF'}
                     </span>
                   </label>
-                  {shortsFactoryEnabled && (
-                    <div className="text-[10px] font-mono text-purple-300 bg-slate-950/90 border border-purple-500/30 rounded-lg px-2.5 py-1.5">
-                      manifest_payload → <code>&quot;shorts_factory&quot;: &#123; &quot;enabled&quot;: true, &quot;clip_duration_sec&quot;: 38 &#125;</code>
-                    </div>
-                  )}
                 </div>
 
                 {/* Быстрое поле ID папки Google Drive прямо в цехе */}
-                <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-semibold text-amber-400 flex items-center gap-1.5">
+                    <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
                       <CloudUpload className="w-3.5 h-3.5" /> Целевая папка Google Drive (GDRIVE_FOLDER_ID):
                     </label>
                     <button
                       onClick={openConfigModal}
-                      className="text-[11px] text-slate-400 hover:text-amber-400 underline cursor-pointer"
+                      className="text-[11px] text-white/55 hover:text-amber-300 underline cursor-pointer"
                     >
                       Настроить Service Account JSON
                     </button>
@@ -6452,53 +6471,53 @@ export default function App() {
                       localStorage.setItem('ac_gdrive_folder_id', e.target.value);
                     }}
                     placeholder="Напр.: 1A2b3C4d5E6f7G8h9I0jKlMnOpQrStUv"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-amber-500 font-mono"
+                    className="w-full min-h-[42px] bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2 text-xs text-[#f8fafc] outline-none focus:border-amber-400 font-mono"
                   />
                 </div>
               </div>
 
-              {/* Правая карточка: Сводка сценария и кнопка запуска облачной сборки */}
-              <div className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-5 flex flex-col justify-between space-y-4">
+              {/* Правая карточка: Сводка сценария и кнопка запуска облачной сборки (изумрудно-бирюзовый градиент) */}
+              <div className="aether-card border border-emerald-500/25 rounded-2xl p-5 flex flex-col justify-between space-y-4">
                 <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <AlertTriangle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                   <div className="space-y-1.5">
-                    <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wide">
+                    <h4 className="text-xs font-bold text-[#f8fafc] uppercase tracking-wide">
                       Прямая отправка манифеста в GitHub Actions (manifest_payload Base64)
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed">
+                    <p className="text-xs text-white/65 leading-relaxed">
                       При нажатии <strong>«🚀 Запустить облачную сборку»</strong> манифест проекта <strong>«{loopProjectName || 'Ambient Loop 4K'}»</strong> (<code className="font-mono text-amber-300">{videoCodec} CRF {videoCrf} • {videoFps}fps</code>, слоты <code className="font-mono text-amber-300">timeline_slots[]</code>, 2-слойный аудио-микшер, <code className="font-mono text-sky-300">loudnorm</code>) кодируется в UTF-8 Base64 и отправляется напрямую через <code className="font-mono text-emerald-300">workflow_dispatch</code>.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-500/20 text-[11px] text-slate-400">
-                  <span>
-                    Актов: <code className="text-amber-400">{timelineSlots.length}</code>, Вставок:{' '}
-                    <code className="text-emerald-400">{totalInsertsCount}</code> | Хронометраж:{' '}
-                    <code className="text-sky-300">{formatTime(calculatedProjectDurationSec)}</code>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.08] text-[11px] text-white/55">
+                  <span className="font-mono">
+                    Актов: <code className="text-amber-300">{timelineSlots.length}</code> • Вставок:{' '}
+                    <code className="text-emerald-300">{totalInsertsCount}</code> • Хронометраж:{' '}
+                    <code className="text-cyan-300">{formatTime(calculatedProjectDurationSec)}</code>
                   </span>
                   <button
                     onClick={() => {
                       openConfigModal();
                       setShowYamlPreview(true);
                     }}
-                    className="text-amber-400 hover:text-amber-300 font-semibold cursor-pointer"
+                    className="text-amber-300 hover:text-amber-200 font-semibold cursor-pointer"
                   >
                     Код Python + FFmpeg YAML →
                   </button>
                 </div>
 
-                <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-2.5">
+                <div className="pt-2 border-t border-white/[0.08] flex flex-col gap-2.5">
                   <div className="flex flex-col sm:flex-row items-stretch gap-2">
-                    {/* Основная кнопка запуска облачной сборки с защитой от двойного запуска */}
+                    {/* Основная кнопка запуска облачной сборки (изумрудно-бирюзовый градиент) */}
                     <button
                       type="button"
                       onClick={startLoopRender}
                       disabled={isRunnerActive || isLoopDispatching}
-                      className={`flex-1 flex items-center justify-center gap-2 font-bold px-5 py-3.5 rounded-xl transition text-xs ${
+                      className={`min-h-[48px] flex-1 flex items-center justify-center gap-2 font-bold px-5 py-3.5 rounded-xl text-xs ${
                         isRunnerActive || isLoopDispatching
                           ? 'bg-slate-800/90 border border-amber-500/40 text-amber-300 cursor-not-allowed opacity-90 shadow-none'
-                          : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 cursor-pointer'
+                          : 'btn-primary-action cursor-pointer'
                       }`}
                     >
                       <InfinityIcon className="w-4 h-4 shrink-0" />
@@ -6523,7 +6542,7 @@ export default function App() {
                         href={renderStatus.runUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-1.5 rounded-xl border border-indigo-400/50 bg-indigo-500/15 hover:bg-indigo-500/25 px-4 py-3.5 text-xs font-mono font-semibold text-indigo-200 transition whitespace-nowrap"
+                        className="min-h-[48px] flex items-center justify-center gap-1.5 rounded-xl border border-cyan-400/50 bg-cyan-500/15 hover:bg-cyan-500/25 px-4 py-3 text-xs font-mono font-semibold text-cyan-200 whitespace-nowrap"
                       >
                         <span>Открыть Run в GitHub Actions</span>
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -7136,8 +7155,8 @@ export default function App() {
         </div>
       )}
 
-      <footer className="border-t border-slate-800/60 bg-[#0b0f17] py-3 px-6 text-center text-xs text-slate-500">
-        AetherCombine Studio • Автономный облачный конвейер 4K продакшна (GitHub Actions FFmpeg + Rclone Google Drive)
+      <footer className="border-t border-white/[0.08] bg-[#080c14]/90 backdrop-blur-md py-3.5 px-6 text-center text-xs text-white/55 font-mono">
+        AetherCombine Studio • Cloud 4K Production Pipeline (GitHub Actions FFmpeg + Rclone Google Drive)
       </footer>
     </div>
   );
