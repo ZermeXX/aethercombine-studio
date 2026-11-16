@@ -28,8 +28,17 @@ import {
   ZoomIn,
   Tv,
   Target,
-  Eye
+  Eye,
+  GitBranch,
+  Layers2
 } from 'lucide-react';
+import { CompactFontSelector } from './CompactFontSelector';
+import {
+  GOOGLE_FONT_PRESETS,
+  StudioFontEntry,
+  ensureFontEntryLoaded,
+  preloadCatalogFonts
+} from '../utils/fontCatalog';
 
 export interface ArtEditorIncomingAsset {
   dataUrl: string;
@@ -755,6 +764,487 @@ function buildSvgDocumentFromCanvas(
   ].join('\n');
 }
 
+type TimelineSvgStyleId = 'cinematic_gold_dark' | 'archival_parchment' | 'minimalist_cyan';
+type TimelineSvgResolution = '1920x1080' | '3840x2160';
+
+interface ParsedTimelineEvent {
+  badge: string;
+  title: string;
+}
+
+function escapeXmlChars(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function wrapTimelineWords(text: string, maxCharsPerLine: number): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    if (!current) {
+      current = w;
+    } else if ((current + ' ' + w).length <= maxCharsPerLine) {
+      current += ' ' + w;
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.slice(0, 3);
+}
+
+function parseTimelineEventsInput(raw: string): ParsedTimelineEvent[] {
+  const normalized = raw.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+
+  const tokens = normalized.includes('->')
+    ? normalized.split(/\s*->\s*|\n+/)
+    : normalized.split(/\n+|;\s*/);
+
+  return tokens
+    .map(t => t.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((segment, idx) => {
+      const sepMatch = segment.match(/^(.+?)\s*(?:—|–|:|\s-\s)\s*(.+)$/);
+      if (sepMatch) {
+        return {
+          badge: sepMatch[1].trim(),
+          title: sepMatch[2].trim()
+        };
+      }
+      const yearMatch = segment.match(/^(\d{3,4}(?:\s*[-–]\s*\d{2,4})?)\s+(.+)$/);
+      if (yearMatch) {
+        return {
+          badge: yearMatch[1].trim(),
+          title: yearMatch[2].trim()
+        };
+      }
+      return {
+        badge: `ЭТАП ${idx + 1}`,
+        title: segment
+      };
+    });
+}
+
+function buildTransparentTimelineSvgMarkup(options: {
+  events: ParsedTimelineEvent[];
+  headerTitle: string;
+  styleId: TimelineSvgStyleId;
+  resolution: TimelineSvgResolution;
+  fontEntry?: StudioFontEntry;
+}): string {
+  const { events, headerTitle, styleId, resolution, fontEntry } = options;
+  const W = resolution === '3840x2160' ? 3840 : 1920;
+  const H = resolution === '3840x2160' ? 2160 : 1080;
+  const scale = resolution === '3840x2160' ? 2 : 1;
+
+  const svgFontFamily = fontEntry?.cssFamily || 'Montserrat, Inter, system-ui, sans-serif';
+  const safeSvgFontAttr = escapeXmlChars(svgFontFamily);
+  const customFontStyleBlock = fontEntry?.dataUrl
+    ? [
+        `    <style type="text/css"><![CDATA[`,
+        `      @font-face { font-family: "${fontEntry.primaryFamily.replace(/"/g, '')}"; src: url("${fontEntry.dataUrl}"); }`,
+        `    ]]></style>`
+      ].join('\n')
+    : '';
+
+  const themes: Record<
+    TimelineSvgStyleId,
+    {
+      spine: string;
+      accent: string;
+      accentSoft: string;
+      cardBg: string;
+      cardBorder: string;
+      badgeBg: string;
+      badgeText: string;
+      titleText: string;
+      headerBg: string;
+      headerText: string;
+      nodeFill: string;
+    }
+  > = {
+    cinematic_gold_dark: {
+      spine: '#FACC15',
+      accent: '#FDE047',
+      accentSoft: 'rgba(250, 204, 21, 0.35)',
+      cardBg: 'rgba(9, 13, 22, 0.88)',
+      cardBorder: '#FACC15',
+      badgeBg: '#FACC15',
+      badgeText: '#090D16',
+      titleText: '#F8FAFC',
+      headerBg: 'rgba(9, 13, 22, 0.90)',
+      headerText: '#FDE047',
+      nodeFill: '#090D16'
+    },
+    archival_parchment: {
+      spine: '#B45309',
+      accent: '#D97706',
+      accentSoft: 'rgba(180, 83, 9, 0.35)',
+      cardBg: 'rgba(243, 232, 206, 0.93)',
+      cardBorder: '#78350F',
+      badgeBg: '#78350F',
+      badgeText: '#FEF3C7',
+      titleText: '#291D12',
+      headerBg: 'rgba(243, 232, 206, 0.94)',
+      headerText: '#451A03',
+      nodeFill: '#FEF3C7'
+    },
+    minimalist_cyan: {
+      spine: '#22D3EE',
+      accent: '#67E8F9',
+      accentSoft: 'rgba(34, 211, 238, 0.35)',
+      cardBg: 'rgba(8, 16, 28, 0.86)',
+      cardBorder: '#22D3EE',
+      badgeBg: '#0E7490',
+      badgeText: '#ECFEFF',
+      titleText: '#F1F5F9',
+      headerBg: 'rgba(8, 16, 28, 0.88)',
+      headerText: '#67E8F9',
+      nodeFill: '#08101C'
+    }
+  };
+
+  const theme = themes[styleId];
+  const safeEvents =
+    events.length > 0
+      ? events
+      : [
+          { badge: '1908', title: 'Находка алмазов' },
+          { badge: '1920', title: 'Расцвет города' },
+          { badge: '1956', title: 'Исход жителей' }
+        ];
+
+  const count = safeEvents.length;
+  const padX = 180 * scale;
+  const axisY = Math.round(H * 0.56);
+  const startX = padX;
+  const endX = W - padX;
+  const spanX = Math.max(200 * scale, endX - startX);
+
+  const cardWidth = Math.min(
+    420 * scale,
+    Math.max(220 * scale, Math.round((spanX / Math.max(1, count)) * 0.86))
+  );
+  const cardHeight = 176 * scale;
+  const nodeRadius = 18 * scale;
+
+  const cleanHeader = headerTitle.trim();
+  const headerSvg = cleanHeader
+    ? [
+        `  <g filter="url(#aether-svg-shadow)">`,
+        `    <rect x="${Math.round((W - Math.min(980 * scale, (cleanHeader.length * 22 + 120) * scale)) / 2)}" y="${84 * scale}" width="${Math.min(980 * scale, (cleanHeader.length * 22 + 120) * scale)}" height="${68 * scale}" rx="${14 * scale}" fill="${theme.headerBg}" stroke="${theme.cardBorder}" stroke-width="${2.5 * scale}" />`,
+        `    <text x="${W / 2}" y="${128 * scale}" text-anchor="middle" fill="${theme.headerText}" font-family="${safeSvgFontAttr}" font-weight="${fontEntry?.weight || '800'}" font-size="${28 * scale}" letter-spacing="${2 * scale}">${escapeXmlChars(cleanHeader.toUpperCase())}</text>`,
+        `  </g>`
+      ].join('\n')
+    : '';
+
+  const nodesSvg = safeEvents
+    .map((ev, idx) => {
+      const cx =
+        count === 1 ? W / 2 : Math.round(startX + (spanX * idx) / Math.max(1, count - 1));
+      const isTop = idx % 2 === 0;
+      const stemLen = (count >= 5 ? (isTop ? 120 : 120) : 105) * scale;
+      const cardY = isTop ? axisY - stemLen - cardHeight : axisY + stemLen;
+      const cardX = Math.max(
+        36 * scale,
+        Math.min(W - cardWidth - 36 * scale, Math.round(cx - cardWidth / 2))
+      );
+
+      const wrappedLines = wrapTimelineWords(ev.title, count >= 5 ? 18 : 22);
+      const badgeW = Math.min(cardWidth - 32 * scale, Math.max(110 * scale, (ev.badge.length * 15 + 36) * scale));
+      const badgeH = 38 * scale;
+      const badgeX = cardX + 20 * scale;
+      const badgeY = cardY + 18 * scale;
+
+      const textStartY = cardY + 86 * scale;
+      const lineStep = 30 * scale;
+      const tspans = wrappedLines
+        .map(
+          (line, lIdx) =>
+            `<tspan x="${cardX + 20 * scale}" dy="${lIdx === 0 ? 0 : lineStep}">${escapeXmlChars(
+              line
+            )}</tspan>`
+        )
+        .join('');
+
+      const arrowHeadX =
+        idx < count - 1
+          ? Math.round((cx + (startX + (spanX * (idx + 1)) / Math.max(1, count - 1))) / 2)
+          : null;
+
+      return [
+        `  <g filter="url(#aether-svg-shadow)">`,
+        `    <line x1="${cx}" y1="${axisY}" x2="${cx}" y2="${isTop ? cardY + cardHeight : cardY}" stroke="${theme.spine}" stroke-width="${3 * scale}" stroke-dasharray="${6 * scale} ${5 * scale}" />`,
+        `    <rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="${16 * scale}" fill="${theme.cardBg}" stroke="${theme.cardBorder}" stroke-width="${2.5 * scale}" />`,
+        `    <rect x="${badgeX}" y="${badgeY}" width="${badgeW}" height="${badgeH}" rx="${8 * scale}" fill="${theme.badgeBg}" />`,
+        `    <text x="${badgeX + badgeW / 2}" y="${badgeY + 26 * scale}" text-anchor="middle" fill="${theme.badgeText}" font-family="${safeSvgFontAttr}" font-weight="${fontEntry?.weight || '800'}" font-size="${20 * scale}">${escapeXmlChars(ev.badge)}</text>`,
+        `    <text x="${cardX + 20 * scale}" y="${textStartY}" fill="${theme.titleText}" font-family="${safeSvgFontAttr}" font-weight="${fontEntry?.weight || '700'}" font-size="${23 * scale}">${tspans}</text>`,
+        `    <circle cx="${cx}" cy="${axisY}" r="${nodeRadius + 7 * scale}" fill="${theme.accentSoft}" />`,
+        `    <circle cx="${cx}" cy="${axisY}" r="${nodeRadius}" fill="${theme.nodeFill}" stroke="${theme.accent}" stroke-width="${4.5 * scale}" />`,
+        `    <circle cx="${cx}" cy="${axisY}" r="${6 * scale}" fill="${theme.accent}" />`,
+        arrowHeadX
+          ? `    <polygon points="${arrowHeadX - 10 * scale},${axisY - 9 * scale} ${arrowHeadX + 12 * scale},${axisY} ${arrowHeadX - 10 * scale},${axisY + 9 * scale}" fill="${theme.accent}" />`
+          : '',
+        `  </g>`
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })
+    .join('\n');
+
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
+    `  <title>AetherCombine Timeline Infographic ${W}x${H}</title>`,
+    `  <defs>`,
+    customFontStyleBlock,
+    `    <filter id="aether-svg-shadow" x="-15%" y="-15%" width="130%" height="130%">`,
+    `      <feDropShadow dx="0" dy="${8 * scale}" stdDeviation="${10 * scale}" flood-color="#000000" flood-opacity="0.55" />`,
+    `    </filter>`,
+    `    <linearGradient id="aether-spine-grad" x1="0%" y1="0%" x2="100%" y2="0%">`,
+    `      <stop offset="0%" stop-color="${theme.spine}" stop-opacity="0.2" />`,
+    `      <stop offset="12%" stop-color="${theme.spine}" stop-opacity="1" />`,
+    `      <stop offset="88%" stop-color="${theme.accent}" stop-opacity="1" />`,
+    `      <stop offset="100%" stop-color="${theme.accent}" stop-opacity="0.2" />`,
+    `    </linearGradient>`,
+    `  </defs>`,
+    headerSvg,
+    `  <line x1="${startX - 50 * scale}" y1="${axisY}" x2="${endX + 50 * scale}" y2="${axisY}" stroke="url(#aether-spine-grad)" stroke-width="${6 * scale}" stroke-linecap="round" />`,
+    nodesSvg,
+    `</svg>`
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function renderTimelineCanvasTransparent(options: {
+  events: ParsedTimelineEvent[];
+  headerTitle: string;
+  styleId: TimelineSvgStyleId;
+  resolution: TimelineSvgResolution;
+  fontEntry?: StudioFontEntry;
+}): HTMLCanvasElement {
+  const { events, headerTitle, styleId, resolution, fontEntry } = options;
+  const W = resolution === '3840x2160' ? 3840 : 1920;
+  const H = resolution === '3840x2160' ? 2160 : 1080;
+  const scale = resolution === '3840x2160' ? 2 : 1;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  ctx.clearRect(0, 0, W, H);
+  const fontFamily = fontEntry?.cssFamily || '"Montserrat", "Inter", sans-serif';
+  const fontWeight = fontEntry?.weight || '800';
+
+  const themes = {
+    cinematic_gold_dark: {
+      spine: '#FACC15',
+      accent: '#FDE047',
+      accentSoft: 'rgba(250, 204, 21, 0.35)',
+      cardBg: 'rgba(9, 13, 22, 0.88)',
+      cardBorder: '#FACC15',
+      badgeBg: '#FACC15',
+      badgeText: '#090D16',
+      titleText: '#F8FAFC',
+      headerBg: 'rgba(9, 13, 22, 0.90)',
+      headerText: '#FDE047',
+      nodeFill: '#090D16'
+    },
+    archival_parchment: {
+      spine: '#B45309',
+      accent: '#D97706',
+      accentSoft: 'rgba(180, 83, 9, 0.35)',
+      cardBg: 'rgba(243, 232, 206, 0.93)',
+      cardBorder: '#78350F',
+      badgeBg: '#78350F',
+      badgeText: '#FEF3C7',
+      titleText: '#291D12',
+      headerBg: 'rgba(243, 232, 206, 0.94)',
+      headerText: '#451A03',
+      nodeFill: '#FEF3C7'
+    },
+    minimalist_cyan: {
+      spine: '#22D3EE',
+      accent: '#67E8F9',
+      accentSoft: 'rgba(34, 211, 238, 0.35)',
+      cardBg: 'rgba(8, 16, 28, 0.86)',
+      cardBorder: '#22D3EE',
+      badgeBg: '#0E7490',
+      badgeText: '#ECFEFF',
+      titleText: '#F1F5F9',
+      headerBg: 'rgba(8, 16, 28, 0.88)',
+      headerText: '#67E8F9',
+      nodeFill: '#08101C'
+    }
+  };
+  const theme = themes[styleId];
+  const safeEvents =
+    events.length > 0
+      ? events
+      : [
+          { badge: '1908', title: 'Находка алмазов' },
+          { badge: '1920', title: 'Расцвет города' },
+          { badge: '1956', title: 'Исход жителей' }
+        ];
+
+  const count = safeEvents.length;
+  const padX = 180 * scale;
+  const axisY = Math.round(H * 0.56);
+  const startX = padX;
+  const endX = W - padX;
+  const spanX = Math.max(200 * scale, endX - startX);
+  const cardWidth = Math.min(
+    420 * scale,
+    Math.max(220 * scale, Math.round((spanX / Math.max(1, count)) * 0.86))
+  );
+  const cardHeight = 176 * scale;
+  const nodeRadius = 18 * scale;
+
+  const cleanHeader = headerTitle.trim();
+  if (cleanHeader) {
+    const hw = Math.min(980 * scale, (cleanHeader.length * 22 + 120) * scale);
+    const hx = Math.round((W - hw) / 2);
+    const hy = 84 * scale;
+    const hh = 68 * scale;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 18 * scale;
+    ctx.shadowOffsetY = 8 * scale;
+    ctx.fillStyle = theme.headerBg;
+    ctx.strokeStyle = theme.cardBorder;
+    ctx.lineWidth = 2.5 * scale;
+    ctx.beginPath();
+    ctx.roundRect(hx, hy, hw, hh, 14 * scale);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = theme.headerText;
+    ctx.font = `${fontWeight} ${28 * scale}px ${fontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cleanHeader.toUpperCase(), W / 2, hy + hh * 0.52);
+    ctx.restore();
+  }
+
+  // Timeline main axis
+  ctx.save();
+  const spineGrad = ctx.createLinearGradient(startX - 50 * scale, 0, endX + 50 * scale, 0);
+  spineGrad.addColorStop(0, theme.spine);
+  spineGrad.addColorStop(1, theme.accent);
+  ctx.strokeStyle = spineGrad;
+  ctx.lineWidth = 6 * scale;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(startX - 50 * scale, axisY);
+  ctx.lineTo(endX + 50 * scale, axisY);
+  ctx.stroke();
+  ctx.restore();
+
+  safeEvents.forEach((ev, idx) => {
+    const cx = count === 1 ? W / 2 : Math.round(startX + (spanX * idx) / Math.max(1, count - 1));
+    const isTop = idx % 2 === 0;
+    const stemLen = (count >= 5 ? 120 : 105) * scale;
+    const cardY = isTop ? axisY - stemLen - cardHeight : axisY + stemLen;
+    const cardX = Math.max(36 * scale, Math.min(W - cardWidth - 36 * scale, Math.round(cx - cardWidth / 2)));
+
+    ctx.save();
+    // Stem line
+    ctx.strokeStyle = theme.spine;
+    ctx.lineWidth = 3 * scale;
+    ctx.setLineDash([6 * scale, 5 * scale]);
+    ctx.beginPath();
+    ctx.moveTo(cx, axisY);
+    ctx.lineTo(cx, isTop ? cardY + cardHeight : cardY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Card
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 18 * scale;
+    ctx.shadowOffsetY = 8 * scale;
+    ctx.fillStyle = theme.cardBg;
+    ctx.strokeStyle = theme.cardBorder;
+    ctx.lineWidth = 2.5 * scale;
+    ctx.beginPath();
+    ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 16 * scale);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Badge pill
+    const badgeW = Math.min(cardWidth - 32 * scale, Math.max(110 * scale, (ev.badge.length * 15 + 36) * scale));
+    const badgeH = 38 * scale;
+    const badgeX = cardX + 20 * scale;
+    const badgeY = cardY + 18 * scale;
+    ctx.fillStyle = theme.badgeBg;
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8 * scale);
+    ctx.fill();
+
+    ctx.fillStyle = theme.badgeText;
+    ctx.font = `${fontWeight} ${20 * scale}px ${fontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ev.badge, badgeX + badgeW / 2, badgeY + badgeH * 0.54);
+
+    // Event lines
+    const wrappedLines = wrapTimelineWords(ev.title, count >= 5 ? 18 : 22);
+    ctx.fillStyle = theme.titleText;
+    ctx.font = `${fontWeight} ${23 * scale}px ${fontFamily}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    wrappedLines.forEach((line, lIdx) => {
+      ctx.fillText(line, cardX + 20 * scale, cardY + 86 * scale + lIdx * 30 * scale);
+    });
+
+    // Axis node & arrow
+    ctx.fillStyle = theme.accentSoft;
+    ctx.beginPath();
+    ctx.arc(cx, axisY, nodeRadius + 7 * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = theme.nodeFill;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = 4.5 * scale;
+    ctx.beginPath();
+    ctx.arc(cx, axisY, nodeRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = theme.accent;
+    ctx.beginPath();
+    ctx.arc(cx, axisY, 6 * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (idx < count - 1) {
+      const arrowX = Math.round((cx + (startX + (spanX * (idx + 1)) / Math.max(1, count - 1))) / 2);
+      ctx.beginPath();
+      ctx.moveTo(arrowX - 10 * scale, axisY - 9 * scale);
+      ctx.lineTo(arrowX + 12 * scale, axisY);
+      ctx.lineTo(arrowX - 10 * scale, axisY + 9 * scale);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+
+  return canvas;
+}
+
 export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
   incomingAsset,
   onApplyToThumbnailCoverA,
@@ -805,6 +1295,27 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
   const [exportBackdropColor, setExportBackdropColor] = useState<string>('#090D16');
   const [svgExportMode, setSvgExportMode] = useState<SvgExportMode>('embedded_hires');
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
+
+  // SVG Infographic & Timeline Generator state
+  const [timelineEventsText, setTimelineEventsText] = useState<string>(
+    '1908 — Находка алмазов -> 1920 — Расцвет города -> 1956 — Исход жителей'
+  );
+  const [timelineHeaderTitle, setTimelineHeaderTitle] = useState<string>('ХРОНОЛОГИЯ СОБЫТИЙ');
+  const [timelineStyleId, setTimelineStyleId] =
+    useState<TimelineSvgStyleId>('cinematic_gold_dark');
+  const [timelineResolution, setTimelineResolution] =
+    useState<TimelineSvgResolution>('1920x1080');
+  const [timelineFontEntry, setTimelineFontEntry] = useState<StudioFontEntry>(
+    () => GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0]
+  );
+
+  useEffect(() => {
+    void preloadCatalogFonts();
+  }, []);
+
+  useEffect(() => {
+    void ensureFontEntryLoaded(timelineFontEntry);
+  }, [timelineFontEntry]);
 
   const loadDataUrlIntoEditor = useCallback(
     (dataUrl: string, label: string, preserveTargetDimensions: boolean = false) => {
@@ -1333,6 +1844,18 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
     onNotify('↔️ Изображение растянуто на всю шапку YouTube 2560×1440 px (Cover).', 'info');
   };
 
+  const handleDockFitCenter = () => {
+    if (targetWidth === 2560 && targetHeight === 1440) {
+      fitImageIntoBannerSafeZone();
+      return;
+    }
+    setCropFitMode('contain');
+    setZoomPct(100);
+    setPanX(0);
+    setPanY(0);
+    onNotify('🎯 Изображение вписано и отцентрировано на холсте!', 'success');
+  };
+
   const resetLayerPosition = () => {
     setPanX(0);
     setPanY(0);
@@ -1394,10 +1917,14 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
       blob => {
         if (!blob) return;
         downloadBlob(blob, `${baseName}.${ext}`);
-        onNotify(
-          `📥 ${ext.toUpperCase()} (${targetWidth}×${targetHeight}, прозрачный фон) скачан!`,
-          'success'
-        );
+        if (format === 'png' && targetWidth === 2560 && targetHeight === 1440) {
+          onNotify('🖼️ Баннер 2560×1440 экспортирован в PNG', 'success');
+        } else {
+          onNotify(
+            `📥 ${ext.toUpperCase()} (${targetWidth}×${targetHeight}, прозрачный фон) скачан!`,
+            'success'
+          );
+        }
       },
       mime,
       0.95
@@ -1409,6 +1936,115 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
     const off = buildFullResExportCanvas();
     const url = off.toDataURL('image/png');
     onApplyToThumbnailCoverA(url);
+  };
+
+  // ============================================================================
+  // 📊 ГЕНЕРАТОР SVG-СХЕМ И ТАЙМЛАЙНОВ (ПРОЗРАЧНЫЙ ФОН 1920x1080 / 3840x2160)
+  // ============================================================================
+  const parsedTimelineEvents = parseTimelineEventsInput(timelineEventsText);
+  const generatedTimelineSvgMarkup = buildTransparentTimelineSvgMarkup({
+    events: parsedTimelineEvents,
+    headerTitle: timelineHeaderTitle,
+    styleId: timelineStyleId,
+    resolution: timelineResolution,
+    fontEntry: timelineFontEntry
+  });
+  const inlineTimelineSvgPreviewMarkup = generatedTimelineSvgMarkup.replace(
+    /^<\?xml[^>]*>\s*/i,
+    ''
+  );
+
+  const handleLoadTimelineSvgToCanvas = async () => {
+    await ensureFontEntryLoaded(timelineFontEntry);
+    const [rw, rh] = timelineResolution === '3840x2160' ? [3840, 2160] : [1920, 1080];
+    setLockAspect(false);
+    setKeepPresetDimensionsOnLoad(true);
+    setTargetWidth(rw);
+    setTargetHeight(rh);
+    setCropFitMode('contain');
+    setShowSafeZones(false);
+    const renderedCanvas = renderTimelineCanvasTransparent({
+      events: parsedTimelineEvents,
+      headerTitle: timelineHeaderTitle,
+      styleId: timelineStyleId,
+      resolution: timelineResolution,
+      fontEntry: timelineFontEntry
+    });
+    loadDataUrlIntoEditor(
+      renderedCanvas.toDataURL('image/png'),
+      `SVG-таймлайн (${timelineResolution}, ${timelineFontEntry.title})`,
+      true
+    );
+    onNotify(
+      `📊 Таймлайн (${rw}×${rh}, шрифт «${timelineFontEntry.primaryFamily}») загружен на холст — можно двигать и масштабировать!`,
+      'success'
+    );
+  };
+
+  const handleOverlayTimelineOnCurrentArt = async () => {
+    await ensureFontEntryLoaded(timelineFontEntry);
+    const baseArtCanvas = buildFullResExportCanvas();
+    const w = baseArtCanvas.width;
+    const h = baseArtCanvas.height;
+
+    const timelineLayer = renderTimelineCanvasTransparent({
+      events: parsedTimelineEvents,
+      headerTitle: timelineHeaderTitle,
+      styleId: timelineStyleId,
+      resolution: timelineResolution,
+      fontEntry: timelineFontEntry
+    });
+
+    const comp = document.createElement('canvas');
+    comp.width = w;
+    comp.height = h;
+    const ctx = comp.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    ctx.drawImage(baseArtCanvas, 0, 0, w, h);
+
+    const fitScale = Math.min(w / timelineLayer.width, h / timelineLayer.height);
+    const drawW = timelineLayer.width * fitScale;
+    const drawH = timelineLayer.height * fitScale;
+    const drawX = (w - drawW) / 2;
+    const drawY = (h - drawH) / 2;
+    ctx.drawImage(timelineLayer, drawX, drawY, drawW, drawH);
+
+    const compositedUrl = comp.toDataURL('image/png');
+    setEffects({ ...DEFAULT_EFFECTS });
+    loadDataUrlIntoEditor(compositedUrl, `${sourceLabel} + таймлайн`, true);
+    onNotify('🖼️ Таймлайн со шрифтом наложен поверх текущего арта!', 'success');
+  };
+
+  const handleDownloadTimelineSvg = () => {
+    const blob = new Blob([generatedTimelineSvgMarkup], {
+      type: 'image/svg+xml;charset=utf-8'
+    });
+    downloadBlob(blob, `timeline_infographic_${timelineResolution}.svg`);
+    onNotify(
+      `📥 Прозрачный SVG-таймлайн (${timelineResolution}) скачан для монтажа / FFmpeg!`,
+      'success'
+    );
+  };
+
+  const handleDownloadTimelinePngTransparent = async () => {
+    await ensureFontEntryLoaded(timelineFontEntry);
+    const [rw, rh] = timelineResolution === '3840x2160' ? [3840, 2160] : [1920, 1080];
+    const out = renderTimelineCanvasTransparent({
+      events: parsedTimelineEvents,
+      headerTitle: timelineHeaderTitle,
+      styleId: timelineStyleId,
+      resolution: timelineResolution,
+      fontEntry: timelineFontEntry
+    });
+    out.toBlob(blob => {
+      if (!blob) return;
+      downloadBlob(blob, `timeline_overlay_${rw}x${rh}_alpha.png`);
+      onNotify(
+        `📥 Прозрачный PNG-оверлей (${rw}×${rh}, «${timelineFontEntry.primaryFamily}») скачан для FFmpeg!`,
+        'success'
+      );
+    }, 'image/png');
   };
 
   return (
@@ -1910,6 +2546,169 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               ))}
             </div>
           </motion.div>
+
+          {/* 4. ГЕНЕРАТОР SVG-СХЕМ И ТАЙМЛАЙНОВ (ИСТОРИЧЕСКИЕ ВСТАВКИ И ИНФОГРАФИКА) */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28, delay: 0.12 }}
+            className="aether-surface rounded-2xl p-5 space-y-4 border border-cyan-400/25"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>📊 Генератор SVG-схем и таймлайнов</span>
+              </span>
+              <span className="text-[10px] font-mono bg-cyan-500/15 border border-cyan-400/35 text-cyan-300 px-2 py-0.5 rounded tabular-nums">
+                {parsedTimelineEvents.length} узлов • Alpha Overlay
+              </span>
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-white/60 uppercase font-semibold block mb-1">
+                    Заголовок схемы (опционально)
+                  </label>
+                  <input
+                    type="text"
+                    value={timelineHeaderTitle}
+                    onChange={e => setTimelineHeaderTitle(e.target.value)}
+                    placeholder="ХРОНОЛОГИЯ СОБЫТИЙ"
+                    className="w-full bg-[#090D16] border border-white/[0.1] focus:border-cyan-400 rounded-xl px-3 py-2 text-xs font-bold text-[#f8fafc] outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/60 uppercase font-semibold block mb-1">
+                    Разрешение (16:9 прозрачный)
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['1920x1080', '3840x2160'] as TimelineSvgResolution[]).map(res => (
+                      <button
+                        key={res}
+                        type="button"
+                        onClick={() => setTimelineResolution(res)}
+                        className={`min-h-[36px] rounded-xl text-[11px] font-mono font-bold border cursor-pointer transition ${
+                          timelineResolution === res
+                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                            : 'bg-[#090D16] border-white/[0.08] text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {res === '3840x2160' ? '4K 3840×2160' : 'FHD 1920×1080'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-white/60 uppercase font-semibold block mb-1">
+                  Ключевые события / этапы (через <code className="text-amber-300">-&gt;</code> или с новой строки)
+                </label>
+                <textarea
+                  rows={2}
+                  value={timelineEventsText}
+                  onChange={e => setTimelineEventsText(e.target.value)}
+                  placeholder="1908 — Находка алмазов -> 1920 — Расцвет города -> 1956 — Исход жителей"
+                  className="w-full bg-[#090D16] border border-white/[0.1] focus:border-amber-400 rounded-xl p-2.5 text-xs text-[#f8fafc] leading-relaxed outline-none"
+                />
+              </div>
+
+              {/* Выбор стиля */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-white/60 uppercase font-semibold block">
+                  Визуальный стиль инфографики:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: 'cinematic_gold_dark', label: 'Cinematic Gold & Dark' },
+                      { id: 'archival_parchment', label: 'Archival Parchment' },
+                      { id: 'minimalist_cyan', label: 'Minimalist Cyan' }
+                    ] as Array<{ id: TimelineSvgStyleId; label: string }>
+                  ).map(st => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setTimelineStyleId(st.id)}
+                      className={`min-h-[36px] px-2.5 py-1.5 rounded-xl text-[11px] font-bold border cursor-pointer transition ${
+                        timelineStyleId === st.id
+                          ? 'bg-amber-500/20 border-amber-400 text-[#FDE047]'
+                          : 'bg-[#090D16] border-white/[0.08] text-white/65 hover:text-white'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Компактный селектор шрифтов для графики и таймлайнов */}
+              <CompactFontSelector
+                selectedFontId={timelineFontEntry.id}
+                onSelectFont={entry => setTimelineFontEntry(entry)}
+                onNotify={onNotify}
+                label="Шрифт титров и схем (Кино/Игры 25+ • ИИ • Google Fonts • .ttf)"
+                accentTone="cyan"
+              />
+
+              {/* Живой мини-предпросмотр SVG на шахматной сетке */}
+              <div
+                className="rounded-xl border border-white/[0.1] overflow-hidden p-2"
+                style={{
+                  backgroundColor: '#131B2E',
+                  backgroundImage:
+                    'linear-gradient(45deg, #1e293b 25%, transparent 25%), linear-gradient(-45deg, #1e293b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1e293b 75%), linear-gradient(-45deg, transparent 75%, #1e293b 75%)',
+                  backgroundSize: '16px 16px',
+                  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
+                }}
+              >
+                <div
+                  className="w-full [&>svg]:w-full [&>svg]:h-auto [&>svg]:block rounded"
+                  dangerouslySetInnerHTML={{ __html: inlineTimelineSvgPreviewMarkup }}
+                />
+              </div>
+
+              {/* Кнопки действий с SVG-схемой */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoadTimelineSvgToCanvas}
+                  className="min-h-[40px] px-3 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Move className="w-3.5 h-3.5 shrink-0" />
+                  <span>На холст (двигать / зум)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOverlayTimelineOnCurrentArt}
+                  className="min-h-[40px] px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-[#FDE047] text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Layers2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Наложить поверх арта</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadTimelineSvg}
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.12] text-white/90 text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Download className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+                  <span>Скачать .SVG (Alpha)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadTimelinePngTransparent}
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                  <span>Скачать .PNG (FFmpeg)</span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
         </div>
 
         {/* ПРАВАЯ КОЛОНКА (7/12): ХОЛСТ С ШАХМАТНОЙ СЕТКОЙ + МУЛЬТИФОРМАТНЫЙ ЭКСПОРТ */}
@@ -1946,10 +2745,10 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               </div>
             </div>
 
-            {/* Checkerboard Canvas Frame + Interactive Safe Zone Overlay */}
+            {/* Checkerboard Canvas Frame + Interactive Safe Zone Overlay + Floating Dock */}
             <div
               ref={canvasFrameRef}
-              className="relative w-full rounded-2xl overflow-hidden border border-white/[0.12] shadow-2xl flex items-center justify-center min-h-[340px] max-h-[560px] p-3 select-none"
+              className="relative w-full rounded-2xl overflow-hidden border border-white/[0.12] shadow-2xl flex items-center justify-center min-h-[360px] max-h-[600px] px-3 pt-3 pb-20 select-none"
               style={{
                 backgroundColor: '#131B2E',
                 backgroundImage:
@@ -2120,6 +2919,89 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                   <span>Тяните картинку мышью • Колёсико = Zoom</span>
                 </div>
               )}
+
+              {/* ПЛАВАЮЩИЙ ДОК-БАР ИНСТРУМЕНТОВ (Interactive Floating Dock) */}
+              <div className="pointer-events-none absolute bottom-3 inset-x-3 z-30 flex justify-center">
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                  className="pointer-events-auto backdrop-blur-xl bg-[#090D16]/85 border border-white/10 rounded-2xl shadow-2xl px-2 py-1.5 flex flex-wrap sm:flex-nowrap items-center justify-center gap-1.5"
+                  role="toolbar"
+                  aria-label="Быстрые инструменты холста Арт-Редактора"
+                >
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileTap={{ scale: 0.94 }}
+                    transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+                    onClick={handleAutoRemoveBackground}
+                    disabled={isRemovingBg}
+                    title="Автоматически удалить фон (1 клик)"
+                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 text-emerald-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <Scissors className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                    <span>{isRemovingBg ? 'Маска...' : '✂️ Удалить фон'}</span>
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileTap={{ scale: 0.94 }}
+                    transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+                    onClick={() => setShowSafeZones(prev => !prev)}
+                    aria-pressed={showSafeZones}
+                    title="Быстрый показ/скрытие сетки YouTube Safe Zones (2560×1440 / 800×800)"
+                    className={`min-h-[36px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors ${
+                      showSafeZones
+                        ? 'bg-cyan-500/25 border-cyan-400/70 text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.28)]'
+                        : 'bg-white/[0.05] hover:bg-white/[0.12] border-white/10 text-white/80'
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+                    <span>📐 Сетка YouTube</span>
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileTap={{ scale: 0.94 }}
+                    transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+                    onClick={handleDockFitCenter}
+                    title="Вписать в безопасную зону баннера или отцентрировать на холсте"
+                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-[#FDE047] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Target className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span>🎯 Вписать в центр</span>
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileTap={{ scale: 0.94 }}
+                    transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+                    onClick={resetLayerPosition}
+                    title="Сбросить позицию (X/Y) и масштаб (100%)"
+                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 text-white/85 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                    <span>🔄 Сброс</span>
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileTap={{ scale: 0.94 }}
+                    transition={{ type: 'spring', stiffness: 460, damping: 24 }}
+                    onClick={() => handleExportFormat('png')}
+                    title={`Быстрый экспорт PNG (${targetWidth}×${targetHeight} px)`}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 whitespace-nowrap"
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                    <span>💾 PNG</span>
+                  </motion.button>
+                </motion.div>
+              </div>
             </div>
 
             {/* КОМПАКТНАЯ ПАНЕЛЬ УПРАВЛЕНИЯ ПОЛОЖЕНИЕМ СЛОЯ (Pan & Zoom + Вписать в 1546×423) */}

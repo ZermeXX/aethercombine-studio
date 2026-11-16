@@ -1812,3 +1812,232 @@ export function localSliceToScenes(
     };
   });
 }
+
+// ============================================================================
+// АВТО-РАЗБИВКА ДОКУМЕНТОВ И ДЛИННЫХ СЦЕНАРИЕВ НА ГЛАВЫ И ТАЙМКОДЫ (130 СЛОВ/МИН)
+// ============================================================================
+export interface TimedDocumentChapter {
+  index: number;
+  timecode: string;
+  startSec: number;
+  durationSec: number;
+  wordCount: number;
+  title: string;
+  body: string;
+}
+
+export interface DocumentChaptersResult {
+  chapters: TimedDocumentChapter[];
+  chaptersTxt: string;
+  totalWords: number;
+  totalDurationSec: number;
+  totalDurationFormatted: string;
+}
+
+export function formatChapterTimestamp(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hrs > 0) {
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function isHeadingLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 110) return false;
+  if (/^#{1,4}\s+\S+/.test(trimmed)) return true;
+  if (/^(?:глава|часть|раздел|акт|chapter|part|act|section)\s+[\divx]+/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(?:\d{1,2}|[IVX]{1,4})[.)]\s+[А-ЯЁA-Z0-9]/.test(trimmed) && !/[.!?]$/.test(trimmed)) {
+    return true;
+  }
+  const words = extractWordTokens(trimmed);
+  if (
+    words.length >= 2 &&
+    words.length <= 9 &&
+    !/[.!?,;]$/.test(trimmed) &&
+    /^[А-ЯЁA-Z0-9«"]/.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function deriveChapterTitleFromBody(body: string, chapterIndex: number): string {
+  const firstSentence =
+    body
+      .replace(/\[[^\]]*\]/g, ' ')
+      .split(/(?<=[.!?])\s+|\r?\n/)[0]
+      ?.trim() || '';
+  const cleaned = firstSentence
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^(?:в современном мире|не секрет, что|стоит отметить, что|на сегодняшний день|как известно)[,:\s]*/i, '')
+    .replace(/[«»"()]/g, '')
+    .replace(/[.!?,;:]+$/, '')
+    .trim();
+
+  if (!cleaned) {
+    return chapterIndex === 0 ? 'Вступление и завязка' : `Глава ${chapterIndex + 1}`;
+  }
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const slice = words.slice(0, 7).join(' ');
+  const titled = slice.charAt(0).toUpperCase() + slice.slice(1);
+  return words.length > 7 ? `${titled}…` : titled;
+}
+
+export function splitTextIntoTimedChapters(
+  rawText: string,
+  wordsPerMin: number = 130
+): DocumentChaptersResult {
+  const normalized = rawText.replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return {
+      chapters: [],
+      chaptersTxt: '',
+      totalWords: 0,
+      totalDurationSec: 0,
+      totalDurationFormatted: '00:00'
+    };
+  }
+
+  const safeWpm = Math.max(60, wordsPerMin);
+  const lines = normalized.split('\n');
+
+  // 1) Попытка разбить по явным заголовкам в документе (.md / .txt / .pdf)
+  const headingSections: Array<{ title: string; bodyLines: string[] }> = [];
+  let hasExplicitHeadings = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (isHeadingLine(trimmed)) {
+      hasExplicitHeadings = true;
+      const cleanTitle = trimmed
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^(\d{1,2}|[IVX]{1,4})[.)]\s*/, '')
+        .trim();
+      headingSections.push({ title: cleanTitle, bodyLines: [] });
+    } else if (headingSections.length > 0) {
+      if (trimmed) headingSections[headingSections.length - 1].bodyLines.push(trimmed);
+    } else if (trimmed) {
+      headingSections.push({ title: '', bodyLines: [trimmed] });
+    }
+  }
+
+  const meaningfulHeadingSections = headingSections
+    .map(sec => ({
+      title: sec.title,
+      body: sec.bodyLines.join(' ').replace(/\s{2,}/g, ' ').trim()
+    }))
+    .filter(sec => extractWordTokens(sec.body).length > 0);
+
+  let rawBlocks: Array<{ title: string; body: string }> = [];
+
+  if (hasExplicitHeadings && meaningfulHeadingSections.length >= 2) {
+    rawBlocks = meaningfulHeadingSections.map((sec, idx) => ({
+      title: sec.title || deriveChapterTitleFromBody(sec.body, idx),
+      body: sec.body
+    }));
+  } else {
+    // 2) Автоматическая смысловая кластеризация по абзацам или предложениям
+    const allWords = extractWordTokens(normalized);
+    const totalWordsCount = allWords.length;
+
+    const targetChapters =
+      totalWordsCount <= 80
+        ? Math.min(3, Math.max(1, Math.ceil(totalWordsCount / 28)))
+        : totalWordsCount <= 350
+        ? Math.min(5, Math.max(3, Math.round(totalWordsCount / 75)))
+        : Math.min(12, Math.max(4, Math.round(totalWordsCount / 220)));
+
+    const paragraphs = normalized
+      .split(/\n{2,}/)
+      .map(p => p.replace(/\s+/g, ' ').trim())
+      .filter(p => extractWordTokens(p).length > 0);
+
+    const units: string[] =
+      paragraphs.length >= targetChapters
+        ? paragraphs
+        : normalized
+            .replace(/\n+/g, ' ')
+            .split(/(?<=[.!?])\s+/)
+            .map(s => s.trim())
+            .filter(s => extractWordTokens(s).length > 0);
+
+    if (units.length <= 1 || targetChapters <= 1) {
+      rawBlocks = [
+        {
+          title: deriveChapterTitleFromBody(normalized, 0),
+          body: normalized.replace(/\s+/g, ' ').trim()
+        }
+      ];
+    } else {
+      const targetWordsPerChapter = Math.max(18, Math.ceil(totalWordsCount / targetChapters));
+      let bucket: string[] = [];
+      let bucketWords = 0;
+
+      for (let i = 0; i < units.length; i++) {
+        const unit = units[i];
+        const uw = extractWordTokens(unit).length;
+        bucket.push(unit);
+        bucketWords += uw;
+
+        const remainingUnits = units.length - 1 - i;
+        if (
+          bucketWords >= targetWordsPerChapter &&
+          remainingUnits >= 1 &&
+          rawBlocks.length < targetChapters - 1
+        ) {
+          const body = bucket.join(' ').trim();
+          rawBlocks.push({
+            title: deriveChapterTitleFromBody(body, rawBlocks.length),
+            body
+          });
+          bucket = [];
+          bucketWords = 0;
+        }
+      }
+
+      if (bucket.length > 0) {
+        const body = bucket.join(' ').trim();
+        rawBlocks.push({
+          title: deriveChapterTitleFromBody(body, rawBlocks.length),
+          body
+        });
+      }
+    }
+  }
+
+  let cumulativeWords = 0;
+  const chapters: TimedDocumentChapter[] = rawBlocks.map((block, idx) => {
+    const wc = Math.max(1, extractWordTokens(block.body).length);
+    const startSec = idx === 0 ? 0 : Math.round((cumulativeWords / safeWpm) * 60);
+    const durationSec = Math.max(4, Math.round((wc / safeWpm) * 60));
+    cumulativeWords += wc;
+    return {
+      index: idx + 1,
+      timecode: formatChapterTimestamp(startSec),
+      startSec,
+      durationSec,
+      wordCount: wc,
+      title: block.title,
+      body: block.body
+    };
+  });
+
+  const totalDurationSec = Math.round((cumulativeWords / safeWpm) * 60);
+  const chaptersTxt = chapters.map(ch => `${ch.timecode} ${ch.title}`).join('\n');
+
+  return {
+    chapters,
+    chaptersTxt,
+    totalWords: cumulativeWords,
+    totalDurationSec,
+    totalDurationFormatted: formatChapterTimestamp(totalDurationSec)
+  };
+}
+

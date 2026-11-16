@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   Sparkles,
   RefreshCw,
@@ -27,9 +29,12 @@ import {
   Layers,
   TrendingUp,
   Globe,
-  Video
+  Video,
+  Upload,
+  ListTree
 } from 'lucide-react';
 import type { NarrativeSceneItem } from './MontageCombineView';
+import { AnimatedNumber, AnimatedDurationText } from './MotionMetrics';
 import {
   VerbaLanguage,
   VerbaTone,
@@ -38,6 +43,7 @@ import {
   VerbaScenePromptCard,
   VoiceoverCleanStats,
   CameraMovementVector,
+  TimedDocumentChapter,
   analyzeVerbaTelemetry,
   buildXrayTokens,
   localRewriteScript,
@@ -47,9 +53,12 @@ import {
   extractWordTokens,
   calculateSceneDurationFromWords,
   pickAntiRepeatCameraVectors,
+  splitTextIntoTimedChapters,
   AI_CLICHE_RULES,
   WATER_BALLAST_RULES
 } from '../utils/verbaFlowLinguistics';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type SubmoduleId = 'rewrite' | 'hooks' | 'voiceprep' | 'scenes' | 'xray';
 
@@ -59,6 +68,11 @@ interface VerbaFlowTextWorkbenchProps {
   onSendToVoiceStudio?: (voiceReadyText: string) => void;
   onSendScenesToTimeline: (scenes: NarrativeSceneItem[], fullScriptText: string) => void;
   onSendToYoutubeSeo: (fullScriptText: string, scenes: NarrativeSceneItem[]) => void;
+  onSendChaptersToYoutubeSeo?: (
+    chaptersTxt: string,
+    chaptersCount: number,
+    totalDurationFormatted: string
+  ) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -128,6 +142,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   onSendToVoiceStudio,
   onSendScenesToTimeline,
   onSendToYoutubeSeo,
+  onSendChaptersToYoutubeSeo,
   onNotify
 }) => {
   const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>('rewrite');
@@ -136,6 +151,19 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const [workingText, setWorkingText] = useState<string>(() => sourceText);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastEngineLabel, setLastEngineLabel] = useState<string>('Локальный движок готов');
+
+  // 0. Загрузка документов (.pdf, .txt, .md) и авто-разбивка на главы
+  const docFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isReadingDocument, setIsReadingDocument] = useState<boolean>(false);
+  const [loadedDocumentMeta, setLoadedDocumentMeta] = useState<{
+    name: string;
+    pages?: number;
+  } | null>(null);
+  const [documentChapters, setDocumentChapters] = useState<TimedDocumentChapter[]>([]);
+  const [chaptersSummary, setChaptersSummary] = useState<{
+    totalWords: number;
+    totalDurationFormatted: string;
+  } | null>(null);
 
   // 1. Настройки Рерайтинг & Анти-ИИ
   const [tone, setTone] = useState<VerbaTone>('doc');
@@ -169,6 +197,137 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   // 5. Цветовой рентген
   const [selectedXrayIndex, setSelectedXrayIndex] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<string>('');
+
+  // Клиентский парсинг документов .pdf (pdfjs-dist) / .txt / .md
+  const handleDocumentFileUpload = async (file: File) => {
+    const lowerName = file.name.toLowerCase();
+    const isPdf = lowerName.endsWith('.pdf') || file.type === 'application/pdf';
+    const isText =
+      lowerName.endsWith('.txt') ||
+      lowerName.endsWith('.md') ||
+      lowerName.endsWith('.markdown') ||
+      file.type.startsWith('text/');
+
+    if (!isPdf && !isText) {
+      onNotify('Поддерживаются файлы .pdf, .txt и .md!', 'error');
+      return;
+    }
+
+    setIsReadingDocument(true);
+    try {
+      let extracted = '';
+      let pagesCount: number | undefined;
+
+      if (isPdf) {
+        const buffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+        const pdfDoc = await loadingTask.promise;
+        pagesCount = pdfDoc.numPages;
+
+        const pageTexts: string[] = [];
+        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+          const page = await pdfDoc.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          const linesMap = new Map<number, string[]>();
+
+          for (const item of textContent.items) {
+            if (!('str' in item) || !item.str) continue;
+            const yCoord = Array.isArray(item.transform) ? Math.round(item.transform[5] / 4) * 4 : 0;
+            const bucket = linesMap.get(yCoord) || [];
+            bucket.push(item.str);
+            linesMap.set(yCoord, bucket);
+          }
+
+          const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+          const pageLines = sortedY
+            .map(y => (linesMap.get(y) || []).join(' ').replace(/\s{2,}/g, ' ').trim())
+            .filter(Boolean);
+          if (pageLines.length > 0) {
+            pageTexts.push(pageLines.join('\n'));
+          }
+        }
+        extracted = pageTexts.join('\n\n').trim();
+      } else {
+        extracted = (await file.text()).replace(/\r\n/g, '\n').trim();
+      }
+
+      if (!extracted) {
+        onNotify(
+          isPdf
+            ? 'PDF загружен, но текстовый слой пуст (возможно, это скан без OCR).'
+            : 'Файл документа пуст!',
+          'error'
+        );
+        return;
+      }
+
+      onSourceTextChange(extracted);
+      setWorkingText(extracted);
+      setLoadedDocumentMeta({ name: file.name, pages: pagesCount });
+      setDocumentChapters([]);
+      setChaptersSummary(null);
+      setLastEngineLabel(
+        isPdf ? `PDF импортирован (${pagesCount} стр.)` : `Документ импортирован (${file.name})`
+      );
+      onNotify(
+        isPdf
+          ? `📄 PDF «${file.name}» (${pagesCount} стр., ${extractWordTokens(extracted).length} слов) загружен! Нажмите «📑 Разбить на главы и таймкоды».`
+          : `📄 Файл «${file.name}» (${extractWordTokens(extracted).length} слов) загружен!`,
+        'success'
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onNotify(`Не удалось прочитать документ «${file.name}»: ${msg}`, 'error');
+    } finally {
+      setIsReadingDocument(false);
+    }
+  };
+
+  const handleSplitDocumentChapters = () => {
+    const targetText = (sourceText || workingText).trim();
+    if (!targetText) {
+      onNotify('Сначала загрузите документ (.pdf, .txt, .md) или вставьте текст!', 'error');
+      return;
+    }
+
+    const res = splitTextIntoTimedChapters(targetText, 130);
+    if (res.chapters.length === 0) {
+      onNotify('Недостаточно текста для выделения логических глав.', 'error');
+      return;
+    }
+
+    setDocumentChapters(res.chapters);
+    setChaptersSummary({
+      totalWords: res.totalWords,
+      totalDurationFormatted: res.totalDurationFormatted
+    });
+    onNotify(
+      `📑 Разбито на ${res.chapters.length} глав • хронометраж ${res.totalDurationFormatted} (при темпе 130 слов/мин)!`,
+      'success'
+    );
+  };
+
+  const handleUpdateChapterTitle = (idx: number, nextTitle: string) => {
+    setDocumentChapters(prev =>
+      prev.map((ch, i) => (i === idx ? { ...ch, title: nextTitle } : ch))
+    );
+  };
+
+  const chaptersOutputTxt = useMemo(
+    () => documentChapters.map(ch => `${ch.timecode} ${ch.title.trim() || `Глава ${ch.index}`}`).join('\n'),
+    [documentChapters]
+  );
+
+  const handleSendDocumentChaptersToSeo = () => {
+    if (documentChapters.length === 0) return;
+    const totalFmt = chaptersSummary?.totalDurationFormatted || '00:00';
+    if (onSendChaptersToYoutubeSeo) {
+      onSendChaptersToYoutubeSeo(chaptersOutputTxt, documentChapters.length, totalFmt);
+    } else {
+      const mapped = buildSyncedMontageScenes(workingText || sourceText);
+      onSendToYoutubeSeo(workingText || sourceText, mapped);
+    }
+  };
 
   // Сквозные живые метрики (Telemetry Bar) — пересчет при каждом вводе
   const analyzedText =
@@ -795,7 +954,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   : 'text-rose-400'
               }`}
             >
-              {telemetry.humanityScore}%
+              <AnimatedNumber value={telemetry.humanityScore} suffix="%" />
             </span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-[#090D16] overflow-hidden">
@@ -811,10 +970,10 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             />
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
-            <span>Burstiness: {telemetry.burstinessPercent}%</span>
+            <span>Burstiness: <AnimatedNumber value={telemetry.burstinessPercent} suffix="%" /></span>
             <span aria-hidden="true">·</span>
             <span className={telemetry.totalClichesCount > 0 ? 'text-rose-300' : 'text-emerald-300'}>
-              ИИ-штампов: {telemetry.totalClichesCount}
+              ИИ-штампов: <AnimatedNumber value={telemetry.totalClichesCount} />
             </span>
           </div>
         </motion.div>
@@ -838,7 +997,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   : 'text-rose-400'
               }`}
             >
-              {telemetry.densityPercent}%
+              <AnimatedNumber value={telemetry.densityPercent} suffix="%" />
             </span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-[#090D16] overflow-hidden">
@@ -848,10 +1007,10 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             />
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
-            <span>Предложений: {telemetry.sentenceCount}</span>
+            <span>Предложений: <AnimatedNumber value={telemetry.sentenceCount} /></span>
             <span aria-hidden="true">·</span>
             <span className={telemetry.totalWaterCount > 0 ? 'text-sky-300' : 'text-emerald-300'}>
-              Балласт: {telemetry.totalWaterCount}
+              Балласт: <AnimatedNumber value={telemetry.totalWaterCount} />
             </span>
           </div>
         </motion.div>
@@ -875,7 +1034,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   : 'text-slate-300'
               }`}
             >
-              {telemetry.uniquenessPercent}%
+              <AnimatedNumber value={telemetry.uniquenessPercent} suffix="%" />
             </span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-[#090D16] overflow-hidden">
@@ -885,9 +1044,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             />
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
-            <span>3-граммы: {100 - telemetry.shingleOverlapPercent}% нов.</span>
+            <span>3-граммы: <AnimatedNumber value={100 - telemetry.shingleOverlapPercent} suffix="%" /> нов.</span>
             <span aria-hidden="true">·</span>
-            <span>Лексика: {telemetry.lexicalDiversityPercent}%</span>
+            <span>Лексика: <AnimatedNumber value={telemetry.lexicalDiversityPercent} suffix="%" /></span>
           </div>
         </motion.div>
 
@@ -902,11 +1061,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
               ⏱️ Объём и тайминг
             </span>
             <span className="text-lg font-mono font-extrabold text-amber-300 tabular-nums">
-              {telemetry.narrationFormatted}
+              <AnimatedDurationText totalSeconds={telemetry.narrationSeconds} />
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono tabular-nums">
-            <span>Слов: {telemetry.wordCount}</span>
+            <span>Слов: <AnimatedNumber value={telemetry.wordCount} /></span>
             <span className="text-slate-400">130 сл/мин (~2.2 сл/с)</span>
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
@@ -1112,6 +1271,139 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   </div>
                 </div>
 
+                {/* ПАНЕЛЬ ЗАГРУЗКИ ДОКУМЕНТОВ (PDF / TXT / MD) И АВТО-РАЗБИВКИ НА ГЛАВЫ */}
+                <div className="rounded-xl bg-[#0b0f19]/90 border border-cyan-500/25 p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        ref={docFileInputRef}
+                        type="file"
+                        accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
+                        className="hidden"
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (f) void handleDocumentFileUpload(f);
+                          e.target.value = '';
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => docFileInputRef.current?.click()}
+                        disabled={isReadingDocument}
+                        className="min-h-[38px] px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/45 text-cyan-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
+                      >
+                        {isReadingDocument ? (
+                          <RefreshCw className="w-4 h-4 animate-spin text-cyan-300" />
+                        ) : (
+                          <Upload className="w-4 h-4 text-cyan-300" />
+                        )}
+                        <span>
+                          {isReadingDocument
+                            ? 'Чтение документа...'
+                            : '📄 Загрузить документ (.pdf, .txt, .md)'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSplitDocumentChapters}
+                        className="min-h-[38px] px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45 text-amber-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition"
+                      >
+                        <ListTree className="w-4 h-4 text-amber-300" />
+                        <span>📑 Разбить на главы и таймкоды</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] font-mono tabular-nums">
+                      {loadedDocumentMeta && (
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/35 text-emerald-300">
+                          {loadedDocumentMeta.name}
+                          {loadedDocumentMeta.pages ? ` (${loadedDocumentMeta.pages} стр.)` : ''}
+                        </span>
+                      )}
+                      <span className="text-slate-400">
+                        Темп: <strong className="text-amber-300">130 слов/мин</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Интерактивный список глав и таймкодов */}
+                  {documentChapters.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                      className="rounded-xl bg-[#111827]/90 border border-amber-400/30 p-3.5 space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-2.5">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-bold text-amber-300">
+                            📑 Главы сценария ({documentChapters.length})
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                            • {chaptersSummary?.totalWords || 0} слов •{' '}
+                            <strong className="text-emerald-300">
+                              {chaptersSummary?.totalDurationFormatted || '00:00'}
+                            </strong>
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyWithFeedback(
+                                chaptersOutputTxt,
+                                'copy-chapters',
+                                'Список глав с таймкодами скопирован!'
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-white/[0.1] text-[11px] text-slate-200 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedId === 'copy-chapters' ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3 text-amber-300" />
+                            )}
+                            <span>Копировать</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleSendDocumentChaptersToSeo}
+                            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition"
+                          >
+                            <TrendingUp className="w-3.5 h-3.5" />
+                            <span>В output_chapters.txt (YouTube SEO) →</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                        {documentChapters.map((ch, idx) => (
+                          <div
+                            key={`doc-ch-${ch.index}`}
+                            className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-[#090D16]/90 border border-white/[0.06] rounded-lg px-2.5 py-1.5 text-xs"
+                          >
+                            <span className="font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 rounded tabular-nums shrink-0">
+                              {ch.timecode}
+                            </span>
+                            <input
+                              type="text"
+                              value={ch.title}
+                              onChange={e => handleUpdateChapterTitle(idx, e.target.value)}
+                              className="flex-1 min-w-[160px] bg-transparent border border-transparent focus:border-cyan-400/50 rounded px-1.5 py-0.5 text-xs font-semibold text-slate-100 outline-none"
+                            />
+                            <span className="text-[10px] font-mono text-slate-400 tabular-nums shrink-0">
+                              {ch.wordCount} сл. • ~{ch.durationSec}с
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+
                 {/* ДВУХКОЛОНОЧНЫЙ РЕДАКТОР: ИСХОДНИК / РЕЗУЛЬТАТ */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-xl bg-[#131B2E]/70 border border-white/[0.08] p-4 space-y-2.5">
@@ -1121,7 +1413,12 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       </label>
                       <button
                         type="button"
-                        onClick={() => onSourceTextChange('')}
+                        onClick={() => {
+                          onSourceTextChange('');
+                          setLoadedDocumentMeta(null);
+                          setDocumentChapters([]);
+                          setChaptersSummary(null);
+                        }}
                         className="text-xs text-slate-400 hover:text-rose-300 cursor-pointer"
                       >
                         Очистить
@@ -1131,7 +1428,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       rows={13}
                       value={sourceText}
                       onChange={e => onSourceTextChange(e.target.value)}
-                      placeholder="Вставьте исходный текст или черновик сценария..."
+                      placeholder="Загрузите документ (.pdf, .txt, .md) кнопкой выше или вставьте длинный текст сценария..."
                       className="w-full bg-[#090D16] border border-white/[0.08] focus:border-amber-400/60 rounded-xl p-3.5 text-sm text-slate-100 leading-relaxed outline-none custom-scrollbar"
                     />
                   </div>

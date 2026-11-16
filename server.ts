@@ -300,6 +300,95 @@ ${cleanText}`;
   });
 
   // ==========================================================================
+  // 2B. POST /api/gemini/match-font — Умный AI-подбор Google Font по названию фильма / игры / сериала
+  // ==========================================================================
+  app.post('/api/gemini/match-font', async (req, res) => {
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        res.status(503).json({
+          ok: false,
+          error: 'GEMINI_API_KEY не настроен на сервере. Проверьте панель Settings > Secrets.'
+        });
+        return;
+      }
+
+      const { query } = req.body as { query?: string };
+      const cleanQuery = (query || '').trim().slice(0, 120);
+      if (!cleanQuery) {
+        res.status(400).json({ ok: false, error: 'Укажите название фильма, сериала или игры' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const prompt = `You are a cinematic title typography & branding expert specializing in movie posters, TV series logos, anime titles, and video game cover typography.
+Analyze the title requested by the user: "${cleanQuery}"
+
+Task:
+1. Identify the iconic typography style used in the official logo/poster/titles of "${cleanQuery}".
+2. Choose the closest REAL, EXISTING font available on Google Fonts (fonts.google.com).
+   - Strongly prefer Google Fonts that support BOTH Cyrillic and Latin if possible (examples: "Cinzel", "Cormorant Garamond", "Playfair Display", "EB Garamond", "Montserrat", "Oswald", "Russo One", "Rubik", "Exo 2", "Philosopher", "Forum", "JetBrains Mono", "Bad Script", "Marck Script", "Neucha", "Press Start 2P", "Poiret One", "Scada", "Cuprum", "Yanone Kaffeesatz", "Kelly Slab", "Fira Sans", "Amatic SC", "Alice", "Oranienbaum", "Alumni Sans").
+   - If the closest visual match is Latin-only (e.g. "Bebas Neue", "Orbitron", "Cinzel Decorative", "Uncial Antiqua", "Libre Baskerville", "Marcellus", "Anton", "Special Elite"), still return it as fontFamily AND provide a Cyrillic-capable Google Font pairing in fallbackCyrillicFamily.
+3. Return strict JSON matching the schema.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              matchedTitle: {
+                type: Type.STRING,
+                description: 'Normalized movie/series/game title in readable Russian / English format.'
+              },
+              referenceTypeface: {
+                type: Type.STRING,
+                description: 'Original poster/logo typeface or typography reference name.'
+              },
+              fontFamily: {
+                type: Type.STRING,
+                description: 'Exact, valid Google Font family name (e.g. "Cinzel", "Exo 2", "Philosopher", "Montserrat").'
+              },
+              fallbackCyrillicFamily: {
+                type: Type.STRING,
+                description: 'Cyrillic-supporting Google Font family fallback matching the mood.'
+              },
+              weight: {
+                type: Type.STRING,
+                description: 'Preferred CSS font weight string such as "700", "800", "900", or "400".'
+              },
+              categoryFallback: {
+                type: Type.STRING,
+                description: 'Either "serif", "sans-serif", or "monospace".'
+              },
+              typographyMood: {
+                type: Type.STRING,
+                description: 'Concise 2-5 word Russian summary of the typography character.'
+              }
+            },
+            required: [
+              'matchedTitle',
+              'referenceTypeface',
+              'fontFamily',
+              'fallbackCyrillicFamily',
+              'weight',
+              'categoryFallback',
+              'typographyMood'
+            ]
+          }
+        }
+      });
+
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      res.json({ ok: true, data: parsed });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
+  // ==========================================================================
   // 3. GET /api/proxy-image — CORS-безопасный прокси для AI Horde R2/CDN картинок
   // ==========================================================================
   app.get('/api/proxy-image', async (req, res) => {

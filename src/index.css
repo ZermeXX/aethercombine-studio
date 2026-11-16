@@ -44,9 +44,9 @@
   }
 }
 
-/* Depth & Glassmorphism Surfaces (#0f1623 + subtle luminous border) */
+/* Depth & Glassmorphism Surfaces (#0f1623/85 + backdrop-blur-md + subtle luminous border) */
 .aether-surface {
-  background-color: rgba(15, 22, 35, 0.78);
+  background-color: rgba(15, 22, 35, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -56,7 +56,7 @@
 }
 
 .aether-card {
-  background-color: rgba(15, 22, 35, 0.75);
+  background-color: rgba(15, 22, 35, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);

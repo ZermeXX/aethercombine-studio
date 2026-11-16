@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Layers,
   Clapperboard,
@@ -62,6 +62,12 @@ import {
   ImageArtEditorView,
   ArtEditorIncomingAsset
 } from './components/ImageArtEditorView';
+import {
+  AmbientShaderBackdrop,
+  AmbientShaderMode,
+  AMBIENT_SHADER_STORAGE_KEY,
+  getInitialAmbientShaderMode
+} from './components/AmbientShaderBackdrop';
 import { YouTubeSeoView } from './components/YouTubeSeoView';
 import {
   LiveTerminal,
@@ -910,6 +916,7 @@ export default function App() {
   const [seoScriptText, setSeoScriptText] = useState<string>(
     'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.'
   );
+  const [verbaFlowChaptersTxt, setVerbaFlowChaptersTxt] = useState<string>('');
 
   // Пресеты форматов каналов (1-Click Format Presets) + синхронизация Ритм-карты, Shorts и шрифта превью
   const [activeFormatPreset, setActiveFormatPreset] =
@@ -1061,6 +1068,46 @@ export default function App() {
   const [editorEditedCoverAUrl, setEditorEditedCoverAUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Фоновый шейдер и переключатель производительности (localStorage + prefers-reduced-motion)
+  const [ambientShaderMode, setAmbientShaderMode] = useState<AmbientShaderMode>(() =>
+    getInitialAmbientShaderMode()
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handleMotionChange = (e: MediaQueryListEvent) => {
+      try {
+        const stored = window.localStorage.getItem(AMBIENT_SHADER_STORAGE_KEY);
+        if (!stored) {
+          setAmbientShaderMode(e.matches ? 'eco' : 'live');
+        }
+      } catch {
+        setAmbientShaderMode(e.matches ? 'eco' : 'live');
+      }
+    };
+    mediaQuery.addEventListener('change', handleMotionChange);
+    return () => mediaQuery.removeEventListener('change', handleMotionChange);
+  }, []);
+
+  const toggleAmbientShaderMode = () => {
+    setAmbientShaderMode(prev => {
+      const next: AmbientShaderMode = prev === 'live' ? 'eco' : 'live';
+      try {
+        window.localStorage.setItem(AMBIENT_SHADER_STORAGE_KEY, next);
+      } catch {
+        // ignore storage errors
+      }
+      showToast(
+        next === 'live'
+          ? '✨ Включён «Живой фон» (24fps Ambient Scroll Shader)'
+          : '⚡ Включён «Экономный режим» — фоновый шейдер остановлен (0% GPU)',
+        'info'
+      );
+      return next;
+    });
+  };
+
   // 2. ПЕРЕКЛЮЧАТЕЛЬ ФОРМАТОВ ПРОЕКТА В ШАПКЕ СТУДИИ (1-Click Format Presets)
   const applyStudioFormatPreset = (presetId: StudioFormatPresetId) => {
     setActiveFormatPreset(presetId);
@@ -1207,10 +1254,10 @@ export default function App() {
 
   const showToast = useCallback((text: string, type: 'info' | 'error' | 'success' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, text, type }]);
-    setTimeout(() => {
+    setToasts(prev => [...prev.slice(-2), { id, text, type }]);
+    window.setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    }, 2500);
   }, []);
 
   // Двухтональный аккорд завершения через Web Audio API (без внешних mp3)
@@ -3894,7 +3941,10 @@ export default function App() {
   const estimatedGb = estimateLoopSizeGb();
 
   return (
-    <div className="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#080c14] text-[#f8fafc] overflow-x-hidden">
+    <div className="relative min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#080c14] text-[#f8fafc] overflow-x-hidden">
+      {/* ЛЁГКИЙ АНИМИРОВАННЫЙ ФОНОВЫЙ ШЕЙДЕР (24fps Scroll Shader / Экономный статичный режим) */}
+      <AmbientShaderBackdrop mode={ambientShaderMode} />
+
       {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Segmented Tabs со скользящим индикатором layoutId) */}
       <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#080c14]/85 backdrop-blur-xl px-4 py-3 shadow-[0_16px_40px_-15px_rgba(0,0,0,0.85)]">
         {/* Верхний ряд: Логотип и статус подключения */}
@@ -3967,33 +4017,63 @@ export default function App() {
             </div>
           </div>
 
-          {/* Правый бейдж статуса */}
-          <button
-            type="button"
-            onClick={openConfigModal}
-            className="min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/80 hover:bg-[#0f1623] hover:border-amber-400/40 px-3 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
-          >
-            <span
-              id="gh-status-indicator"
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                isGhConnected
-                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
-                  : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
+          {/* Правая группа: Переключатель «✨ Живой фон / ⚡ Экономный режим» + Статус GitHub / GDrive */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={toggleAmbientShaderMode}
+              aria-pressed={ambientShaderMode === 'live'}
+              title={
+                ambientShaderMode === 'live'
+                  ? 'Активен плавный шейдер 24fps. Нажмите для включения Экономного режима (статичный фон #080c14)'
+                  : 'Активен Экономный режим (0% нагрузки на GPU). Нажмите для включения Живого фона'
+              }
+              className={`min-h-[44px] flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold cursor-pointer transition ${
+                ambientShaderMode === 'live'
+                  ? 'bg-gradient-to-r from-indigo-500/20 to-cyan-500/20 border-cyan-400/45 text-cyan-200 shadow-[0_0_18px_rgba(14,116,144,0.28)]'
+                  : 'bg-[#0f1623]/85 border-white/[0.08] text-amber-300 hover:border-amber-400/40'
               }`}
-            />
-            <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[130px] sm:max-w-none">
-              {ghRepo || 'ZermeXX/aetherflow-render'}
-            </span>
-            <span className="h-4 w-px bg-white/[0.1] hidden sm:inline-block" />
-            <span className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] font-medium text-emerald-400">
-              <HardDrive
-                className={`w-3.5 h-3.5 ${
-                  isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
+            >
+              {ambientShaderMode === 'live' ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+                  <span className="whitespace-nowrap">✨ Живой фон</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="whitespace-nowrap">⚡ Экономный режим</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={openConfigModal}
+              className="min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-[#0f1623] hover:border-amber-400/40 px-3 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
+            >
+              <span
+                id="gh-status-indicator"
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  isGhConnected
+                    ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
+                    : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
                 }`}
               />
-              <span>GDrive Ready</span>
-            </span>
-          </button>
+              <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[130px] sm:max-w-none">
+                {ghRepo || 'ZermeXX/aetherflow-render'}
+              </span>
+              <span className="h-4 w-px bg-white/[0.1] hidden sm:inline-block" />
+              <span className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] font-medium text-emerald-400">
+                <HardDrive
+                  className={`w-3.5 h-3.5 ${
+                    isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
+                  }`}
+                />
+                <span>GDrive Ready</span>
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* Нижний ряд: Ровно 5 чистых модулей в верхней навигации со скользящим индикатором */}
@@ -4100,7 +4180,7 @@ export default function App() {
       </header>
 
       {/* ОСНОВНОЙ КОНТЕНТ */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 overflow-x-hidden">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 overflow-x-hidden">
         {/* =========================================
             ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
            ========================================= */}
@@ -6441,15 +6521,24 @@ export default function App() {
               if (newScenes.length > 0) {
                 setActiveNarrativeScenes(newScenes);
               }
-              setActiveTab('seo');
+              handleSelectTab('seo');
               showToast('📈 Сценарий и структура сцен переданы в YouTube SEO!', 'success');
+            }}
+            onSendChaptersToYoutubeSeo={(chaptersTxt, chaptersCount, totalDurationFormatted) => {
+              setVerbaFlowChaptersTxt(chaptersTxt);
+              setSeoScriptText(sourceText);
+              handleSelectTab('seo');
+              showToast(
+                `📑 ${chaptersCount} глав (${totalDurationFormatted}) переданы в output_chapters.txt в модуле YouTube SEO!`,
+                'success'
+              );
             }}
             onSendScenesToTimeline={(newScenes, fullScript) => {
               setExternalNarrativeScenes(newScenes);
               setActiveNarrativeScenes(newScenes);
               setTransferredScript(fullScript);
               setSeoScriptText(fullScript);
-              setActiveTab('combine');
+              handleSelectTab('combine');
               showToast(
                 `🎬 В Повествовательный монтаж / Ритм-карту передано ${newScenes.length} сцен с точным расчётом duration и векторами камеры!`,
                 'success'
@@ -6471,6 +6560,11 @@ export default function App() {
             scriptContext={seoScriptText || transferredScript || sourceText}
             narrativeScenes={activeNarrativeScenes}
             loopSlots={timelineSlots}
+            externalChaptersTxt={verbaFlowChaptersTxt}
+            onClearExternalChapters={() => {
+              setVerbaFlowChaptersTxt('');
+              showToast('Переключено обратно на автоматический расчёт глав по Ритм-карте.', 'info');
+            }}
             seoState={youtubeSeoState}
             onSeoStateChange={setYoutubeSeoState}
             shortsExportConfig={shortsExportConfig}
@@ -6487,7 +6581,7 @@ export default function App() {
               if (words) {
                 setThumbTitle(words);
               }
-              setActiveTab('thumb');
+              handleSelectTab('thumb');
               showToast(`Хук «${words}» передан на 4K обложку!`, 'success');
             }}
             onNotify={showToast}
@@ -6826,28 +6920,45 @@ export default function App() {
         </div>
       )}
 
-      {/* ВСПЛЫВАЮЩИЕ УВЕДОМЛЕНИЯ (TOASTS) */}
-      {toasts.length > 0 && (
-        <div className="fixed bottom-14 right-6 z-50 flex flex-col gap-2 max-w-sm">
-          {toasts.map(t => (
-            <div
+      {/* ДИНАМИЧЕСКАЯ КАПСУЛА СТАТУСОВ (DYNAMIC ISLAND STATUS PILL) */}
+      <div
+        aria-live="polite"
+        className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] pointer-events-none flex flex-col items-center gap-1.5 px-3 max-w-[92vw]"
+      >
+        <AnimatePresence mode="popLayout">
+          {toasts.slice(-2).map(t => (
+            <motion.button
               key={t.id}
-              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border text-xs font-medium shadow-xl backdrop-blur-md transition ${
+              type="button"
+              layout
+              initial={{ opacity: 0, y: -18, scale: 0.84 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -14, scale: 0.88 }}
+              transition={{ type: 'spring', stiffness: 460, damping: 30 }}
+              onClick={() => setToasts(prev => prev.filter(item => item.id !== t.id))}
+              title="Нажмите, чтобы скрыть уведомление"
+              className={`pointer-events-auto flex items-center gap-2.5 px-4 py-2 rounded-full border text-xs font-semibold shadow-[0_14px_38px_rgba(0,0,0,0.72)] backdrop-blur-xl cursor-pointer ${
                 t.type === 'error'
-                  ? 'bg-rose-950/90 border-rose-500/40 text-rose-200'
+                  ? 'bg-[#1a0b12]/90 border-rose-400/50 text-rose-100'
                   : t.type === 'success'
-                  ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
-                  : 'bg-[#111622]/95 border-amber-500/40 text-slate-200'
+                  ? 'bg-[#091512]/90 border-emerald-400/50 text-emerald-100'
+                  : 'bg-[#090D16]/90 border-amber-400/45 text-slate-100'
               }`}
             >
-              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>{t.text}</span>
-            </div>
+              {t.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : t.type === 'error' ? (
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              ) : (
+                <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
+              )}
+              <span className="leading-snug text-left">{t.text}</span>
+            </motion.button>
           ))}
-        </div>
-      )}
+        </AnimatePresence>
+      </div>
 
-      <footer className="border-t border-white/[0.08] bg-[#080c14]/90 backdrop-blur-md py-3.5 px-6 text-center text-xs text-white/55 font-mono">
+      <footer className="relative z-10 border-t border-white/[0.08] bg-[#080c14]/90 backdrop-blur-md py-3.5 px-6 text-center text-xs text-white/55 font-mono">
         AetherCombine Studio • Cloud 4K Production Pipeline (GitHub Actions FFmpeg + Rclone Google Drive)
       </footer>
     </div>

@@ -22,6 +22,11 @@ import type {
   ShortsExportSegment
 } from './MontageCombineView';
 import type { TimelineSlot } from '../App';
+import {
+  AnimatedNumber,
+  AnimatedDurationText,
+  MetadataReadinessRing
+} from './MotionMetrics';
 
 import {
   SeoToneStyle,
@@ -40,6 +45,8 @@ interface YouTubeSeoViewProps {
   narrativeScenes: NarrativeSceneItem[];
   loopSlots: TimelineSlot[];
   projectName: string;
+  externalChaptersTxt?: string;
+  onClearExternalChapters?: () => void;
   seoState?: YoutubeSeoState;
   onSeoStateChange?: React.Dispatch<React.SetStateAction<YoutubeSeoState>>;
   shortsExportConfig?: ShortsExportManifestBlock;
@@ -72,6 +79,8 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   narrativeScenes,
   loopSlots,
   projectName,
+  externalChaptersTxt,
+  onClearExternalChapters,
   seoState,
   onSeoStateChange,
   shortsExportConfig,
@@ -248,11 +257,17 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       .join('\n');
   }, [loopSlots]);
 
-  const [chaptersText, setChaptersText] = useState<string>(computedChaptersFromManifest);
+  const [chaptersText, setChaptersText] = useState<string>(
+    externalChaptersTxt?.trim() || computedChaptersFromManifest
+  );
 
   useEffect(() => {
-    setChaptersText(computedChaptersFromManifest);
-  }, [computedChaptersFromManifest]);
+    if (externalChaptersTxt && externalChaptersTxt.trim()) {
+      setChaptersText(externalChaptersTxt.trim());
+    } else {
+      setChaptersText(computedChaptersFromManifest);
+    }
+  }, [computedChaptersFromManifest, externalChaptersTxt]);
 
   const copyWithToast = (text: string, key: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -510,8 +525,14 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     onShortsExportChange?.(computedShortsManifestBlock);
   }, [computedShortsManifestBlock, onShortsExportChange]);
 
-  // 4. Точный расчёт глав output_chapters.txt путём суммирования реальных duration сцен из текущей Ритм-карты
+  const hasVerbaFlowChapters = Boolean(externalChaptersTxt && externalChaptersTxt.trim());
+
+  // 4. Точный расчёт глав output_chapters.txt (приоритет: импортированные из VerbaFlow 130 сл./мин, либо расчёт по duration Ритм-карты)
   const exactRhythmMapChaptersTxt = useMemo(() => {
+    if (externalChaptersTxt && externalChaptersTxt.trim()) {
+      return externalChaptersTxt.trim();
+    }
+
     if (narrativeScenes.length > 0) {
       const totalScenes = narrativeScenes.length;
       const chapterCount = Math.min(8, Math.max(3, Math.ceil(totalScenes / 3)));
@@ -540,7 +561,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       .split('\n')
       .map(line => line.replace(/^00:/, '').replace(' - ', ' '))
       .join('\n');
-  }, [narrativeScenes, computedChaptersFromManifest]);
+  }, [externalChaptersTxt, narrativeScenes, computedChaptersFromManifest]);
 
   const totalRhythmMapDurationSec = useMemo(() => {
     return narrativeScenes.reduce((acc, sc, idx) => {
@@ -626,7 +647,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     onNotify('📦 Файл RELEASE_CARD.md (English Release Package) успешно скачан!', 'success');
   };
 
-  // Скачивание output_chapters.txt с точным суммированием реальных duration сцен
+  // Скачивание output_chapters.txt с точным суммированием реальных duration сцен или глав VerbaFlow
   const handleDownloadOutputChaptersTxt = () => {
     const blob = new Blob([exactRhythmMapChaptersTxt + '\n'], {
       type: 'text/plain;charset=utf-8'
@@ -638,7 +659,9 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     a.click();
     URL.revokeObjectURL(url);
     onNotify(
-      `⏱️ Файл output_chapters.txt скачан (точный расчёт по ${narrativeScenes.length} сценам Ритм-карты)!`,
+      hasVerbaFlowChapters
+        ? '⏱️ Файл output_chapters.txt скачан (главы из VerbaFlow • темп 130 слов/мин)!'
+        : `⏱️ Файл output_chapters.txt скачан (точный расчёт по ${narrativeScenes.length} сценам Ритм-карты)!`,
       'success'
     );
   };
@@ -1079,14 +1102,43 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
               </p>
             </div>
             <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2.5 py-0.5 rounded tabular-nums">
-              {narrativeScenes.length} сцен • {formatSecToShortChapter(totalRhythmMapDurationSec)}
+              <AnimatedNumber value={narrativeScenes.length} /> сцен •{' '}
+              <AnimatedDurationText totalSeconds={totalRhythmMapDurationSec} />
             </span>
           </div>
 
+          <MetadataReadinessRing
+            titleValid={activeReleaseTitle.trim().length > 0 && activeReleaseTitle.trim().length <= 60}
+            descriptionValid={descriptionWordCount >= 40}
+            chaptersValid={exactRhythmMapChaptersTxt.trim().split(/\r?\n/).filter(Boolean).length >= 2}
+            tagsValid={tagsListCount >= 5 && tagsCharCount > 0 && tagsCharCount <= 500}
+            chaptersCount={exactRhythmMapChaptersTxt.trim().split(/\r?\n/).filter(Boolean).length}
+            tagsCount={tagsListCount}
+          />
+
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
               <span>Предпросмотр точных глав (output_chapters.txt):</span>
-              <span className="text-emerald-400">Секунда в секунду с монтажом</span>
+              <div className="flex items-center gap-2">
+                {hasVerbaFlowChapters ? (
+                  <>
+                    <span className="text-cyan-300 bg-cyan-500/15 border border-cyan-400/35 px-2 py-0.5 rounded">
+                      Из VerbaFlow (130 слов/мин)
+                    </span>
+                    {onClearExternalChapters && (
+                      <button
+                        type="button"
+                        onClick={onClearExternalChapters}
+                        className="text-[10px] text-slate-400 hover:text-amber-300 underline cursor-pointer"
+                      >
+                        Вернуть Ритм-карту
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-emerald-400">Секунда в секунду с монтажом</span>
+                )}
+              </div>
             </div>
             <pre className="text-xs font-mono text-indigo-200 whitespace-pre-wrap max-h-32 overflow-y-auto custom-scroll leading-relaxed tabular-nums">
               {exactRhythmMapChaptersTxt}

@@ -36,6 +36,13 @@ import {
   Image as ImageIcon,
   ArrowRight
 } from 'lucide-react';
+import { CompactFontSelector } from './CompactFontSelector';
+import {
+  GOOGLE_FONT_PRESETS,
+  StudioFontEntry,
+  ensureFontEntryLoaded,
+  preloadCatalogFonts
+} from '../utils/fontCatalog';
 
 declare global {
   interface Window {
@@ -792,35 +799,43 @@ interface FontStyleOption {
 const FONT_STYLE_OPTIONS: FontStyleOption[] = [
   {
     id: 'cinematic_sans',
-    label: 'Cinematic Sans (Montserrat / Impact)',
-    subtitle: 'Современный жирный гротеск',
+    label: 'Кино-гротеск',
+    subtitle: 'Современный контрастный 4K заголовок с глубокой тенью',
     previewFontFamily: '"Montserrat", Impact, sans-serif'
   },
   {
     id: 'gold_ice_magic',
-    label: 'Gold & Ice Magic (Cinzel + Frost)',
+    label: '3D Золото и Лёд',
     subtitle: '3D-золото сверху (#FFE58F → #B86B00) и морозный лёд с инеем снизу (#FFFFFF → #5B9BD5)',
     previewFontFamily: '"Cinzel", "Cinzel Decorative", serif'
   },
   {
     id: 'royal_gold_laurels',
-    label: 'Royal Gold Serif + Laurels (Cinzel Decorative)',
+    label: 'Королевские лавры',
     subtitle: 'Золотой градиент #F6D365 → #C59B27 и лавровые ветви',
     previewFontFamily: '"Cinzel Decorative", "Cinzel", serif'
   },
   {
     id: 'medieval_serif',
-    label: 'Medieval Story Serif (Cormorant Garamond Bold)',
-    subtitle: 'Атмосферный книжный / исторический шрифт с мягким свечением',
+    label: 'Исторический / Свечение',
+    subtitle: 'Атмосферный тёплый градиент пергамента с мягким свечением',
     previewFontFamily: '"Cormorant Garamond", Georgia, serif'
   },
   {
     id: 'minimal_clean',
-    label: 'Minimal Clean (Inter / Bebas Neue)',
-    subtitle: 'Строгий минималистичный стиль',
+    label: 'Минимал',
+    subtitle: 'Чистый плакатный контур без лишнего декора',
     previewFontFamily: '"Bebas Neue", "Inter", sans-serif'
   }
 ];
+
+const DEFAULT_FONT_ID_BY_STYLE: Record<ThumbnailFontStyleId, string> = {
+  cinematic_sans: 'gg_montserrat',
+  gold_ice_magic: 'gg_cinzel',
+  royal_gold_laurels: 'gg_cinzel_decorative',
+  medieval_serif: 'gg_cormorant',
+  minimal_clean: 'gg_bebas_neue'
+};
 
 export interface HookTextLayout {
   xPct: number;
@@ -1322,10 +1337,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     'deep_sleep'
   ]);
   const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
+  const [selectedFontEntry, setSelectedFontEntry] = useState<StudioFontEntry>(
+    () => GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0]
+  );
+  const [applyFontToBadges, setApplyFontToBadges] = useState<boolean>(false);
 
   useEffect(() => {
     if (externalFontStyle) {
       setFontStyle(externalFontStyle);
+      const mappedId = DEFAULT_FONT_ID_BY_STYLE[externalFontStyle];
+      const matched = GOOGLE_FONT_PRESETS.find(f => f.id === mappedId);
+      if (matched) setSelectedFontEntry(matched);
       onConsumeExternalFontStyle?.();
     }
   }, [externalFontStyle, onConsumeExternalFontStyle]);
@@ -1478,28 +1500,27 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    if (typeof document !== 'undefined' && 'fonts' in document) {
-      Promise.allSettled([
-        document.fonts.load('900 64px "Montserrat"'),
-        document.fonts.load('900 64px "Cinzel Decorative"'),
-        document.fonts.load('900 64px "Cinzel"'),
-        document.fonts.load('800 64px "Cinzel"'),
-        document.fonts.load('700 64px "Cinzel"'),
-        document.fonts.load('700 64px "Cormorant Garamond"'),
-        document.fonts.load('700 64px "Bebas Neue"'),
-        document.fonts.load('800 24px "Inter"'),
-        document.fonts.load('800 24px "Montserrat"'),
-        document.fonts.load('700 24px "Inter"')
-      ]).then(() => {
-        if (!cancelled) {
-          setFontsReadyTick(t => t + 1);
-        }
-      });
-    }
+    preloadCatalogFonts().then(() => {
+      if (!cancelled) {
+        setFontsReadyTick(t => t + 1);
+      }
+    });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    ensureFontEntryLoaded(selectedFontEntry).then(() => {
+      if (!cancelled) {
+        setFontsReadyTick(t => t + 1);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFontEntry]);
 
   const toggleBadgeA = (badgeId: CinematicBadgeId) => {
     const exists = selectedBadgesA.includes(badgeId);
@@ -1620,7 +1641,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       showRoyalDecor: boolean,
       showMagicDecor: boolean,
       hookLayout: HookTextLayout,
-      variantLabel?: string
+      variantLabel?: string,
+      fontOptions?: { fontEntry?: StudioFontEntry; applyToBadges?: boolean }
     ): HookBoundingBoxPct | null => {
       if (!canvas) return null;
       const ctx = canvas.getContext('2d');
@@ -1717,8 +1739,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       if (badgesToDraw.length > 0) {
         const badgeFontPx = 13.5 * scale;
-        const badgeFontFamily = '"Montserrat", "Inter", sans-serif';
-        const badgeFontWeight = '800';
+        const badgeFontFamily =
+          fontOptions?.applyToBadges && fontOptions?.fontEntry
+            ? fontOptions.fontEntry.cssFamily
+            : '"Montserrat", "Inter", sans-serif';
+        const badgeFontWeight =
+          fontOptions?.applyToBadges && fontOptions?.fontEntry
+            ? fontOptions.fontEntry.weight || '800'
+            : '800';
         const baseTrackingPx = 1.4 * scale;
 
         const measureTrackedWidth = (text: string, trackingPx: number): number => {
@@ -1801,6 +1829,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
 
       let returnBox: HookBoundingBoxPct | null = null;
+      const customFamily = fontOptions?.fontEntry?.cssFamily;
+      const customWeight = fontOptions?.fontEntry?.weight || '800';
       ctx.save();
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'center';
@@ -1810,7 +1840,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         let fontSize = 80 * scale * fontScale;
         const maxTextW = w * 0.88;
         const buildFontStr = (fs: number) =>
-          `900 ${Math.max(1, Math.round(fs))}px "Cinzel", "Cinzel Decorative", Georgia, serif`;
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Cinzel", "Cinzel Decorative", Georgia, serif'
+          }`;
 
         ctx.font = buildFontStr(fontSize);
         let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
@@ -2066,7 +2098,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const decorReserve = showRoyalDecor ? 190 * scale * fontScale : 32 * scale;
         const maxTextW = Math.max(160 * scale, w - 120 * scale - decorReserve);
         const buildFontStr = (fs: number) =>
-          `900 ${Math.max(1, Math.round(fs))}px "Cinzel Decorative", "Cinzel", Georgia, serif`;
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Cinzel Decorative", "Cinzel", Georgia, serif'
+          }`;
 
         ctx.font = buildFontStr(fontSize);
         let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
@@ -2148,7 +2182,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         let fontSize = 76 * scale * fontScale;
         const maxTextW = w * 0.88;
         const buildFontStr = (fs: number) =>
-          `700 ${Math.max(1, Math.round(fs))}px "Cormorant Garamond", "Cinzel", Georgia, serif`;
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Cormorant Garamond", "Cinzel", Georgia, serif'
+          }`;
 
         ctx.font = buildFontStr(fontSize);
         let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
@@ -2197,7 +2233,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         let fontSize = 78 * scale * fontScale;
         const maxTextW = w * 0.88;
         const buildFontStr = (fs: number) =>
-          `700 ${Math.max(1, Math.round(fs))}px "Bebas Neue", "Inter", sans-serif`;
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Bebas Neue", "Inter", sans-serif'
+          }`;
 
         ctx.font = buildFontStr(fontSize);
         let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
@@ -2244,7 +2282,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         let fontSize = 72 * scale * fontScale;
         const maxTextW = w * 0.88;
         const buildFontStr = (fs: number) =>
-          `900 ${Math.max(1, Math.round(fs))}px "Montserrat", Impact, "Arial Black", sans-serif`;
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
+          }`;
 
         ctx.font = buildFontStr(fontSize);
         let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
@@ -2295,6 +2335,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   );
 
   const renderAllCanvases = useCallback(() => {
+    const fontOpts = {
+      fontEntry: selectedFontEntry,
+      applyToBadges: applyFontToBadges
+    };
+
     const nextBoxA = drawCoverOnCanvas(
       canvasARef.current,
       imgA,
@@ -2304,7 +2349,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       royalDecorEnabled,
       magicDecorEnabled,
       hookLayoutA,
-      'Обложка A'
+      'Обложка A',
+      fontOpts
     );
     setHookBoxA(prev => {
       if (!prev && !nextBoxA) return prev;
@@ -2330,7 +2376,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       royalDecorEnabled,
       magicDecorEnabled,
       hookLayoutB,
-      'Обложка B'
+      'Обложка B',
+      fontOpts
     );
     setHookBoxB(prev => {
       if (!prev && !nextBoxB) return prev;
@@ -2355,7 +2402,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       fontStyle,
       royalDecorEnabled,
       magicDecorEnabled,
-      hookLayoutA
+      hookLayoutA,
+      undefined,
+      fontOpts
     );
   }, [
     drawCoverOnCanvas,
@@ -2366,6 +2415,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     titleB,
     badgesB,
     fontStyle,
+    selectedFontEntry,
+    applyFontToBadges,
     royalDecorEnabled,
     magicDecorEnabled,
     hookLayoutA,
@@ -2428,7 +2479,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         fontStyle,
         royalDecorEnabled,
         magicDecorEnabled,
-        hookLayoutA
+        hookLayoutA,
+        undefined,
+        { fontEntry: selectedFontEntry, applyToBadges: applyFontToBadges }
       );
       const link = document.createElement('a');
       link.download = `thumbnail_4k_${idx + 1}.png`;
@@ -2847,6 +2900,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
     offscreen.height = 2160;
+    const fontOpts = {
+      fontEntry: selectedFontEntry,
+      applyToBadges: applyFontToBadges
+    };
     if (slot === 'A') {
       drawCoverOnCanvas(
         offscreen,
@@ -2856,7 +2913,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         fontStyle,
         royalDecorEnabled,
         magicDecorEnabled,
-        hookLayoutA
+        hookLayoutA,
+        undefined,
+        fontOpts
       );
     } else {
       drawCoverOnCanvas(
@@ -2867,7 +2926,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         fontStyle,
         royalDecorEnabled,
         magicDecorEnabled,
-        hookLayoutB
+        hookLayoutB,
+        undefined,
+        fontOpts
       );
     }
     const link = document.createElement('a');
@@ -3244,7 +3305,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </button>
           </div>
 
-          {/* Стиль шрифта и декоративные эффекты (современные пилюли-переключатели с янтарно-золотым акцентом) */}
+          {/* Компактный селектор шрифтов (CapCut-Style) + шейдеры заголовка */}
           <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
             <div className="flex items-center justify-between gap-2">
               <label
@@ -3252,12 +3313,36 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2"
               >
                 <Type className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Стиль шрифта заголовка</span>
+                <span>Шрифт и эффект заголовка</span>
               </label>
               <span className="text-[10px] font-mono text-amber-300/90 bg-amber-500/10 border border-amber-400/25 px-2 py-0.5 rounded-full">
                 3840×2160 Canvas
               </span>
             </div>
+
+            {/* Компактное выпадающее окно выбора шрифта (Кино/Игры 25+ • ИИ-подбор • Google Fonts • Свой .ttf/.otf/.woff2) */}
+            <CompactFontSelector
+              selectedFontId={selectedFontEntry.id}
+              onSelectFont={entry => {
+                setSelectedFontEntry(entry);
+                if (entry.source === 'custom') {
+                  setApplyFontToBadges(true);
+                }
+              }}
+              onFontLoaded={() => setFontsReadyTick(t => t + 1)}
+              onNotify={onNotify}
+              accentTone="amber"
+            />
+
+            <label className="flex items-center gap-2 text-[11px] text-white/75 cursor-pointer select-none pt-0.5">
+              <input
+                type="checkbox"
+                checked={applyFontToBadges}
+                onChange={e => setApplyFontToBadges(e.target.checked)}
+                className="accent-amber-400 rounded cursor-pointer"
+              />
+              <span>Применять выбранный шрифт также к верхним бейджам</span>
+            </label>
 
             {/* Скрытый синхронизированный select для обратной совместимости */}
             <select
@@ -3265,7 +3350,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               value={fontStyle}
               onChange={e => setFontStyle(e.target.value as ThumbnailFontStyleId)}
               className="sr-only"
-              aria-label="Шрифт и декор заголовка"
+              aria-label="Эффект и декор заголовка"
             >
               {FONT_STYLE_OPTIONS.map(opt => (
                 <option key={opt.id} value={opt.id}>
@@ -3274,39 +3359,55 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               ))}
             </select>
 
-            {/* Интерактивные пилюли-переключатели стилей шрифта со скользящим индикатором */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {FONT_STYLE_OPTIONS.map(opt => {
-                const isSelected = fontStyle === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setFontStyle(opt.id)}
-                    className={`relative min-h-[44px] px-3 py-2 rounded-xl text-left text-xs font-bold flex items-center justify-between gap-2 cursor-pointer overflow-hidden border ${
-                      isSelected
-                        ? 'text-slate-950 border-amber-300/60 shadow-[0_8px_24px_-6px_rgba(245,158,11,0.45)]'
-                        : 'bg-[#080c14]/75 border-white/[0.08] text-white/75 hover:text-white hover:border-white/20'
-                    }`}
-                  >
-                    {isSelected && (
-                      <motion.div
-                        layoutId="activeThumbFontPill"
-                        className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 -z-0"
-                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                      />
-                    )}
-                    <span className="relative z-10 truncate">{opt.label}</span>
-                    {opt.id === 'gold_ice_magic' && (
-                      <Sparkles
-                        className={`relative z-10 w-3.5 h-3.5 shrink-0 ${
-                          isSelected ? 'text-slate-950' : 'text-amber-400'
-                        }`}
-                      />
-                    )}
-                  </button>
-                );
-              })}
+            {/* Компактная строка визуальных эффектов/градиентов для выбранного шрифта */}
+            <div className="space-y-1.5 pt-1 border-t border-white/[0.07]">
+              <span className="text-[10px] text-white/50 uppercase font-semibold tracking-wider block">
+                Визуальный стиль текста (шейдер / декор):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {FONT_STYLE_OPTIONS.map(opt => {
+                  const isSelected = fontStyle === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setFontStyle(opt.id);
+                        const defaultFontId = DEFAULT_FONT_ID_BY_STYLE[opt.id];
+                        const defaultEntry = GOOGLE_FONT_PRESETS.find(f => f.id === defaultFontId);
+                        if (
+                          defaultEntry &&
+                          selectedFontEntry.source === 'google' &&
+                          Object.values(DEFAULT_FONT_ID_BY_STYLE).includes(selectedFontEntry.id)
+                        ) {
+                          setSelectedFontEntry(defaultEntry);
+                        }
+                      }}
+                      className={`relative min-h-[34px] px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer overflow-hidden border transition ${
+                        isSelected
+                          ? 'text-slate-950 border-amber-300/60 shadow-[0_6px_18px_-6px_rgba(245,158,11,0.45)]'
+                          : 'bg-[#080c14]/75 border-white/[0.08] text-white/75 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      {isSelected && (
+                        <motion.div
+                          layoutId="activeThumbFontPill"
+                          className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 -z-0"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                        />
+                      )}
+                      {opt.id === 'gold_ice_magic' && (
+                        <Sparkles
+                          className={`relative z-10 w-3 h-3 shrink-0 ${
+                            isSelected ? 'text-slate-950' : 'text-amber-400'
+                          }`}
+                        />
+                      )}
+                      <span className="relative z-10 whitespace-nowrap">{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <p className="text-[11px] text-white/55 leading-relaxed">
@@ -3317,7 +3418,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setMagicDecorEnabled(prev => !prev)}
-                className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
+                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                   magicDecorEnabled
                     ? 'bg-gradient-to-r from-amber-500/20 via-sky-500/20 to-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]'
                     : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
@@ -3337,7 +3438,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setRoyalDecorEnabled(prev => !prev)}
-                className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
+                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
                   royalDecorEnabled
                     ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
                     : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'

@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { motion, Reorder, useDragControls } from 'motion/react';
 import {
   Clapperboard,
   FolderUp,
@@ -22,10 +23,13 @@ import {
   AlertTriangle,
   Subtitles,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Eye,
+  GripVertical
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
+import { AnimatedNumber, AnimatedDurationText } from './MotionMetrics';
 import {
   LiveTerminal,
   TerminalLogEntry,
@@ -302,6 +306,278 @@ const CINEMATIC_OVERLAY_PRESETS: Array<{
     desc: 'Тёплое анаморфное свечение свечей и ламп (Halation & Bloom)'
   }
 ];
+
+const sceneStableKeyMap = new WeakMap<NarrativeSceneItem, string>();
+let sceneRowSeq = 1;
+
+const getSceneRowKey = (scene: NarrativeSceneItem): string => {
+  let key = sceneStableKeyMap.get(scene);
+  if (!key) {
+    key = `scene_row_${sceneRowSeq++}`;
+    sceneStableKeyMap.set(scene, key);
+  }
+  return key;
+};
+
+const transferSceneKey = (
+  fromScene: NarrativeSceneItem,
+  toScene: NarrativeSceneItem
+): NarrativeSceneItem => {
+  const key = getSceneRowKey(fromScene);
+  sceneStableKeyMap.set(toScene, key);
+  return toScene;
+};
+
+interface DraggableSceneRowProps {
+  rowKey: string;
+  sc: NarrativeSceneItem;
+  idx: number;
+  canDrag: boolean;
+  updateScene: (idx: number, patch: Partial<NarrativeSceneItem>) => void;
+  removeScene: (idx: number) => void;
+  onCopyPrompt: (idx: number, prompt: string) => void;
+  onDragEndNotify: () => void;
+}
+
+const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
+  rowKey,
+  sc,
+  idx,
+  canDrag,
+  updateScene,
+  removeScene,
+  onCopyPrompt,
+  onDragEndNotify
+}) => {
+  const dragControls = useDragControls();
+  const hasFile = Boolean(sc.file_name.trim());
+  const isFlagged = Boolean(sc.needs_revision);
+
+  const rowClassName = `grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition-colors ${
+    isFlagged
+      ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-2 border-l-rose-500'
+      : hasFile
+      ? 'bg-indigo-950/15 hover:bg-indigo-950/30'
+      : 'bg-[#0d1320] hover:bg-slate-900/80'
+  }`;
+
+  const rowCells = (
+    <>
+      {/* 1. Drag Handle (⋮⋮), индекс, scene_id и вектор камеры */}
+      <div className="col-span-2 flex items-center gap-1 min-w-0">
+        <button
+          type="button"
+          onPointerDown={e => {
+            if (!canDrag) return;
+            e.preventDefault();
+            dragControls.start(e);
+          }}
+          disabled={!canDrag}
+          title={
+            canDrag
+              ? 'Потяните ⋮⋮, чтобы изменить порядок сцены на таймлайне'
+              : 'Очистите поиск, чтобы перетаскивать сцены'
+          }
+          aria-label={`Перетащить сцену #${idx + 1}`}
+          className={`shrink-0 p-1 rounded transition touch-none ${
+            canDrag
+              ? 'text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] cursor-grab active:cursor-grabbing'
+              : 'text-slate-700 cursor-not-allowed'
+          }`}
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+
+        <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-1.5 py-0.5 rounded shrink-0 tabular-nums">
+          #{idx + 1}
+        </span>
+        <input
+          type="text"
+          value={sc.scene_id}
+          onChange={e => updateScene(idx, { scene_id: e.target.value })}
+          className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 outline-none focus:border-indigo-400"
+        />
+        <select
+          value={sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length]}
+          onChange={e =>
+            updateScene(idx, {
+              camera_movement: e.target.value as CameraVectorType
+            })
+          }
+          title="Вектор движения камеры (camera_movement)"
+          className="bg-slate-900 border border-indigo-500/40 rounded px-1 py-1 text-[10px] font-mono text-indigo-300 outline-none shrink-0"
+        >
+          <option value="zoom_in">zoom_in</option>
+          <option value="zoom_out">zoom_out</option>
+          <option value="pan_left">pan_left</option>
+          <option value="pan_right">pan_right</option>
+        </select>
+      </div>
+
+      {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
+      <div className="col-span-3 flex items-center gap-1.5 min-w-0">
+        <input
+          type="text"
+          value={sc.file_name}
+          placeholder={
+            sc.ai_video_prompt
+              ? `Промт: ${sc.ai_video_prompt.slice(0, 32)}...`
+              : 'Имя файла (JSON / Drag&Drop)'
+          }
+          title={
+            sc.ai_video_prompt
+              ? `AI Prompt: ${sc.ai_video_prompt}${sc.sfx ? ` | SFX: ${sc.sfx}` : ''}`
+              : undefined
+          }
+          onChange={e => updateScene(idx, { file_name: e.target.value })}
+          className="w-full bg-slate-900 border border-slate-700/80 rounded px-2 py-1 text-[11px] font-mono text-amber-300 outline-none focus:border-amber-400"
+        />
+        {sc.ai_video_prompt && (
+          <button
+            type="button"
+            onClick={() => onCopyPrompt(idx, sc.ai_video_prompt || '')}
+            title={`Скопировать AI-промт: ${sc.ai_video_prompt}`}
+            className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40 text-[10px] font-mono text-indigo-200 hover:bg-indigo-500/35 cursor-pointer"
+          >
+            AI
+          </button>
+        )}
+        {hasFile && (
+          <span title="Имя файла назначено" className="shrink-0 flex items-center">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          </span>
+        )}
+      </div>
+
+      {/* 3. Старт (start_time) и длительность (duration) */}
+      <div className="col-span-2 flex items-center gap-1 tabular-nums">
+        <input
+          type="text"
+          value={String(sc.start_time)}
+          onChange={e => updateScene(idx, { start_time: e.target.value })}
+          className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-sky-300 text-center outline-none"
+          title="start_time"
+        />
+        <input
+          type="number"
+          min={0.5}
+          max={600}
+          step={0.5}
+          value={sc.duration}
+          onChange={e =>
+            updateScene(idx, {
+              duration: Math.max(0.5, Number(e.target.value) || 6)
+            })
+          }
+          className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-emerald-400 font-bold text-center outline-none"
+          title="duration (сек)"
+        />
+      </div>
+
+      {/* 4. Переход (transition) + Титр (text_overlay) */}
+      <div className="col-span-2 flex items-center gap-1 min-w-0">
+        <select
+          value={sc.transition.type}
+          onChange={e => {
+            const t = e.target.value as NarrativeSceneItem['transition']['type'];
+            updateScene(idx, {
+              transition: {
+                type: t,
+                duration_sec:
+                  t === 'cut' || t === 'none'
+                    ? 0
+                    : sc.transition.duration_sec || 0.8
+              }
+            });
+          }}
+          className="w-20 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none shrink-0"
+        >
+          <option value="crossfade">xfade</option>
+          <option value="dissolve">dissolve</option>
+          <option value="fade">fade</option>
+          <option value="cut">cut</option>
+        </select>
+        <input
+          type="text"
+          value={sc.text_overlay}
+          placeholder="Титр..."
+          onChange={e => updateScene(idx, { text_overlay: e.target.value })}
+          className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
+        />
+      </div>
+
+      {/* 5. Точечная пометка сцен на пересборку («🔄 На пересборку» + заметка + удаление) */}
+      <div className="col-span-3 flex items-center gap-1 min-w-0">
+        <button
+          type="button"
+          onClick={() => updateScene(idx, { needs_revision: !sc.needs_revision })}
+          className={`shrink-0 px-2 py-1 rounded text-[10px] font-bold transition cursor-pointer border ${
+            isFlagged
+              ? 'bg-rose-500 text-slate-950 border-rose-400 shadow-sm'
+              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-700/80'
+          }`}
+          title="Пометить сцену на точечную пересборку в Patch-манифест"
+        >
+          🔄 {isFlagged ? 'В патче' : 'На пересборку'}
+        </button>
+        <input
+          type="text"
+          value={sc.revision_note || ''}
+          placeholder="Заметка (сменить ракурс, зум...)"
+          onChange={e =>
+            updateScene(idx, {
+              revision_note: e.target.value,
+              needs_revision: Boolean(e.target.value.trim()) || sc.needs_revision
+            })
+          }
+          className={`w-full bg-slate-900 border rounded px-1.5 py-1 text-[11px] outline-none ${
+            isFlagged
+              ? 'border-rose-400/60 text-rose-200 focus:border-rose-400'
+              : 'border-slate-700/80 text-slate-300 focus:border-indigo-400'
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => removeScene(idx)}
+          className="text-slate-500 hover:text-rose-400 p-1 rounded cursor-pointer shrink-0"
+          title="Удалить сцену"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </>
+  );
+
+  if (!canDrag) {
+    return (
+      <div style={{ height: `${ROW_HEIGHT}px` }} className={rowClassName}>
+        {rowCells}
+      </div>
+    );
+  }
+
+  return (
+    <Reorder.Item
+      value={rowKey}
+      dragListener={false}
+      dragControls={dragControls}
+      layout="position"
+      transition={{ type: 'spring', stiffness: 440, damping: 32 }}
+      whileDrag={{
+        scale: 1.01,
+        zIndex: 30,
+        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.72)',
+        backgroundColor: 'rgba(30, 41, 59, 0.96)'
+      }}
+      onDragEnd={onDragEndNotify}
+      as="div"
+      style={{ height: `${ROW_HEIGHT}px` }}
+      className={`${rowClassName} select-none`}
+    >
+      {rowCells}
+    </Reorder.Item>
+  );
+};
 
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ghToken,
@@ -664,18 +940,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const scenarioJsonInputRef = useRef<HTMLInputElement | null>(null);
   const masterAudioInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Пересчет start_time по цепочке длительностей сцен
-  const recalculateStartTimes = (list: NarrativeSceneItem[]): NarrativeSceneItem[] => {
+  // Пересчет start_time по цепочке длительностей сцен (с сохранением стабильного WeakMap-ключа строки)
+  const recalculateStartTimes = (
+    list: NarrativeSceneItem[],
+    renumberSequentialIds = false
+  ): NarrativeSceneItem[] => {
     let cursorSec = 0;
     return list.map((item, idx) => {
       const startStr = formatTimecode(cursorSec);
       const dur = Math.max(0.5, Number(item.duration) || 6);
       cursorSec += dur;
-      return {
+      const shouldRenumberId =
+        renumberSequentialIds &&
+        (!item.scene_id.trim() || /^(?:scene|sc)_?\d+$/i.test(item.scene_id.trim()));
+      const nextItem: NarrativeSceneItem = {
         ...item,
         scene_index: idx + 1,
+        ...(shouldRenumberId
+          ? { scene_id: `scene_${String(idx + 1).padStart(3, '0')}` }
+          : {}),
         start_time: startStr
       };
+      return transferSceneKey(item, nextItem);
     });
   };
 
@@ -1068,9 +1354,34 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     e.target.value = '';
   };
 
+  const didReorderRef = useRef<boolean>(false);
+
+  const sceneKeys = useMemo(() => narrativeScenes.map(getSceneRowKey), [narrativeScenes]);
+
+  const handleReorderScenesByKeys = (nextKeys: string[]) => {
+    didReorderRef.current = true;
+    setNarrativeScenes(prev => {
+      const keyToScene = new Map<string, NarrativeSceneItem>();
+      prev.forEach(sc => keyToScene.set(getSceneRowKey(sc), sc));
+      const reordered = nextKeys
+        .map(k => keyToScene.get(k))
+        .filter((sc): sc is NarrativeSceneItem => Boolean(sc));
+      if (reordered.length !== prev.length) return prev;
+      return recalculateStartTimes(reordered, true);
+    });
+  };
+
+  const handleSceneDragEndNotify = () => {
+    if (!didReorderRef.current) return;
+    didReorderRef.current = false;
+    onNotify('🔄 Порядок сцен обновлён — таймкоды глав пересчитаны', 'info');
+  };
+
   const updateScene = (idx: number, patch: Partial<NarrativeSceneItem>) => {
     setNarrativeScenes(prev => {
-      const updated = prev.map((sc, i) => (i === idx ? { ...sc, ...patch } : sc));
+      const updated = prev.map((sc, i) =>
+        i === idx ? transferSceneKey(sc, { ...sc, ...patch }) : sc
+      );
       if (patch.duration !== undefined) {
         return recalculateStartTimes(updated);
       }
@@ -1720,7 +2031,454 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       : `scenes_manifest_${narrativeScenes.length}scenes_${exportSettings.resolution}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    onNotify(`JSON-манифест (${narrativeScenes.length} сцен) экспортирован!`, 'success');
+    onNotify('✅ Манифест (manifest.json) сформирован и готов к отправке', 'success');
+  };
+
+  // Экспорт автономной интерактивной раскадровки (storyboard.html) без внешних зависимостей
+  const handleExportInteractiveStoryboardHtml = () => {
+    const escHtml = (str: string): string =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const safeProjectTitle = projectName.trim() || 'Narrative Movie 4K';
+    const releaseTitle = youtubeSeo?.title?.trim() || safeProjectTitle;
+    const totalDurStr = calcTotalDuration(narrativeScenes);
+
+    const cameraLabelMap: Record<CameraVectorType, { label: string; arrow: string; color: string }> = {
+      zoom_in: { label: 'ZOOM IN • Наезд', arrow: '⊕', color: '#FACC15' },
+      zoom_out: { label: 'ZOOM OUT • Отъезд', arrow: '⊖', color: '#38BDF8' },
+      pan_left: { label: 'PAN LEFT • Панорама ◄', arrow: '◄', color: '#34D399' },
+      pan_right: { label: 'PAN RIGHT • Панорама ►', arrow: '►', color: '#A78BFA' }
+    };
+
+    const sceneTimingMeta: Array<{
+      sc: NarrativeSceneItem;
+      idx: number;
+      startSec: number;
+      endSec: number;
+      startFmt: string;
+      endFmt: string;
+    }> = [];
+
+    let cursorSec = 0;
+    narrativeScenes.forEach((sc, idx) => {
+      const dur = Math.max(0.5, Number(sc.duration) || 6);
+      const isLast = idx === narrativeScenes.length - 1;
+      const overlap =
+        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
+          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
+          : 0;
+      const startSec = cursorSec;
+      const endSec = startSec + dur;
+      sceneTimingMeta.push({
+        sc,
+        idx,
+        startSec,
+        endSec,
+        startFmt: formatTimecode(startSec),
+        endFmt: formatTimecode(endSec)
+      });
+      cursorSec = Math.max(0, endSec - overlap);
+    });
+
+    const totalScenes = narrativeScenes.length;
+    const chapterCount = Math.min(8, Math.max(2, Math.ceil(totalScenes / 3)));
+    const chapterStep = Math.max(1, Math.floor(totalScenes / chapterCount));
+    const chaptersNav: Array<{ timecode: string; title: string; anchorId: string }> = [];
+    sceneTimingMeta.forEach((item, idx) => {
+      if (idx === 0 || idx % chapterStep === 0) {
+        chaptersNav.push({
+          timecode: item.startFmt,
+          title: toEnglishSceneTitle(item.sc, chaptersNav.length),
+          anchorId: `scene-${idx + 1}`
+        });
+      }
+    });
+
+    const buildInlineScenePreviewSvg = (
+      sc: NarrativeSceneItem,
+      idx: number,
+      camInfo: { label: string; arrow: string; color: string },
+      startFmt: string
+    ): string => {
+      const huePalette = [
+        ['#0f172a', '#1e1b4b', '#0e7490'],
+        ['#111827', '#1e293b', '#b45309'],
+        ['#090d16', '#1e1b4b', '#4338ca'],
+        ['#0b1320', '#164e63', '#0f766e']
+      ][idx % 4];
+      const promptShort = escHtml(
+        (sc.prompt_ru || sc.ai_video_prompt || sc.text_overlay || sc.file_name || 'Cinematic Frame').slice(0, 74)
+      );
+      const styleLabel = escHtml((sc.visual_style || 'Historical Storytelling').slice(0, 32));
+      const camVec = sc.camera_movement || 'zoom_in';
+
+      const reticleSvg =
+        camVec === 'zoom_in'
+          ? `<rect x="78" y="34" width="164" height="92" rx="6" fill="none" stroke="${camInfo.color}" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.8"/><path d="M125 80 L195 80 M160 56 L160 104" stroke="${camInfo.color}" stroke-width="1.5" opacity="0.6"/>`
+          : camVec === 'zoom_out'
+          ? `<rect x="34" y="18" width="252" height="144" rx="8" fill="none" stroke="${camInfo.color}" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.75"/><rect x="108" y="54" width="104" height="72" rx="4" fill="none" stroke="${camInfo.color}" stroke-width="1.5" opacity="0.5"/>`
+          : camVec === 'pan_left'
+          ? `<path d="M230 90 L90 90 M112 72 L90 90 L112 108" fill="none" stroke="${camInfo.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`
+          : `<path d="M90 90 L230 90 M208 72 L230 90 L208 108" fill="none" stroke="${camInfo.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`;
+
+      return `<svg viewBox="0 0 320 180" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Scene ${idx + 1}">
+        <defs>
+          <linearGradient id="sg-${idx}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${huePalette[0]}"/>
+            <stop offset="55%" stop-color="${huePalette[1]}"/>
+            <stop offset="100%" stop-color="${huePalette[2]}" stop-opacity="0.65"/>
+          </linearGradient>
+        </defs>
+        <rect width="320" height="180" fill="url(#sg-${idx})"/>
+        <circle cx="268" cy="36" r="46" fill="${camInfo.color}" fill-opacity="0.10"/>
+        ${reticleSvg}
+        <rect x="10" y="10" width="66" height="22" rx="6" fill="rgba(9,13,22,0.85)" stroke="${camInfo.color}" stroke-width="1.2"/>
+        <text x="43" y="25" text-anchor="middle" fill="#F8FAFC" font-family="ui-monospace,monospace" font-size="11" font-weight="700">#${String(idx + 1).padStart(3, '0')}</text>
+        <rect x="236" y="10" width="74" height="22" rx="6" fill="rgba(9,13,22,0.85)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        <text x="273" y="25" text-anchor="middle" fill="#FDE047" font-family="ui-monospace,monospace" font-size="11" font-weight="700">${escHtml(startFmt)}</text>
+        <rect x="10" y="140" width="300" height="30" rx="6" fill="rgba(8,12,20,0.82)"/>
+        <text x="18" y="159" fill="#E2E8F0" font-family="system-ui,sans-serif" font-size="10.5" font-weight="600">${promptShort}</text>
+        <text x="14" y="132" fill="${camInfo.color}" font-family="ui-monospace,monospace" font-size="9.5" font-weight="700">${styleLabel}</text>
+      </svg>`;
+    };
+
+    const sceneCardsHtml = sceneTimingMeta
+      .map(({ sc, idx, startFmt, endFmt }) => {
+        const cam = sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length];
+        const camInfo = cameraLabelMap[cam] || cameraLabelMap.zoom_in;
+        const dur = Math.max(0.5, Number(sc.duration) || 6);
+        const searchIndex = [
+          `#${idx + 1}`,
+          sc.scene_id,
+          sc.file_name,
+          sc.text_overlay,
+          sc.ai_video_prompt || '',
+          sc.prompt_ru || '',
+          cam
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        return `<article id="scene-${idx + 1}" class="scene-card${
+          sc.needs_revision ? ' is-revision' : ''
+        }" data-search="${escHtml(searchIndex)}" data-has-file="${
+          sc.file_name.trim() ? '1' : '0'
+        }" data-revision="${sc.needs_revision ? '1' : '0'}" data-has-text="${
+          sc.text_overlay.trim() ? '1' : '0'
+        }">
+          <div class="scene-thumb">
+            ${buildInlineScenePreviewSvg(sc, idx, camInfo, startFmt)}
+          </div>
+          <div class="scene-body">
+            <div class="scene-top">
+              <div class="scene-badges">
+                <span class="badge badge-idx">#${idx + 1} • ${escHtml(sc.scene_id)}</span>
+                <span class="badge badge-time">${escHtml(startFmt)} → ${escHtml(endFmt)} (${dur}s)</span>
+                <span class="badge badge-cam" style="border-color:${camInfo.color}66;color:${camInfo.color}">${camInfo.arrow} ${camInfo.label}</span>
+                <span class="badge badge-trans">${escHtml(sc.transition.type)} ${sc.transition.duration_sec}s</span>
+              </div>
+              <label class="approve-toggle">
+                <input type="checkbox" data-scene-check="${idx + 1}" />
+                <span>Проверено</span>
+              </label>
+            </div>
+            <div class="scene-file">
+              <span class="lbl">Файл клипа:</span>
+              <code>${escHtml(sc.file_name.trim() || 'Не привязан (ожидает медиа)')}</code>
+            </div>
+            ${
+              sc.text_overlay.trim()
+                ? `<div class="scene-voice">
+                     <span class="lbl">🎙️ Озвучка / Титр:</span>
+                     <p>${escHtml(sc.text_overlay)}</p>
+                   </div>`
+                : ''
+            }
+            ${
+              sc.ai_video_prompt
+                ? `<div class="scene-prompt">
+                     <span class="lbl">🎬 AI Video Prompt:</span>
+                     <p>${escHtml(sc.ai_video_prompt)}</p>
+                   </div>`
+                : ''
+            }
+            ${
+              sc.sfx
+                ? `<div class="scene-meta-line"><span class="lbl">🔊 SFX:</span> ${escHtml(sc.sfx)}</div>`
+                : ''
+            }
+            ${
+              sc.needs_revision
+                ? `<div class="scene-revision">🔄 На пересборку: ${escHtml(
+                    sc.revision_note?.trim() || 'Требует проверки перед рендером'
+                  )}</div>`
+                : ''
+            }
+          </div>
+        </article>`;
+      })
+      .join('\n');
+
+    const htmlDocument = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escHtml(releaseTitle)} — Интерактивная раскадровка (${narrativeScenes.length} сцен)</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080c14;
+      --card: #111827;
+      --card-deep: #090d16;
+      --border: rgba(255,255,255,0.1);
+      --gold: #FACC15;
+      --gold-soft: #FDE047;
+      --cyan: #22D3EE;
+      --emerald: #34D399;
+      --rose: #FB7185;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: radial-gradient(circle at 15% 0%, #1e1b4b 0%, var(--bg) 48%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      line-height: 1.5;
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 16px; }
+    .hero {
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid rgba(250, 204, 21, 0.35);
+      border-radius: 18px;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.55);
+    }
+    .hero-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-soft); }
+    h1 { margin: 4px 0 8px; font-size: clamp(20px, 4vw, 28px); line-height: 1.2; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .stat-pill { background: var(--card-deep); border: 1px solid var(--border); border-radius: 10px; padding: 5px 10px; color: #E2E8F0; }
+    .stat-pill strong { color: var(--gold-soft); }
+    .chapters-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .chapters-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--cyan); margin-bottom: 8px; }
+    .chapters-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ch-link {
+      display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+      background: var(--card-deep); border: 1px solid rgba(34,211,238,0.3); color: #E2E8F0;
+      padding: 5px 10px; border-radius: 9px; font-size: 12px; transition: 0.15s;
+    }
+    .ch-link:hover { border-color: var(--cyan); color: #fff; }
+    .ch-link b { color: var(--gold-soft); font-family: ui-monospace, monospace; }
+    .toolbar {
+      position: sticky; top: 8px; z-index: 20;
+      background: rgba(9, 13, 22, 0.92); backdrop-filter: blur(12px);
+      border: 1px solid var(--border); border-radius: 14px; padding: 12px;
+      margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    .search-input {
+      flex: 1 1 220px; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 9px 12px; font-size: 13px; outline: none;
+    }
+    .search-input:focus { border-color: var(--cyan); }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .f-btn {
+      background: var(--card); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 9px; padding: 7px 11px; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+    .f-btn.active { background: rgba(250,204,21,0.16); border-color: var(--gold); color: var(--gold-soft); }
+    .progress-tag { font-family: ui-monospace, monospace; font-size: 12px; color: var(--emerald); margin-left: auto; }
+    .scenes-grid { display: flex; flex-direction: column; gap: 12px; }
+    .scene-card {
+      display: grid; grid-template-columns: 280px 1fr; gap: 14px;
+      background: rgba(17, 24, 39, 0.86); border: 1px solid var(--border);
+      border-radius: 16px; padding: 12px; transition: border-color 0.2s;
+    }
+    .scene-card.is-revision { border-color: rgba(251,113,133,0.6); background: rgba(76, 5, 25, 0.22); }
+    .scene-card.is-checked { border-color: rgba(52,211,153,0.55); }
+    .scene-thumb { aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: #090d16; }
+    .scene-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .scene-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+    .scene-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .badge {
+      font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--card-deep);
+    }
+    .badge-idx { color: #C7D2FE; border-color: rgba(129,140,248,0.45); }
+    .badge-time { color: var(--emerald); border-color: rgba(52,211,153,0.35); }
+    .badge-trans { color: var(--muted); }
+    .approve-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--emerald); cursor: pointer; }
+    .scene-file { font-size: 12px; color: var(--muted); word-break: break-all; }
+    .scene-file code { color: #FCD34D; font-family: ui-monospace, monospace; }
+    .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
+    .scene-voice { background: var(--card-deep); border-left: 3px solid var(--gold); border-radius: 8px; padding: 8px 10px; }
+    .scene-voice p, .scene-prompt p { margin: 4px 0 0; font-size: 13.5px; color: #F1F5F9; white-space: pre-wrap; }
+    .scene-prompt { background: rgba(15,23,42,0.7); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+    .scene-prompt p { font-size: 12.5px; color: #CBD5E1; }
+    .scene-meta-line { font-size: 12px; color: #CBD5E1; }
+    .scene-revision { background: rgba(244,63,94,0.16); border: 1px solid rgba(244,63,94,0.45); color: #FECDD3; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+    .script-details { margin-top: 12px; background: var(--card-deep); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .script-details summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--gold-soft); }
+    .script-details pre { margin: 8px 0 0; white-space: pre-wrap; font-family: inherit; font-size: 13px; color: #E2E8F0; max-height: 260px; overflow-y: auto; }
+    @media (max-width: 760px) {
+      .scene-card { grid-template-columns: 1fr; }
+      .wrap { padding: 10px; }
+      .progress-tag { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">AETHER COMBINE • OFFLINE STORYBOARD</div>
+          <h1>${escHtml(releaseTitle)}</h1>
+        </div>
+        <div class="stats">
+          <span class="stat-pill">Сцен: <strong>${narrativeScenes.length}</strong></span>
+          <span class="stat-pill">Длительность: <strong>${escHtml(totalDurStr)}</strong></span>
+          <span class="stat-pill">Ритм: <strong>${escHtml(rhythmProfile)}</strong></span>
+          <span class="stat-pill">Рендер: <strong>${escHtml(exportSettings.resolution.toUpperCase())} • ${exportSettings.fps}fps</strong></span>
+        </div>
+      </div>
+
+      ${
+        chaptersNav.length > 0
+          ? `<div class="chapters-box">
+               <div class="chapters-title">⏱️ Навигация по главам и таймкодам</div>
+               <div class="chapters-list">
+                 ${chaptersNav
+                   .map(
+                     ch =>
+                       `<a class="ch-link" href="#${ch.anchorId}"><b>${escHtml(
+                         ch.timecode
+                       )}</b><span>${escHtml(ch.title)}</span></a>`
+                   )
+                   .join('')}
+               </div>
+             </div>`
+          : ''
+      }
+
+      ${
+        transferredScript.trim()
+          ? `<details class="script-details">
+               <summary>📜 Полный текст сценария (из VerbaFlow)</summary>
+               <pre>${escHtml(transferredScript.trim())}</pre>
+             </details>`
+          : ''
+      }
+    </header>
+
+    <div class="toolbar">
+      <input id="sbSearch" class="search-input" type="search" placeholder="Поиск по номеру, тексту, промпту, вектору камеры..." />
+      <div class="filter-row">
+        <button class="f-btn active" data-filter="all" type="button">Все (${narrativeScenes.length})</button>
+        <button class="f-btn" data-filter="text" type="button">С текстом</button>
+        <button class="f-btn" data-filter="file" type="button">С файлом</button>
+        <button class="f-btn" data-filter="revision" type="button">Пересборка</button>
+      </div>
+      <span id="sbProgress" class="progress-tag">Проверено: 0/${narrativeScenes.length}</span>
+    </div>
+
+    <main id="sbList" class="scenes-grid">
+      ${sceneCardsHtml}
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var cards = Array.prototype.slice.call(document.querySelectorAll('.scene-card'));
+      var searchEl = document.getElementById('sbSearch');
+      var btns = Array.prototype.slice.call(document.querySelectorAll('.f-btn'));
+      var progressEl = document.getElementById('sbProgress');
+      var activeFilter = 'all';
+      var storageKey = 'aether_sb_' + ${JSON.stringify(safeProjectTitle.slice(0, 40))};
+      var checkedMap = {};
+      try { checkedMap = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (e) {}
+
+      function updateProgress() {
+        var count = 0;
+        cards.forEach(function (card) {
+          var cb = card.querySelector('input[type="checkbox"]');
+          if (cb && cb.checked) count++;
+        });
+        if (progressEl) progressEl.textContent = 'Проверено: ' + count + '/' + cards.length;
+      }
+
+      cards.forEach(function (card) {
+        var cb = card.querySelector('input[type="checkbox"]');
+        if (!cb) return;
+        var key = cb.getAttribute('data-scene-check');
+        if (key && checkedMap[key]) {
+          cb.checked = true;
+          card.classList.add('is-checked');
+        }
+        cb.addEventListener('change', function () {
+          card.classList.toggle('is-checked', cb.checked);
+          if (key) {
+            checkedMap[key] = cb.checked;
+            try { localStorage.setItem(storageKey, JSON.stringify(checkedMap)); } catch (e) {}
+          }
+          updateProgress();
+        });
+      });
+
+      function applyFilters() {
+        var q = (searchEl ? searchEl.value : '').trim().toLowerCase();
+        cards.forEach(function (card) {
+          var hay = card.getAttribute('data-search') || '';
+          var matchSearch = !q || hay.indexOf(q) !== -1;
+          var matchFilter =
+            activeFilter === 'all' ||
+            (activeFilter === 'file' && card.getAttribute('data-has-file') === '1') ||
+            (activeFilter === 'revision' && card.getAttribute('data-revision') === '1') ||
+            (activeFilter === 'text' && card.getAttribute('data-has-text') === '1');
+          card.style.display = matchSearch && matchFilter ? '' : 'none';
+        });
+      }
+
+      if (searchEl) searchEl.addEventListener('input', applyFilters);
+      btns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btns.forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          activeFilter = btn.getAttribute('data-filter') || 'all';
+          applyFilters();
+        });
+      });
+      updateProgress();
+    })();
+  </script>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlDocument], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const slug = safeProjectTitle
+      .toLowerCase()
+      .replace(/[^a-zа-яё0-9]+/gi, '_')
+      .replace(/^_+|_+$/g, '') || 'project';
+    a.download = `storyboard_${slug}_${narrativeScenes.length}scenes.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify(
+      `👁️ Интерактивная раскадровка (.html, ${narrativeScenes.length} сцен) скачана — работает 100% оффлайн с любого телефона!`,
+      'success'
+    );
   };
 
   const isRunnerBusy = terminalStatus === 'running' || terminalStatus === 'queued';
@@ -1861,6 +2619,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-indigo-400" /> Экспорт JSON
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportInteractiveStoryboardHtml}
+            className="bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/50 text-cyan-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+            title="Скачать автономный однофайловый HTML для вычитки сценария, камер и сцен с телефона перед 4K-рендером"
+          >
+            <Eye className="w-3.5 h-3.5 text-cyan-300" /> 👁️ Скачать интерактивную раскадровку (.html)
           </button>
         </div>
       </div>
@@ -2671,13 +3438,47 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             </div>
           )}
 
-          <div className="bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-            <span className="text-slate-400">
-              Активный профиль: <strong className="text-emerald-400">{lastAppliedDnaSummary}</strong>
-            </span>
-            <span className="text-indigo-300 tabular-nums">
-              Сцен: {narrativeScenes.length} • Хронометраж: {formatTimecode(totalNarrativeDurationSec)}
-            </span>
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 space-y-2 text-[11px] font-mono">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-slate-400">
+                Активный профиль: <strong className="text-emerald-400">{lastAppliedDnaSummary}</strong>
+              </span>
+              <span className="text-indigo-300 tabular-nums">
+                Сцен: <AnimatedNumber value={narrativeScenes.length} /> • Хронометраж:{' '}
+                <AnimatedDurationText totalSeconds={totalNarrativeDurationSec} />
+              </span>
+            </div>
+
+            {/* Живая визуальная полоса Ритм-карты (плавно анимируется при перетаскивании сцен) */}
+            {narrativeScenes.length > 0 && (
+              <div
+                className="flex items-center gap-0.5 h-3 w-full rounded-md bg-[#090D16] p-0.5 overflow-hidden border border-white/[0.06]"
+                title="Визуальная Ритм-карта последовательности сцен и векторов камеры"
+              >
+                {narrativeScenes.slice(0, 80).map((sc, idx) => {
+                  const dur = Math.max(0.5, Number(sc.duration) || 6);
+                  const cam = sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length];
+                  const colorClass =
+                    cam === 'zoom_in'
+                      ? 'bg-amber-400/80'
+                      : cam === 'zoom_out'
+                      ? 'bg-sky-400/80'
+                      : cam === 'pan_left'
+                      ? 'bg-emerald-400/80'
+                      : 'bg-indigo-400/80';
+                  return (
+                    <motion.div
+                      key={getSceneRowKey(sc)}
+                      layout
+                      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                      style={{ flexGrow: dur }}
+                      className={`h-full rounded-[2px] min-w-[2px] ${colorClass}`}
+                      title={`#${idx + 1} ${sc.scene_id} (${sc.start_time}) • ${dur}с • ${cam}`}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -2750,21 +3551,30 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               className="text-xs font-mono bg-slate-900/95 border border-indigo-500/40 text-slate-200 px-3 py-1.5 rounded-xl inline-flex flex-wrap items-center gap-2 shadow-sm tabular-nums"
             >
               <span>
-                Всего сцен: <strong className="text-indigo-300">{narrativeScenes.length}</strong>
+                Всего сцен:{' '}
+                <strong className="text-indigo-300">
+                  <AnimatedNumber value={narrativeScenes.length} />
+                </strong>
                 <span className="text-slate-500 text-[10px] ml-1">
-                  (заполнено: {filledScenesCount})
+                  (заполнено: <AnimatedNumber value={filledScenesCount} />)
                 </span>
               </span>
               <span className="text-slate-600">|</span>
               <span>
                 Расчетный хронометраж:{' '}
-                <strong className="text-amber-300">{calcTotalDuration(narrativeScenes)}</strong>
+                <strong className="text-amber-300">
+                  <AnimatedDurationText totalSeconds={totalNarrativeDurationSec} />
+                </strong>{' '}
+                <span className="text-slate-400 text-[10px]">
+                  ({(totalNarrativeDurationSec / 60).toFixed(1)} мин /{' '}
+                  <AnimatedNumber value={Math.round(totalNarrativeDurationSec)} /> сек)
+                </span>
               </span>
               <span className="text-slate-600">|</span>
               <span>
                 На пересборку:{' '}
                 <strong className={flaggedRevisionScenes.length > 0 ? 'text-rose-400' : 'text-slate-400'}>
-                  {flaggedRevisionScenes.length}
+                  <AnimatedNumber value={flaggedRevisionScenes.length} />
                 </strong>
               </span>
               <span className="text-slate-600">|</span>
@@ -2887,210 +3697,83 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           <span className="text-[11px] font-mono text-slate-400 tabular-nums">
-            Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows} (Виртуализация DOM активна)
+            {!searchQuery.trim() && narrativeScenes.length <= 220 ? (
+              <span>⋮⋮ Потяните сцену за ручку для смены порядка ({totalRows} сцен)</span>
+            ) : (
+              <span>
+                Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows} (Виртуализация DOM активна)
+              </span>
+            )}
           </span>
         </div>
 
         {/* Шапка колонок компактной строчной таблицы */}
         <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-t-xl text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          <div className="col-span-2">№ / ID / Камера</div>
+          <div className="col-span-2">⋮⋮ № / ID / Камера</div>
           <div className="col-span-3">Видеофайл (file_name)</div>
           <div className="col-span-2 text-center">Старт / Длит. (с)</div>
           <div className="col-span-2">Переход / Титр</div>
           <div className="col-span-3">🔄 На пересборку &amp; Заметка</div>
         </div>
 
-        {/* Виртуализированный контейнер прокрутки компактной строчной сетки */}
+        {/* Таймлайн сцен с Drag-to-Reorder (Motion Reorder.Group) или виртуализацией при поиске / >220 сцен */}
         <div
           ref={scrollContainerRef}
           onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
           style={{ height: `${VIEWPORT_HEIGHT}px` }}
           className="overflow-y-auto custom-scroll border-x border-b border-slate-800 rounded-b-xl bg-[#090d16]"
         >
-          <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
-            {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
-              const hasFile = Boolean(sc.file_name.trim());
-              const isFlagged = Boolean(sc.needs_revision);
-              return (
-                <div
-                  key={sc.scene_id + '-' + idx}
-                  style={{ height: `${ROW_HEIGHT}px` }}
-                  className={`grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition ${
-                    isFlagged
-                      ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-2 border-l-rose-500'
-                      : hasFile
-                      ? 'bg-indigo-950/15 hover:bg-indigo-950/30'
-                      : 'bg-[#0d1320] hover:bg-slate-900/80'
-                  }`}
-                >
-                  {/* 1. Индекс, scene_id и вектор камеры */}
-                  <div className="col-span-2 flex items-center gap-1 min-w-0">
-                    <span className="text-[10px] font-mono font-bold bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 px-1.5 py-0.5 rounded shrink-0 tabular-nums">
-                      #{idx + 1}
-                    </span>
-                    <input
-                      type="text"
-                      value={sc.scene_id}
-                      onChange={e => updateScene(idx, { scene_id: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 outline-none focus:border-indigo-400"
-                    />
-                    <select
-                      value={sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length]}
-                      onChange={e =>
-                        updateScene(idx, {
-                          camera_movement: e.target.value as CameraVectorType
-                        })
-                      }
-                      title="Вектор движения камеры (camera_movement)"
-                      className="bg-slate-900 border border-indigo-500/40 rounded px-1 py-1 text-[10px] font-mono text-indigo-300 outline-none shrink-0"
-                    >
-                      <option value="zoom_in">zoom_in</option>
-                      <option value="zoom_out">zoom_out</option>
-                      <option value="pan_left">pan_left</option>
-                      <option value="pan_right">pan_right</option>
-                    </select>
-                  </div>
-
-                  {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
-                  <div className="col-span-3 flex items-center gap-1.5 min-w-0">
-                    <input
-                      type="text"
-                      value={sc.file_name}
-                      placeholder={
-                        sc.ai_video_prompt
-                          ? `Промт: ${sc.ai_video_prompt.slice(0, 32)}...`
-                          : 'Имя файла (JSON / Drag&Drop)'
-                      }
-                      title={
-                        sc.ai_video_prompt
-                          ? `AI Prompt: ${sc.ai_video_prompt}${sc.sfx ? ` | SFX: ${sc.sfx}` : ''}`
-                          : undefined
-                      }
-                      onChange={e => updateScene(idx, { file_name: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-2 py-1 text-[11px] font-mono text-amber-300 outline-none focus:border-amber-400"
-                    />
-                    {sc.ai_video_prompt && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(sc.ai_video_prompt || '');
-                          onNotify(`Промт сцены #${idx + 1} скопирован!`, 'success');
-                        }}
-                        title={`Скопировать AI-промт: ${sc.ai_video_prompt}`}
-                        className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40 text-[10px] font-mono text-indigo-200 hover:bg-indigo-500/35 cursor-pointer"
-                      >
-                        AI
-                      </button>
-                    )}
-                    {hasFile && (
-                      <span title="Имя файла назначено" className="shrink-0 flex items-center">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      </span>
-                    )}
-                  </div>
-
-                  {/* 3. Старт (start_time) и длительность (duration) */}
-                  <div className="col-span-2 flex items-center gap-1 tabular-nums">
-                    <input
-                      type="text"
-                      value={String(sc.start_time)}
-                      onChange={e => updateScene(idx, { start_time: e.target.value })}
-                      className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-sky-300 text-center outline-none"
-                      title="start_time"
-                    />
-                    <input
-                      type="number"
-                      min={0.5}
-                      max={600}
-                      step={0.5}
-                      value={sc.duration}
-                      onChange={e =>
-                        updateScene(idx, {
-                          duration: Math.max(0.5, Number(e.target.value) || 6)
-                        })
-                      }
-                      className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-emerald-400 font-bold text-center outline-none"
-                      title="duration (сек)"
-                    />
-                  </div>
-
-                  {/* 4. Переход (transition) + Титр (text_overlay) */}
-                  <div className="col-span-2 flex items-center gap-1 min-w-0">
-                    <select
-                      value={sc.transition.type}
-                      onChange={e => {
-                        const t = e.target.value as NarrativeSceneItem['transition']['type'];
-                        updateScene(idx, {
-                          transition: {
-                            type: t,
-                            duration_sec:
-                              t === 'cut' || t === 'none'
-                                ? 0
-                                : sc.transition.duration_sec || 0.8
-                          }
-                        });
-                      }}
-                      className="w-20 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none shrink-0"
-                    >
-                      <option value="crossfade">xfade</option>
-                      <option value="dissolve">dissolve</option>
-                      <option value="fade">fade</option>
-                      <option value="cut">cut</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={sc.text_overlay}
-                      placeholder="Титр..."
-                      onChange={e => updateScene(idx, { text_overlay: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
-                    />
-                  </div>
-
-                  {/* 5. Точечная пометка сцен на пересборку («🔄 На пересборку» + заметка + удаление) */}
-                  <div className="col-span-3 flex items-center gap-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateScene(idx, { needs_revision: !sc.needs_revision })
-                      }
-                      className={`shrink-0 px-2 py-1 rounded text-[10px] font-bold transition cursor-pointer border ${
-                        isFlagged
-                          ? 'bg-rose-500 text-slate-950 border-rose-400 shadow-sm'
-                          : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-700/80'
-                      }`}
-                      title="Пометить сцену на точечную пересборку в Patch-манифест"
-                    >
-                      🔄 {isFlagged ? 'В патче' : 'На пересборку'}
-                    </button>
-                    <input
-                      type="text"
-                      value={sc.revision_note || ''}
-                      placeholder="Заметка (сменить ракурс, зум...)"
-                      onChange={e =>
-                        updateScene(idx, {
-                          revision_note: e.target.value,
-                          needs_revision: Boolean(e.target.value.trim()) || sc.needs_revision
-                        })
-                      }
-                      className={`w-full bg-slate-900 border rounded px-1.5 py-1 text-[11px] outline-none ${
-                        isFlagged
-                          ? 'border-rose-400/60 text-rose-200 focus:border-rose-400'
-                          : 'border-slate-700/80 text-slate-300 focus:border-indigo-400'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeScene(idx)}
-                      className="text-slate-500 hover:text-rose-400 p-1 rounded cursor-pointer shrink-0"
-                      title="Удалить сцену"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {!searchQuery.trim() && narrativeScenes.length <= 220 ? (
+            <Reorder.Group
+              axis="y"
+              values={sceneKeys}
+              onReorder={handleReorderScenesByKeys}
+              as="div"
+              className="divide-y divide-slate-800/70"
+            >
+              {narrativeScenes.map((sc, idx) => {
+                const rowKey = getSceneRowKey(sc);
+                return (
+                  <DraggableSceneRow
+                    key={rowKey}
+                    rowKey={rowKey}
+                    sc={sc}
+                    idx={idx}
+                    canDrag={true}
+                    updateScene={updateScene}
+                    removeScene={removeScene}
+                    onCopyPrompt={(sceneIdx, prompt) => {
+                      navigator.clipboard.writeText(prompt);
+                      onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
+                    }}
+                    onDragEndNotify={handleSceneDragEndNotify}
+                  />
+                );
+              })}
+            </Reorder.Group>
+          ) : (
+            <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
+              {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
+                const rowKey = getSceneRowKey(sc);
+                return (
+                  <DraggableSceneRow
+                    key={rowKey}
+                    rowKey={rowKey}
+                    sc={sc}
+                    idx={idx}
+                    canDrag={false}
+                    updateScene={updateScene}
+                    removeScene={removeScene}
+                    onCopyPrompt={(sceneIdx, prompt) => {
+                      navigator.clipboard.writeText(prompt);
+                      onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
+                    }}
+                    onDragEndNotify={handleSceneDragEndNotify}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -3114,6 +3797,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleExportInteractiveStoryboardHtml}
+              className="flex items-center gap-2 bg-[#111827] hover:bg-slate-800 border border-cyan-400/45 text-cyan-200 font-bold px-4 py-3.5 rounded-xl transition text-xs cursor-pointer"
+            >
+              <Eye className="w-4 h-4 text-cyan-300" />
+              <span>👁️ Раскадровка (.html)</span>
+            </button>
+
             <button
               type="button"
               onClick={startNarrativeScenesRender}
