@@ -289,7 +289,7 @@ export const CompactFontSelector: React.FC<CompactFontSelectorProps> = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 460, damping: 32 }}
-            className={`absolute z-50 mt-1.5 w-full min-w-[300px] rounded-2xl bg-[#0B101C]/95 backdrop-blur-xl border border-white/[0.14] shadow-[0_24px_60px_-10px_rgba(0,0,0,0.9)] overflow-hidden ${
+            className={`absolute z-50 mt-1.5 w-full min-w-0 sm:min-w-[300px] rounded-2xl bg-[#0B101C]/95 backdrop-blur-xl border border-white/[0.14] shadow-[0_24px_60px_-10px_rgba(0,0,0,0.9)] overflow-hidden ${
               align === 'right' ? 'right-0' : 'left-0'
             }`}
           >
@@ -327,7 +327,7 @@ export const CompactFontSelector: React.FC<CompactFontSelectorProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('film_game')}
-                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  className={`min-h-[38px] sm:min-h-[34px] px-2.5 py-1 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
                     activeTab === 'film_game'
                       ? activeTabBg
                       : 'bg-[#131B2E]/65 border-white/[0.08] text-white/60 hover:text-white'
@@ -339,7 +339,7 @@ export const CompactFontSelector: React.FC<CompactFontSelectorProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('google')}
-                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  className={`min-h-[38px] sm:min-h-[34px] px-2.5 py-1 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
                     activeTab === 'google'
                       ? activeTabBg
                       : 'bg-[#131B2E]/65 border-white/[0.08] text-white/60 hover:text-white'
@@ -561,7 +561,7 @@ export const CompactFontSelector: React.FC<CompactFontSelectorProps> = ({
                 type="button"
                 disabled={isUploadingFont}
                 onClick={() => fontFileInputRef.current?.click()}
-                className="w-full min-h-[36px] px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-amber-500/15 border border-white/[0.12] hover:border-amber-400/45 text-[11px] font-bold text-[#f8fafc] hover:text-amber-200 flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+                className="w-full min-h-[40px] sm:min-h-[36px] px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-amber-500/15 border border-white/[0.12] hover:border-amber-400/45 text-[11px] font-bold text-[#f8fafc] hover:text-amber-200 flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
                 <Plus className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>

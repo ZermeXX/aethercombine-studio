@@ -683,7 +683,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   }, [activeReleaseTitle, description, releaseCardTimestamps, tagsString]);
 
   return (
-    <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
+    <div className="bg-[#111622] border border-slate-800 rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
       {/* ШАПКА ВКЛАДКИ «📦 YOUTUBE SEO & УПАКОВКА» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div className="space-y-1">
@@ -701,7 +701,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             type="button"
             onClick={handleGenerateWithGemini}
             disabled={isGenerating}
-            className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+            className="min-h-[42px] bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
             {isGenerating ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
@@ -718,7 +718,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             onClick={() =>
               copyWithToast(releaseCardText, 'release-card', 'Карточка релиза (Title + Description + Timestamps + Tags)')
             }
-            className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-sky-500/20"
+            className="min-h-[42px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-sky-500/20"
           >
             {copiedKey === 'release-card' ? (
               <Check className="w-4 h-4" />
@@ -733,7 +733,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           <button
             type="button"
             onClick={handleDownloadMetadataTxt}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-amber-500/20"
+            className="min-h-[42px] bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-amber-500/20"
           >
             <Download className="w-4 h-4" /> 📥 Скачать metadata.txt
           </button>
@@ -766,7 +766,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 applyTonePresetsLocally(item.id);
                 onNotify(`Тональность SEO переключена на «${item.id}» (US English)`, 'info');
               }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+              className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
                 tone === item.id
                   ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.25)]'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -837,7 +837,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                     onClick={() =>
                       copyWithToast(item.title, `title-${item.id}`, `Заголовок ${item.id}`)
                     }
-                    className="flex-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                    className="min-h-[40px] flex-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
                   >
                     {copiedKey === `title-${item.id}` ? (
                       <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -851,7 +851,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onApplyTitleToThumbnail(item.title)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg text-[11px] cursor-pointer transition"
+                      className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg text-[11px] cursor-pointer transition"
                       title="Передать этот YouTube-заголовок в мокап 4K Превью"
                     >
                       В Превью →
@@ -898,7 +898,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           <button
             type="button"
             onClick={() => copyWithToast(description, 'seo-desc', 'SEO-описание (EN)')}
-            className="w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+            className="min-h-[42px] w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
           >
             {copiedKey === 'seo-desc' ? (
               <Check className="w-4 h-4 text-emerald-400" />
@@ -924,7 +924,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setChapterSourceMode('scenes')}
-                  className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
+                  className={`min-h-[36px] sm:min-h-[28px] px-2.5 py-1 rounded font-semibold cursor-pointer ${
                     chapterSourceMode === 'scenes'
                       ? 'bg-indigo-500/30 text-indigo-200'
                       : 'text-slate-400 hover:text-slate-200'
@@ -935,7 +935,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setChapterSourceMode('loop')}
-                  className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
+                  className={`min-h-[36px] sm:min-h-[28px] px-2.5 py-1 rounded font-semibold cursor-pointer ${
                     chapterSourceMode === 'loop'
                       ? 'bg-amber-500/30 text-amber-200'
                       : 'text-slate-400 hover:text-slate-200'
@@ -959,7 +959,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             onClick={() =>
               copyWithToast(chaptersText, 'seo-chapters', 'Кликабельные главы (Timestamps)')
             }
-            className="w-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+            className="min-h-[42px] w-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
           >
             {copiedKey === 'seo-chapters' ? (
               <Check className="w-4 h-4 text-emerald-400" />
@@ -980,12 +980,12 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
               г) Теги YouTube (Tags • 30 релевантных тегов через запятую со счетчиком до 500 символов)
             </h3>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono bg-slate-900 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded">
-              Тегов: <strong>{tagsListCount}</strong>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-mono text-slate-300 tabular-nums">
+              Тегов: <strong className="text-slate-100">{tagsListCount}</strong>
             </span>
             <span
-              className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
+              className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border tabular-nums ${
                 tagsCharCount <= 500
                   ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                   : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
@@ -1008,7 +1008,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           <button
             type="button"
             onClick={() => copyWithToast(tagsString, 'seo-tags', 'Все 30 тегов YouTube')}
-            className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition"
+            className="min-h-[42px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition"
           >
             {copiedKey === 'seo-tags' ? (
               <Check className="w-4 h-4 text-emerald-400" />
@@ -1021,7 +1021,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           <button
             type="button"
             onClick={handleDownloadMetadataTxt}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-amber-500/15"
+            className="min-h-[42px] bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-amber-500/15"
           >
             <Download className="w-4 h-4" /> 📥 Скачать metadata.txt (Полный пакет)
           </button>
@@ -1048,7 +1048,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   key={tid}
                   type="button"
                   onClick={() => setSelectedTitleId(tid)}
-                  className={`px-2.5 py-1 rounded font-bold cursor-pointer transition ${
+                  className={`min-h-[36px] sm:min-h-[30px] px-2.5 py-1 rounded font-bold cursor-pointer transition ${
                     selectedTitleId === tid
                       ? 'bg-sky-500 text-slate-950'
                       : 'text-slate-400 hover:text-slate-200'
@@ -1068,7 +1068,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   'Карточка релиза (Title + Description + Timestamps + Tags)'
                 )
               }
-              className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-sky-500/20"
+              className="min-h-[42px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-sky-500/20"
             >
               {copiedKey === 'release-card' ? (
                 <Check className="w-4 h-4" />
@@ -1101,7 +1101,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 Структурированный Markdown-манифест релиза и точные таймкоды глав по реальным <code className="text-emerald-300">duration</code> сцен Ритм-карты
               </p>
             </div>
-            <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2.5 py-0.5 rounded tabular-nums">
+            <span className="text-[11px] font-mono text-emerald-300 tabular-nums shrink-0">
               <AnimatedNumber value={narrativeScenes.length} /> сцен •{' '}
               <AnimatedDurationText totalSeconds={totalRhythmMapDurationSec} />
             </span>
@@ -1149,7 +1149,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <button
               type="button"
               onClick={handleDownloadReleaseCardMd}
-              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-lg shadow-emerald-500/20"
+              className="min-h-[42px] bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-lg shadow-emerald-500/20"
             >
               <Download className="w-4 h-4" />
               <span>Скачать RELEASE_CARD.md</span>
@@ -1158,7 +1158,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <button
               type="button"
               onClick={handleDownloadOutputChaptersTxt}
-              className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+              className="min-h-[42px] bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
             >
               <Clock className="w-4 h-4 text-indigo-300" />
               <span>Скачать output_chapters.txt</span>
@@ -1191,7 +1191,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   'info'
                 );
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${
+              className={`min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${
                 shortsEnabled
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
                   : 'bg-slate-900 border-slate-700 text-slate-400'
@@ -1201,7 +1201,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
               <span className="text-slate-400 block text-[10px]">Вертикальный кроп</span>
               <strong className="text-slate-100 font-mono">9:16 • 1080x1920</strong>

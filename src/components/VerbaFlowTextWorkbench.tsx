@@ -845,7 +845,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   };
 
   return (
-    <div className="rounded-2xl bg-[#090D16]/90 backdrop-blur-xl border border-white/[0.08] shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] p-5 sm:p-6 space-y-6">
+    <div className="rounded-2xl bg-[#090D16]/90 backdrop-blur-xl border border-white/[0.08] shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] p-3.5 sm:p-6 space-y-5 sm:space-y-6">
       {/* ШАПКА ВКЛАДКИ + ПЕРЕКЛЮЧАТЕЛЬ ЯЗЫКА RU / EN (US) + КНОПКИ СКВОЗНОГО КОНВЕЙЕРА */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
         <div className="space-y-1.5">
@@ -1082,9 +1082,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
 
       {/* ОСНОВНАЯ РАБОЧАЯ СЕТКА: ПЕРЕКЛЮЧАТЕЛЬ 5 ПОДМОДУЛЕЙ СЛЕВА + СЦЕНА МОДУЛЯ СПРАВА */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* ЛЕВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ПОДМОДУЛЕЙ */}
-        <aside className="lg:col-span-3 space-y-2.5">
-          <div className="rounded-xl bg-[#131B2E]/75 border border-white/[0.08] p-2 space-y-1">
+        {/* ЛЕВЫЙ ПЕРЕКЛЮЧАТЕЛЬ ПОДМОДУЛЕЙ (горизонтальный свайп на <1024px, вертикальный на lg+) */}
+        <aside className="lg:col-span-3 space-y-2.5 min-w-0">
+          <div className="rounded-xl bg-[#131B2E]/75 border border-white/[0.08] p-2 flex lg:flex-col overflow-x-auto lg:overflow-visible no-scrollbar gap-1.5 lg:gap-0 lg:space-y-1">
             {SUBMODULES.map(mod => {
               const isActive = activeSubmodule === mod.id;
               return (
@@ -1092,7 +1092,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   key={mod.id}
                   type="button"
                   onClick={() => setActiveSubmodule(mod.id)}
-                  className={`relative w-full text-left rounded-lg px-3 py-2.5 flex items-start gap-2.5 cursor-pointer transition-colors overflow-hidden ${
+                  className={`relative shrink-0 lg:shrink lg:w-full min-h-[44px] text-left rounded-lg px-3 py-2.5 flex items-center lg:items-start gap-2.5 cursor-pointer transition-colors overflow-hidden ${
                     isActive
                       ? 'text-slate-50'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.03]'
@@ -1105,12 +1105,12 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       className="absolute inset-0 rounded-lg bg-gradient-to-r from-amber-500/20 via-orange-500/10 to-transparent border border-amber-400/40"
                     />
                   )}
-                  <span className="relative z-10 text-base leading-none mt-0.5 select-none">
+                  <span className="relative z-10 text-base leading-none lg:mt-0.5 select-none">
                     {mod.emoji}
                   </span>
                   <div className="relative z-10 min-w-0">
-                    <div className="text-xs font-bold leading-snug">{mod.title}</div>
-                    <div className="text-[11px] text-slate-400 truncate">{mod.subtitle}</div>
+                    <div className="text-xs font-bold leading-snug whitespace-nowrap lg:whitespace-normal">{mod.title}</div>
+                    <div className="text-[11px] text-slate-400 truncate hidden lg:block">{mod.subtitle}</div>
                   </div>
                 </button>
               );
@@ -1213,7 +1213,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                           key={t.id}
                           type="button"
                           onClick={() => setTone(t.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer border transition ${
+                          className={`min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer border transition ${
                             tone === t.id
                               ? 'bg-amber-500/20 border-amber-400/50 text-amber-200'
                               : 'bg-[#090D16] border-white/[0.08] text-slate-400 hover:text-slate-200'
@@ -1290,7 +1290,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                         type="button"
                         onClick={() => docFileInputRef.current?.click()}
                         disabled={isReadingDocument}
-                        className="min-h-[38px] px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/45 text-cyan-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/45 text-cyan-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition disabled:opacity-60"
                       >
                         {isReadingDocument ? (
                           <RefreshCw className="w-4 h-4 animate-spin text-cyan-300" />
@@ -1307,7 +1307,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <button
                         type="button"
                         onClick={handleSplitDocumentChapters}
-                        className="min-h-[38px] px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45 text-amber-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45 text-amber-200 text-xs font-bold flex items-center gap-2 cursor-pointer transition"
                       >
                         <ListTree className="w-4 h-4 text-amber-300" />
                         <span>📑 Разбить на главы и таймкоды</span>
@@ -1358,7 +1358,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                                 'Список глав с таймкодами скопирован!'
                               )
                             }
-                            className="px-2.5 py-1 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-white/[0.1] text-[11px] text-slate-200 flex items-center gap-1 cursor-pointer"
+                            className="min-h-[40px] sm:min-h-[34px] px-2.5 py-1 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-white/[0.1] text-[11px] text-slate-200 flex items-center gap-1 cursor-pointer"
                           >
                             {copiedId === 'copy-chapters' ? (
                               <Check className="w-3 h-3 text-emerald-400" />
@@ -1371,7 +1371,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                           <button
                             type="button"
                             onClick={handleSendDocumentChaptersToSeo}
-                            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition"
+                            className="min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition"
                           >
                             <TrendingUp className="w-3.5 h-3.5" />
                             <span>В output_chapters.txt (YouTube SEO) →</span>
@@ -1392,7 +1392,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                               type="text"
                               value={ch.title}
                               onChange={e => handleUpdateChapterTitle(idx, e.target.value)}
-                              className="flex-1 min-w-[160px] bg-transparent border border-transparent focus:border-cyan-400/50 rounded px-1.5 py-0.5 text-xs font-semibold text-slate-100 outline-none"
+                              className="flex-1 min-w-[120px] bg-transparent border border-transparent focus:border-cyan-400/50 rounded px-1.5 py-0.5 text-xs font-semibold text-slate-100 outline-none"
                             />
                             <span className="text-[10px] font-mono text-slate-400 tabular-nums shrink-0">
                               {ch.wordCount} сл. • ~{ch.durationSec}с
@@ -1478,11 +1478,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                 className="space-y-4"
               >
                 <div className="rounded-xl bg-[#131B2E]/80 border border-white/[0.08] p-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 bg-[#090D16] p-1 rounded-xl border border-white/[0.08]">
+                  <div className="flex flex-wrap items-center gap-2 bg-[#090D16] p-1 rounded-xl border border-white/[0.08]">
                     <button
                       type="button"
                       onClick={() => setHookGenerationMode('single15')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition ${
+                      className={`min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition ${
                         hookGenerationMode === 'single15'
                           ? 'bg-amber-500/20 text-amber-200 border border-amber-400/40'
                           : 'text-slate-400 hover:text-slate-200'
@@ -1493,7 +1493,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     <button
                       type="button"
                       onClick={() => setHookGenerationMode('pack5')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition ${
+                      className={`min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition ${
                         hookGenerationMode === 'pack5'
                           ? 'bg-amber-500/20 text-amber-200 border border-amber-400/40'
                           : 'text-slate-400 hover:text-slate-200'
@@ -1729,7 +1729,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                             'Дикторский текст скопирован!'
                           )
                         }
-                        className="px-3 py-1.5 rounded-lg bg-[#090D16] border border-white/[0.08] text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                        className="min-h-[40px] px-3 py-1.5 rounded-lg bg-[#090D16] border border-white/[0.08] text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer"
                       >
                         {copiedId === 'voice-copy' ? (
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -1741,7 +1741,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <button
                         type="button"
                         onClick={handleDownloadVoiceTxt}
-                        className="px-3 py-1.5 rounded-lg bg-[#090D16] border border-white/[0.08] text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                        className="min-h-[40px] px-3 py-1.5 rounded-lg bg-[#090D16] border border-white/[0.08] text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Скачать .txt</span>
@@ -1749,7 +1749,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <button
                         type="button"
                         onClick={handleTransferScenesToRenderTimeline}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-300 flex items-center gap-1.5 cursor-pointer"
+                        className="min-h-[40px] px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-300 flex items-center gap-1.5 cursor-pointer"
                       >
                         <span>Синхронизировать с Монтажом</span>
                         <ArrowRight className="w-3.5 h-3.5" />
@@ -2036,7 +2036,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                             key={rIdx}
                             type="button"
                             onClick={() => handleReplaceXrayToken(selectedXrayIndex, rep)}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-semibold text-emerald-200 cursor-pointer"
+                            className="min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-semibold text-emerald-200 cursor-pointer"
                           >
                             Заменить на «{rep}»
                           </button>
@@ -2044,7 +2044,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <button
                         type="button"
                         onClick={() => handleReplaceXrayToken(selectedXrayIndex, '')}
-                        className="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/40 text-xs font-semibold text-rose-200 cursor-pointer"
+                        className="min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/40 text-xs font-semibold text-rose-200 cursor-pointer"
                       >
                         Удалить фрагмент
                       </button>
@@ -2076,7 +2076,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                               'success'
                             );
                           }}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 text-xs text-rose-200 cursor-pointer"
+                          className="min-h-[40px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 text-xs text-rose-200 cursor-pointer"
                         >
                           Убрать «{c.phrase}» ({c.count}×)
                         </button>
@@ -2094,7 +2094,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                             setWorkingText(next);
                             onNotify(`Удалена вода «${w.phrase}»`, 'success');
                           }}
-                          className="px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-xs text-sky-200 cursor-pointer"
+                          className="min-h-[40px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-xs text-sky-200 cursor-pointer"
                         >
                           Высушить «{w.phrase}» ({w.count}×)
                         </button>

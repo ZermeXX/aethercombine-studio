@@ -3946,35 +3946,30 @@ export default function App() {
       <AmbientShaderBackdrop mode={ambientShaderMode} />
 
       {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Segmented Tabs со скользящим индикатором layoutId) */}
-      <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#080c14]/85 backdrop-blur-xl px-4 py-3 shadow-[0_16px_40px_-15px_rgba(0,0,0,0.85)]">
-        {/* Верхний ряд: Логотип и статус подключения */}
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+      <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#080c14]/85 backdrop-blur-xl px-3 sm:px-4 py-2.5 sm:py-3 shadow-[0_16px_40px_-15px_rgba(0,0,0,0.85)]">
+        {/* Верхний ряд: Логотип, пресеты форматов и статус подключения */}
+        <div className="mx-auto flex max-w-[1600px] flex-wrap xl:flex-nowrap items-center justify-between gap-2.5 sm:gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink-0">
             {/* Иконка и заголовок AETHER COMBINE */}
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 shadow-[0_8px_20px_-4px_rgba(245,158,11,0.45)]">
+            <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 shadow-[0_8px_20px_-4px_rgba(245,158,11,0.45)]">
               <Layers className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-[#f8fafc] whitespace-nowrap">
-                  AETHER <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">COMBINE</span>
-                </h1>
-                <span className="rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-300 whitespace-nowrap">
-                  PRO 4K • STUDIO
-                </span>
-              </div>
-              <p className="hidden md:block text-xs text-white/55 truncate">
-                Автономный облачный видеокомбайн &amp; универсальный парсер N-слотов (GitHub Actions → Google Drive)
+              <h1 className="text-sm sm:text-lg font-extrabold tracking-tight text-[#f8fafc] whitespace-nowrap">
+                AETHER <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">COMBINE</span>
+              </h1>
+              <p className="hidden 2xl:block text-[11px] text-white/50 truncate">
+                4K Production Studio • GitHub Actions → Google Drive
               </p>
             </div>
           </div>
 
           {/* Центральный блок: 1-Click Format Presets + Свободный ввод названия проекта и обложки */}
-          <div className="flex flex-wrap items-center gap-2 bg-[#090d16]/90 border border-white/[0.08] rounded-2xl p-1.5 shadow-inner">
+          <div className="order-3 w-full xl:order-none xl:w-auto flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar bg-[#090d16]/90 border border-white/[0.08] rounded-2xl p-1.5 shadow-inner">
             <button
               type="button"
               onClick={() => applyStudioFormatPreset('histoviva_doc')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`min-h-[40px] xl:min-h-[36px] shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeFormatPreset === 'histoviva_doc'
                   ? 'bg-indigo-500/25 border border-indigo-400/60 text-indigo-200 shadow-[0_0_14px_rgba(99,102,241,0.3)]'
                   : 'text-slate-400 hover:text-slate-200 border border-transparent'
@@ -3987,7 +3982,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => applyStudioFormatPreset('ambient_loop_3h')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`min-h-[40px] xl:min-h-[36px] shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeFormatPreset === 'ambient_loop_3h'
                   ? 'bg-amber-500/25 border border-amber-400/60 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.3)]'
                   : 'text-slate-400 hover:text-slate-200 border border-transparent'
@@ -4004,7 +3999,7 @@ export default function App() {
                 onChange={e => setLoopProjectName(e.target.value)}
                 placeholder="Название ролика..."
                 title="Свободное уникальное название текущего видеопроекта"
-                className="bg-slate-950/90 border border-slate-800 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-200 outline-none w-44"
+                className="bg-slate-950/90 border border-slate-800 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-200 outline-none w-40 2xl:w-44"
               />
               <input
                 type="text"
@@ -4012,13 +4007,13 @@ export default function App() {
                 onChange={e => setThumbTitle(e.target.value)}
                 placeholder="Заголовок обложки..."
                 title="Свободный заголовок 4K обложки для текущего выпуска"
-                className="bg-slate-950/90 border border-slate-800 focus:border-amber-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-amber-300 outline-none w-40"
+                className="bg-slate-950/90 border border-slate-800 focus:border-amber-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-amber-300 outline-none w-36 2xl:w-40"
               />
             </div>
           </div>
 
           {/* Правая группа: Переключатель «✨ Живой фон / ⚡ Экономный режим» + Статус GitHub / GDrive */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={toggleAmbientShaderMode}
@@ -4028,7 +4023,7 @@ export default function App() {
                   ? 'Активен плавный шейдер 24fps. Нажмите для включения Экономного режима (статичный фон #080c14)'
                   : 'Активен Экономный режим (0% нагрузки на GPU). Нажмите для включения Живого фона'
               }
-              className={`min-h-[44px] flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold cursor-pointer transition ${
+              className={`min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 rounded-xl border px-2.5 sm:px-3 py-2 text-xs font-bold cursor-pointer transition ${
                 ambientShaderMode === 'live'
                   ? 'bg-gradient-to-r from-indigo-500/20 to-cyan-500/20 border-cyan-400/45 text-cyan-200 shadow-[0_0_18px_rgba(14,116,144,0.28)]'
                   : 'bg-[#0f1623]/85 border-white/[0.08] text-amber-300 hover:border-amber-400/40'
@@ -4037,12 +4032,14 @@ export default function App() {
               {ambientShaderMode === 'live' ? (
                 <>
                   <Sparkles className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
-                  <span className="whitespace-nowrap">✨ Живой фон</span>
+                  <span className="whitespace-nowrap hidden sm:inline">✨ Живой фон</span>
+                  <span className="whitespace-nowrap sm:hidden">✨ Фон</span>
                 </>
               ) : (
                 <>
                   <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="whitespace-nowrap">⚡ Экономный режим</span>
+                  <span className="whitespace-nowrap hidden sm:inline">⚡ Экономный режим</span>
+                  <span className="whitespace-nowrap sm:hidden">⚡ Эконом</span>
                 </>
               )}
             </button>
@@ -4050,7 +4047,7 @@ export default function App() {
             <button
               type="button"
               onClick={openConfigModal}
-              className="min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-[#0f1623] hover:border-amber-400/40 px-3 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
+              className="min-h-[40px] sm:min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-[#0f1623] hover:border-amber-400/40 px-2.5 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
             >
               <span
                 id="gh-status-indicator"
@@ -4060,11 +4057,11 @@ export default function App() {
                     : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
                 }`}
               />
-              <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[130px] sm:max-w-none">
+              <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[100px] sm:max-w-[160px] xl:max-w-none">
                 {ghRepo || 'ZermeXX/aetherflow-render'}
               </span>
-              <span className="h-4 w-px bg-white/[0.1] hidden sm:inline-block" />
-              <span className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] font-medium text-emerald-400">
+              <span className="h-4 w-px bg-white/[0.1] hidden md:inline-block" />
+              <span className="hidden md:flex items-center gap-1.5 font-mono text-[11px] font-medium text-emerald-400 whitespace-nowrap">
                 <HardDrive
                   className={`w-3.5 h-3.5 ${
                     isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
@@ -4076,11 +4073,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* Нижний ряд: Ровно 5 чистых модулей в верхней навигации со скользящим индикатором */}
+        {/* Нижний ряд: Горизонтальная панель навигации со скользящим индикатором */}
         <nav
           role="tablist"
           aria-label="Цехи продакшна AetherCombine"
-          className="mx-auto mt-3 flex max-w-[1600px] flex-wrap items-center gap-1.5 rounded-2xl border border-white/[0.08] bg-[#0f1623]/85 backdrop-blur-md p-1.5"
+          className="mx-auto mt-2.5 sm:mt-3 flex max-w-[1600px] flex-nowrap overflow-x-auto no-scrollbar xl:flex-wrap items-center gap-1.5 rounded-2xl border border-white/[0.08] bg-[#0f1623]/85 backdrop-blur-md p-1.5"
         >
           {[
             {
@@ -4147,7 +4144,7 @@ export default function App() {
                 aria-selected={isActive}
                 onClick={() => handleSelectTab(tabItem.id)}
                 id={tabItem.domId}
-                className={`relative group nav-tab ${tabItem.cls} min-h-[44px] flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold whitespace-nowrap cursor-pointer overflow-hidden ${
+                className={`relative group nav-tab ${tabItem.cls} min-h-[44px] shrink-0 flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold whitespace-nowrap cursor-pointer overflow-hidden ${
                   isActive
                     ? 'active text-[#f8fafc] border border-amber-400/45 shadow-[0_6px_20px_-4px_rgba(245,158,11,0.28)]'
                     : 'border border-transparent text-white/60 hover:bg-white/[0.04] hover:text-white'
@@ -4180,7 +4177,7 @@ export default function App() {
       </header>
 
       {/* ОСНОВНОЙ КОНТЕНТ */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6 overflow-x-hidden">
+      <main className="relative z-10 flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden">
         {/* =========================================
             ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
            ========================================= */}
@@ -4238,10 +4235,10 @@ export default function App() {
           id="view-loop"
           className={`studio-view space-y-6 ${activeTab === 'loop' ? '' : 'hidden'}`}
         >
-          <div className="aether-surface rounded-2xl p-5 sm:p-6 space-y-6">
+          <div className="aether-surface rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
-              <div className="space-y-2 flex-1 min-w-[260px]">
-                <h2 className="text-lg font-bold text-[#f8fafc] flex items-center gap-2">
+              <div className="space-y-2 flex-1 min-w-0 sm:min-w-[260px]">
+                <h2 className="text-base sm:text-lg font-bold text-[#f8fafc] flex items-center gap-2">
                   <Repeat className="text-amber-400 w-5 h-5 shrink-0" />
                   <span>Многочасовой Луп (N-Слотов) — Конструктор 4K</span>
                 </h2>
@@ -4254,18 +4251,19 @@ export default function App() {
                     value={loopProjectName}
                     onChange={e => setLoopProjectName(e.target.value)}
                     placeholder="Ambient Loop 4K"
-                    className="min-h-[38px] bg-[#080c14]/90 border border-white/[0.12] focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs font-semibold text-[#f8fafc] w-full sm:w-80 outline-none"
+                    className="min-h-[40px] bg-[#080c14]/90 border border-white/[0.12] focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs font-semibold text-[#f8fafc] w-full sm:w-80 outline-none"
                   />
                 </div>
                 <p className="text-xs text-white/55">
-                  Экспорт <code className="font-mono text-amber-300">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с) • <code className="font-mono text-emerald-300">inserts[]</code>
+                  Экспорт <code className="font-mono text-amber-300">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с)
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] bg-white/[0.04] border border-white/[0.08] text-cyan-300 px-3 py-1 rounded-full font-mono">
-                  {videoCodec === 'libx265' ? 'H.265' : 'H.264'} • CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k
+              <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono tabular-nums text-white/75">
+                <span className="text-cyan-300">
+                  {videoCodec === 'libx265' ? 'H.265' : 'H.264'} • CRF {videoCrf} • {videoFps}fps
                 </span>
-                <span className="text-[11px] bg-emerald-500/10 border border-emerald-400/30 text-emerald-300 px-3 py-1 rounded-full font-mono">
+                <span className="text-white/25">•</span>
+                <span className="text-emerald-300 font-semibold">
                   Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • {formatTimeHMS(calculatedProjectDurationSec)}
                 </span>
               </div>
@@ -4917,18 +4915,18 @@ export default function App() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   {/* Локальные пресеты манифеста (localStorage) */}
-                  <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 rounded-xl px-2.5 py-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1.5">
                     <input
                       type="text"
                       value={presetNameInput}
                       onChange={e => setPresetNameInput(e.target.value)}
                       placeholder={loopProjectName ? `Имя (${loopProjectName})` : 'Имя пресета...'}
-                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 w-32 sm:w-36 outline-none focus:border-amber-500"
+                      className="min-h-[38px] sm:min-h-[32px] bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-[11px] text-slate-200 w-32 sm:w-36 outline-none focus:border-amber-500"
                     />
                     <button
                       type="button"
                       onClick={saveManifestPreset}
-                      className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
+                      className="min-h-[38px] sm:min-h-[32px] bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
                       title="Сохранить слоты, врезки, кодек и папку GDrive в браузер (localStorage)"
                     >
                       💾 Сохранить пресет
@@ -4937,7 +4935,7 @@ export default function App() {
                       aria-label="Выбор локального пресета манифеста"
                       value={selectedPresetId}
                       onChange={e => setSelectedPresetId(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 max-w-[170px] outline-none focus:border-sky-500"
+                      className="min-h-[38px] sm:min-h-[32px] bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 max-w-[170px] outline-none focus:border-sky-500"
                     >
                       {savedManifestPresets.length === 0 ? (
                         <option value="">Нет сохранённых пресетов</option>
@@ -4953,7 +4951,7 @@ export default function App() {
                       type="button"
                       onClick={loadSelectedManifestPreset}
                       disabled={savedManifestPresets.length === 0}
-                      className="bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed border border-sky-500/40 text-sky-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
+                      className="min-h-[38px] sm:min-h-[32px] bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed border border-sky-500/40 text-sky-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
                       title="Загрузить выбранный пресет манифеста в редактор"
                     >
                       📂 Загрузить пресет
@@ -4962,7 +4960,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={deleteSelectedManifestPreset}
-                        className="text-slate-500 hover:text-rose-400 px-1.5 py-1 rounded-lg text-[11px] transition cursor-pointer"
+                        className="min-h-[38px] sm:min-h-[32px] text-slate-500 hover:text-rose-400 px-2 py-1 rounded-lg text-[11px] transition cursor-pointer"
                         title="Удалить выбранный пресет"
                       >
                         ✕
@@ -4973,14 +4971,14 @@ export default function App() {
                   <button
                     type="button"
                     onClick={addTimelineSlot}
-                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs transition cursor-pointer"
+                    className="min-h-[40px] bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2 rounded-xl text-xs transition cursor-pointer"
                   >
                     + Добавить слот (#{timelineSlots.length + 1})
                   </button>
                   <button
                     type="button"
                     onClick={applyBlizzard3HSpecPreset}
-                    className="bg-slate-900 hover:bg-slate-800 border border-sky-500/40 text-sky-300 px-3 py-2 rounded-xl text-xs transition cursor-pointer"
+                    className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-sky-500/40 text-sky-300 px-3 py-2 rounded-xl text-xs transition cursor-pointer"
                   >
                     Сбросить к 6 актам (3:00:00)
                   </button>
@@ -5093,7 +5091,7 @@ export default function App() {
                     </div>
 
                     {/* Пропорциональная шкала + вертикальные маркеры-флажки */}
-                    <div className="relative pt-7 pb-2 select-none">
+                    <div className="relative pt-7 pb-2 px-3 overflow-x-hidden select-none">
                       {/* Маркеры-флажки всех врезок (inserts) */}
                       {scrubberInserts.map(item => {
                         const leftPct = Math.min(99.2, Math.max(0.8, (item.globalSec / totalSpan) * 100));
@@ -5371,7 +5369,7 @@ export default function App() {
                             onChange={e =>
                               updateTimelineSlotField(sIdx, 'title', e.target.value)
                             }
-                            className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-100 w-64 sm:w-80 outline-none focus:border-amber-500"
+                            className="min-h-[38px] sm:min-h-[32px] bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-100 w-full sm:w-72 outline-none focus:border-amber-500"
                           />
                           <span
                             className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
@@ -5388,14 +5386,14 @@ export default function App() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-mono text-slate-400">
                             Петля: {loopIterations}× по {slot.source_clip_duration_sec}с (шов {seamSec.toFixed(1)}с)
                           </span>
                           <button
                             type="button"
                             onClick={() => removeTimelineSlot(sIdx)}
-                            className="text-xs text-rose-400 hover:text-rose-300 px-2 py-1 rounded bg-rose-950/30 border border-rose-500/30 cursor-pointer"
+                            className="min-h-[38px] sm:min-h-[32px] text-xs text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded-lg bg-rose-950/30 border border-rose-500/30 cursor-pointer"
                           >
                             Удалить слот
                           </button>
@@ -5570,11 +5568,11 @@ export default function App() {
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
                               onClick={() => addInsertToSlot(sIdx)}
-                              className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                              className="min-h-[40px] sm:min-h-[34px] bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer"
                             >
                               + Добавить вставку E{slot.inserts.length + 1}
                             </button>
@@ -5582,7 +5580,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => clearSlotInserts(sIdx)}
-                                className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer"
+                                className="min-h-[40px] sm:min-h-[34px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg text-[11px] transition cursor-pointer"
                               >
                                 Очистить (inserts: [])
                               </button>
@@ -6333,7 +6331,7 @@ export default function App() {
                       type="button"
                       onClick={startPreflightCheck}
                       disabled={isRunnerActive || isLoopDispatching}
-                      className={`flex-1 flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
+                      className={`min-h-[44px] flex-1 flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
                         isRunnerActive || isLoopDispatching
                           ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                           : 'bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/40 text-sky-300 cursor-pointer'
@@ -6345,7 +6343,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={enqueueCurrentManifest}
-                      className="flex items-center justify-center gap-1.5 rounded-xl border border-purple-500/45 bg-purple-500/15 hover:bg-purple-500/25 px-4 py-2.5 text-xs font-semibold text-purple-200 transition cursor-pointer whitespace-nowrap"
+                      className="min-h-[44px] flex items-center justify-center gap-1.5 rounded-xl border border-purple-500/45 bg-purple-500/15 hover:bg-purple-500/25 px-4 py-2.5 text-xs font-semibold text-purple-200 transition cursor-pointer whitespace-nowrap"
                       title="Поставить текущий манифест в локальную очередь: после завершения текущего run он запустится автоматически"
                     >
                       <ListOrdered className="w-3.5 h-3.5 text-purple-300" />
@@ -6920,10 +6918,10 @@ export default function App() {
         </div>
       )}
 
-      {/* ДИНАМИЧЕСКАЯ КАПСУЛА СТАТУСОВ (DYNAMIC ISLAND STATUS PILL) */}
+      {/* ДИНАМИЧЕСКАЯ КАПСУЛА СТАТУСОВ (DYNAMIC ISLAND STATUS PILL — не перекрывает шапку на мобильных и десктопе) */}
       <div
         aria-live="polite"
-        className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] pointer-events-none flex flex-col items-center gap-1.5 px-3 max-w-[92vw]"
+        className="fixed bottom-4 left-1/2 -translate-x-1/2 md:bottom-auto md:top-3.5 md:right-4 md:left-auto md:translate-x-0 z-[60] pointer-events-none flex flex-col items-center md:items-end gap-1.5 px-3 max-w-[calc(100vw-24px)] md:max-w-md"
       >
         <AnimatePresence mode="popLayout">
           {toasts.slice(-2).map(t => (

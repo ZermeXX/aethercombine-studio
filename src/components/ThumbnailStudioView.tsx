@@ -1373,6 +1373,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [hoveredSlot, setHoveredSlot] = useState<'A' | 'B' | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
 
+  // Локальная подготовка разрешения, 3x3 резкости базового кадра и умный экспорт < 2 МБ
+  const [baseSharpenPct, setBaseSharpenPct] = useState<number>(0);
+  const [baseResolutionPreset, setBaseResolutionPreset] = useState<
+    'original' | '1920x1080' | '2560x1440' | '3840x2160'
+  >('original');
+  const [isOptimizingYtThumb, setIsOptimizingYtThumb] = useState<boolean>(false);
+
   const selectedBadgesA = parseBadgeIds(thumbBadge);
 
   // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
@@ -1642,7 +1649,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       showMagicDecor: boolean,
       hookLayout: HookTextLayout,
       variantLabel?: string,
-      fontOptions?: { fontEntry?: StudioFontEntry; applyToBadges?: boolean }
+      fontOptions?: { fontEntry?: StudioFontEntry; applyToBadges?: boolean },
+      baseSharpenPercent: number = 0
     ): HookBoundingBoxPct | null => {
       if (!canvas) return null;
       const ctx = canvas.getContext('2d');
@@ -1655,15 +1663,74 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ctx.clearRect(0, 0, w, h);
 
       if (image) {
-        drawCoverImageToCanvas(
-          ctx,
-          image,
-          image.naturalWidth || w,
-          image.naturalHeight || h,
-          w,
-          h,
-          1
-        );
+        if (baseSharpenPercent > 0 && w > 2 && h > 2) {
+          // Применяем Unsharp / Sharpen 3x3 строго к базовому кадру до наложения титров и бейджей
+          const bgCanvas = document.createElement('canvas');
+          bgCanvas.width = w;
+          bgCanvas.height = h;
+          const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
+          if (bgCtx) {
+            bgCtx.imageSmoothingEnabled = true;
+            bgCtx.imageSmoothingQuality = 'high';
+            drawCoverImageToCanvas(
+              bgCtx,
+              image,
+              image.naturalWidth || w,
+              image.naturalHeight || h,
+              w,
+              h,
+              1
+            );
+            const imgData = bgCtx.getImageData(0, 0, w, h);
+            const dst = imgData.data;
+            const copy = new Uint8ClampedArray(dst);
+            const amount = (baseSharpenPercent / 100) * 1.35;
+            const stride = w * 4;
+            for (let y = 1; y < h - 1; y++) {
+              const rowOff = y * stride;
+              for (let x = 1; x < w - 1; x++) {
+                const i = rowOff + x * 4;
+                for (let ch = 0; ch < 3; ch++) {
+                  const center = copy[i + ch];
+                  const avgNeighbors =
+                    (copy[i - 4 + ch] +
+                      copy[i + 4 + ch] +
+                      copy[i - stride + ch] +
+                      copy[i + stride + ch]) *
+                    0.25;
+                  const sharpened = center + (center - avgNeighbors) * amount;
+                  dst[i + ch] = sharpened < 0 ? 0 : sharpened > 255 ? 255 : sharpened;
+                }
+              }
+            }
+            bgCtx.putImageData(imgData, 0, 0);
+            ctx.drawImage(bgCanvas, 0, 0);
+          } else {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            drawCoverImageToCanvas(
+              ctx,
+              image,
+              image.naturalWidth || w,
+              image.naturalHeight || h,
+              w,
+              h,
+              1
+            );
+          }
+        } else {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          drawCoverImageToCanvas(
+            ctx,
+            image,
+            image.naturalWidth || w,
+            image.naturalHeight || h,
+            w,
+            h,
+            1
+          );
+        }
       } else {
         const bgGrad = ctx.createLinearGradient(0, 0, w, h);
         bgGrad.addColorStop(0, '#090d16');
@@ -2350,7 +2417,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       magicDecorEnabled,
       hookLayoutA,
       'Обложка A',
-      fontOpts
+      fontOpts,
+      baseSharpenPct
     );
     setHookBoxA(prev => {
       if (!prev && !nextBoxA) return prev;
@@ -2377,7 +2445,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       magicDecorEnabled,
       hookLayoutB,
       'Обложка B',
-      fontOpts
+      fontOpts,
+      baseSharpenPct
     );
     setHookBoxB(prev => {
       if (!prev && !nextBoxB) return prev;
@@ -2404,7 +2473,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       magicDecorEnabled,
       hookLayoutA,
       undefined,
-      fontOpts
+      fontOpts,
+      baseSharpenPct
     );
   }, [
     drawCoverOnCanvas,
@@ -2422,7 +2492,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     hookLayoutA,
     hookLayoutB,
     abModeEnabled,
-    fontsReadyTick
+    fontsReadyTick,
+    baseSharpenPct
   ]);
 
   useEffect(() => {
@@ -2481,7 +2552,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         magicDecorEnabled,
         hookLayoutA,
         undefined,
-        { fontEntry: selectedFontEntry, applyToBadges: applyFontToBadges }
+        { fontEntry: selectedFontEntry, applyToBadges: applyFontToBadges },
+        baseSharpenPct
       );
       const link = document.createElement('a');
       link.download = `thumbnail_4k_${idx + 1}.png`;
@@ -2895,8 +2967,56 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     capturedImg.src = dataUrl;
   };
 
-  // Кнопка «📥 Скачать 4K обложку» (финальный экспорт 3840×2160 PNG с сохранёнными x/y и масштабом)
-  const downloadCover4K = (slot: 'A' | 'B') => {
+  // Локальное приведение базового изображения к целевому разрешению (1920x1080, 2560x1440, 3840x2160)
+  const resampleBaseSlotToResolution = (targetW: number, targetH: number) => {
+    const presetKey = `${targetW}x${targetH}` as '1920x1080' | '2560x1440' | '3840x2160';
+    const resampleSingleImage = (srcImg: HTMLImageElement | null, onDone: (img: HTMLImageElement, url: string) => void) => {
+      if (!srcImg) return;
+      const off = document.createElement('canvas');
+      off.width = targetW;
+      off.height = targetH;
+      const ctx = off.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      drawCoverImageToCanvas(
+        ctx,
+        srcImg,
+        srcImg.naturalWidth || targetW,
+        srcImg.naturalHeight || targetH,
+        targetW,
+        targetH,
+        1
+      );
+      const dataUrl = off.toDataURL('image/png');
+      const nextImg = new Image();
+      nextImg.onload = () => onDone(nextImg, dataUrl);
+      nextImg.src = dataUrl;
+    };
+
+    if (!imgA && !imgB) {
+      onNotify('Сначала выберите или загрузите базовый кадр для изменения разрешения.', 'info');
+      return;
+    }
+
+    resampleSingleImage(imgA, (nextImgA, urlA) => {
+      setImgA(nextImgA);
+      window.selectedMasterThumbnail = urlA;
+      setBaseResolutionPreset(presetKey);
+      onNotify(
+        `🔍 Базовый кадр приведён к ${targetW}×${targetH} px (High-Quality Canvas)`,
+        'success'
+      );
+    });
+    if (abModeEnabled && imgB) {
+      resampleSingleImage(imgB, nextImgB => {
+        setImgB(nextImgB);
+      });
+    }
+  };
+
+  // Сборка полноразмерного 4K Canvas (3840x2160) с резкой базой + векторными титрами и бейджами
+  const buildFullResThumbnailCanvas = (slot: 'A' | 'B'): HTMLCanvasElement => {
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
     offscreen.height = 2160;
@@ -2915,7 +3035,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         magicDecorEnabled,
         hookLayoutA,
         undefined,
-        fontOpts
+        fontOpts,
+        baseSharpenPct
       );
     } else {
       drawCoverOnCanvas(
@@ -2928,14 +3049,84 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         magicDecorEnabled,
         hookLayoutB,
         undefined,
-        fontOpts
+        fontOpts,
+        baseSharpenPct
       );
     }
+    return offscreen;
+  };
+
+  // Кнопка «📥 Скачать 4K обложку» (финальный экспорт 3840×2160 PNG с сохранёнными x/y и масштабом)
+  const downloadCover4K = (slot: 'A' | 'B') => {
+    const offscreen = buildFullResThumbnailCanvas(slot);
     const link = document.createElement('a');
     link.download = `thumbnail_4k_3840x2160_${slot}.png`;
     link.href = offscreen.toDataURL('image/png');
     link.click();
     onNotify(`📥 4K обложка ${slot} (3840×2160 PNG без водяных знаков) скачана!`, 'success');
+  };
+
+  // Умный экспорт обложки под лимит YouTube (< 2 МБ): бинарный подбор максимального JPEG-качества
+  const downloadCoverYouTube2Mb = async (slot: 'A' | 'B') => {
+    if (isOptimizingYtThumb) return;
+    setIsOptimizingYtThumb(true);
+    const MAX_YT_THUMB_BYTES = Math.floor(1.95 * 1024 * 1024); // строго <= 1.95 МБ
+
+    const toJpegBlob = (canvas: HTMLCanvasElement, q: number): Promise<Blob | null> =>
+      new Promise(resolve => {
+        canvas.toBlob(blob => resolve(blob), 'image/jpeg', q);
+      });
+
+    try {
+      const offscreen = buildFullResThumbnailCanvas(slot);
+      let bestBlob = await toJpegBlob(offscreen, 0.95);
+      let bestQ = 0.95;
+
+      if (!bestBlob || bestBlob.size > MAX_YT_THUMB_BYTES) {
+        let low = 0.20;
+        let high = 0.94;
+        bestBlob = null;
+        for (let step = 0; step < 8; step++) {
+          const mid = Number(((low + high) / 2).toFixed(3));
+          const candidate = await toJpegBlob(offscreen, mid);
+          if (!candidate) break;
+          if (candidate.size <= MAX_YT_THUMB_BYTES) {
+            bestBlob = candidate;
+            bestQ = mid;
+            low = mid;
+          } else {
+            high = mid;
+          }
+        }
+        if (!bestBlob) {
+          bestBlob = await toJpegBlob(offscreen, 0.15);
+          bestQ = 0.15;
+        }
+      }
+
+      if (!bestBlob) {
+        onNotify('Не удалось сформировать оптимизированную обложку для YouTube.', 'error');
+        return;
+      }
+
+      const url = URL.createObjectURL(bestBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `thumbnail_youtube_4k_3840x2160_${slot}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+      const mbText = (bestBlob.size / (1024 * 1024)).toFixed(2);
+      const qPct = Math.round(bestQ * 100);
+      onNotify(
+        `✅ Обложка оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
+        'success'
+      );
+    } finally {
+      setIsOptimizingYtThumb(false);
+    }
   };
 
   // Передача чистого арта или скомпонованного кадра в модуль «🖼️ Арт-Редактор & Фон»
@@ -3051,7 +3242,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Левая колонка (5/12): Настройки Обложки A / B, AI Horde / Cloudflare Flux.1-Schnell и пилюли-переключатели */}
-        <div className="lg:col-span-5 aether-surface rounded-2xl p-5 sm:p-6 space-y-5 min-w-0">
+        <div className="lg:col-span-5 aether-surface rounded-2xl p-4 sm:p-6 space-y-5 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3.5">
             <div>
               <h2 className="text-base font-bold text-[#f8fafc] flex items-center gap-2 tracking-tight">
@@ -3063,10 +3254,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </p>
             </div>
             <span
-              className={`text-[10px] font-mono px-2.5 py-1 rounded-full border shrink-0 ${
-                isCloudflareConfigured
-                  ? 'bg-amber-500/15 border-amber-400/40 text-amber-300'
-                  : 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
+              className={`text-[11px] font-mono shrink-0 ${
+                isCloudflareConfigured ? 'text-amber-300' : 'text-emerald-300/85'
               }`}
             >
               {isCloudflareConfigured ? 'Cloudflare Flux • 16:9' : 'Flux.1 AI Horde • 16:9'}
@@ -3315,7 +3504,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <Type className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>Шрифт и эффект заголовка</span>
               </label>
-              <span className="text-[10px] font-mono text-amber-300/90 bg-amber-500/10 border border-amber-400/25 px-2 py-0.5 rounded-full">
+              <span className="text-[11px] font-mono text-amber-300/85">
                 3840×2160 Canvas
               </span>
             </div>
@@ -3582,7 +3771,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         type="button"
                         aria-pressed={isActive}
                         onClick={() => toggleBadgeA(badge.id)}
-                        className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                        className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
                           isActive
                             ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
                             : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
@@ -3609,7 +3798,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         type="button"
                         aria-pressed={isActive}
                         onClick={() => toggleBadgeA(badge.id)}
-                        className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
+                        className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
                           isActive
                             ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
                             : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
@@ -3795,18 +3984,93 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           )}
 
-          {/* Главный экшен: экспорт 4K обложки и передача в Арт-Редактор */}
+          {/* ЛОКАЛЬНЫЙ РЕСАЙЗ И ПОВЫШЕНИЕ ЧЁТКОСТИ БАЗОВОГО КАДРА (100% HTML5 Canvas) */}
+          <div className="aether-card rounded-2xl p-4 space-y-3 border border-cyan-400/25 bg-[#080c14]/70">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-cyan-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>🔍 Разрешение и чёткость холста</span>
+              </span>
+              <span className="text-[10px] font-mono text-white/55">100% локально Canvas</span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              {(
+                [
+                  { id: '1920x1080', w: 1920, h: 1080, tag: 'Full HD' },
+                  { id: '2560x1440', w: 2560, h: 1440, tag: '2K QHD' },
+                  { id: '3840x2160', w: 3840, h: 2160, tag: '4K UHD' }
+                ] as const
+              ).map(res => {
+                const isSelected = baseResolutionPreset === res.id;
+                return (
+                  <button
+                    key={`thumb-res-${res.id}`}
+                    type="button"
+                    onClick={() => resampleBaseSlotToResolution(res.w, res.h)}
+                    className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-[10.5px] font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition ${
+                      isSelected
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_14px_rgba(34,211,238,0.2)]'
+                        : 'bg-[#090D16] border-white/[0.08] text-white/75 hover:text-white hover:border-cyan-400/40'
+                    }`}
+                  >
+                    <span className="tabular-nums">{res.w}×{res.h}</span>
+                    <span className="text-[9px] font-sans text-white/50">{res.tag}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-white/80 font-semibold">
+                  Резкость / микроконтраст базового кадра
+                </span>
+                <span className="font-mono font-bold text-cyan-300 tabular-nums">
+                  {baseSharpenPct}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={baseSharpenPct}
+                onChange={e => setBaseSharpenPct(Number(e.target.value))}
+                className="w-full accent-cyan-400 cursor-pointer"
+              />
+              <p className="text-[10px] text-white/50 leading-tight">
+                Применяется 3×3 свёртка строго к базовой картинке — титры и бейджи всегда остаются идеально чёткими.
+              </p>
+            </div>
+          </div>
+
+          {/* Главный экшен: экспорт 4K обложки (PNG Lossless + YouTube < 2 МБ) и передача в Арт-Редактор */}
           <div className="space-y-2.5 pt-1">
-            <button
-              type="button"
-              onClick={() => downloadCover4K('A')}
-              className="w-full min-h-[48px] btn-primary-action py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Download className="w-4 h-4 shrink-0" />
-              <span>📥 Экспорт 4K обложки A (3840×2160 PNG)</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => downloadCover4K('A')}
+                className="w-full min-h-[48px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>📥 4K PNG Обложка A</span>
+              </button>
+              <button
+                type="button"
+                disabled={isOptimizingYtThumb}
+                onClick={() => void downloadCoverYouTube2Mb('A')}
+                className="w-full min-h-[48px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              >
+                <Download className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>
+                  {isOptimizingYtThumb ? 'Сжатие...' : '📦 Скачать для YouTube (< 2 МБ)'}
+                </span>
+              </button>
+            </div>
+
             {onSendToArtEditor && (
-              <div className={`grid gap-2 ${abModeEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <div className={`grid gap-2 ${abModeEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                 <button
                   type="button"
                   onClick={() => handleOpenSlotInArtEditor('A')}
@@ -3830,20 +4094,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             )}
             {abModeEnabled && (
-              <button
-                type="button"
-                onClick={() => downloadCover4K('B')}
-                className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-300 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>📥 Экспорт 4K обложки B (3840×2160 PNG)</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadCover4K('B')}
+                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>📥 4K PNG Обложка B</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isOptimizingYtThumb}
+                  onClick={() => void downloadCoverYouTube2Mb('B')}
+                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-amber-400/45 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  <Download className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>📦 YouTube B (&lt; 2 МБ)</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
 
         {/* Правая зона (7/12): 4K Холст A (или A vs B) в аккуратной рамке с бликом + Мобильный масштаб 160x90 px */}
-        <div className="lg:col-span-7 aether-surface rounded-2xl p-5 sm:p-6 space-y-5 flex flex-col justify-between min-w-0">
+        <div className="lg:col-span-7 aether-surface rounded-2xl p-4 sm:p-6 space-y-5 flex flex-col justify-between min-w-0">
           <div className={`grid gap-5 ${abModeEnabled ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'}`}>
             {/* ХОЛСТ ОБЛОЖКИ A */}
             <div className="space-y-3">
@@ -4301,14 +4576,27 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setZoomedVariantIdx(index);
+                        }}
+                        aria-label={`Увеличить вариант #${index + 1}`}
+                        title="Увеличить кадр"
+                        className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-cyan-300 text-xs font-bold flex items-center justify-center cursor-pointer"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </button>
+
                       <button
                         type="button"
                         onClick={e => {
                           e.stopPropagation();
                           handleDownloadVariantFromGrid(index);
                         }}
-                        className="min-h-[38px] btn-primary-action py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer"
+                        className="min-h-[40px] btn-primary-action py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>📥 Скачать 4K</span>
@@ -4320,7 +4608,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           e.stopPropagation();
                           handleAttachToYoutubeRelease(index);
                         }}
-                        className={`min-h-[38px] font-bold py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer border ${
+                        className={`min-h-[40px] font-bold py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer border ${
                           isAttached
                             ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
                             : 'bg-white/[0.05] hover:bg-white/[0.1] border-white/[0.1] text-cyan-300'
@@ -4347,7 +4635,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           <button
             type="button"
             onClick={() => setShowVideoExtractor(prev => !prev)}
-            className="w-full min-h-[56px] p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+            className="w-full min-h-[56px] p-4 sm:p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center shrink-0">
@@ -4363,7 +4651,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-400/30 text-amber-300 px-2.5 py-0.5 rounded-full">
+              <span className="text-[11px] font-mono text-amber-300/85">
                 3840×2160
               </span>
               <ChevronDown
@@ -4484,7 +4772,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           <button
             type="button"
             onClick={() => setShowPromptGenerator(prev => !prev)}
-            className="w-full min-h-[56px] p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+            className="w-full min-h-[56px] p-4 sm:p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center shrink-0">
@@ -4500,7 +4788,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] font-mono bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 px-2.5 py-0.5 rounded-full">
+              <span className="text-[11px] font-mono text-emerald-300/85">
                 PROMPT LAB
               </span>
               <ChevronDown

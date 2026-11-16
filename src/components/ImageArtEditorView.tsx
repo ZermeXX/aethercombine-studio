@@ -1290,10 +1290,12 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
   const [flipV, setFlipV] = useState<boolean>(false);
   const [effects, setEffects] = useState<ImageEffectsState>({ ...DEFAULT_EFFECTS });
 
-  // Export settings
+  // Export & Canvas sharpness/resizer settings
   const [jpegQuality, setJpegQuality] = useState<number>(92);
   const [exportBackdropColor, setExportBackdropColor] = useState<string>('#090D16');
   const [svgExportMode, setSvgExportMode] = useState<SvgExportMode>('embedded_hires');
+  const [dockExportMode, setDockExportMode] = useState<'png_lossless' | 'youtube_optimized'>('png_lossless');
+  const [isOptimizingYtExport, setIsOptimizingYtExport] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
   // SVG Infographic & Timeline Generator state
@@ -1494,9 +1496,11 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
       const drawX = (W - drawW) / 2 + panX * targetToCanvasScale;
       const drawY = (H - drawH) / 2 + panY * targetToCanvasScale;
 
-      // Step B: CSS canvas filter pipeline (Brightness, Contrast, Saturation, Blur)
+      // Step B: CSS canvas filter pipeline (Brightness, Contrast, Saturation, Blur) + High Quality Smoothing
       const blurScaled = effects.blur > 0 ? Math.max(0.2, (effects.blur * Math.min(W, H)) / 900) : 0;
       ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.filter = [
         `brightness(${effects.brightness}%)`,
         `contrast(${effects.contrast}%)`,
@@ -1880,8 +1884,168 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
     window.setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
 
+  const canvasToBlobAsync = (
+    canvas: HTMLCanvasElement,
+    mime: string,
+    quality?: number
+  ): Promise<Blob | null> =>
+    new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), mime, quality);
+    });
+
+  // Локальный ресайз базового кадра/холста в браузере (imageSmoothingQuality = 'high')
+  const resampleBaseCanvasToResolution = (newW: number, newH: number) => {
+    const src = sourceCanvasRef.current;
+    const curMask = alphaMaskRef.current;
+    if (!src) return;
+
+    const sw = src.width;
+    const sh = src.height;
+    const scaleCover = Math.max(newW / Math.max(1, sw), newH / Math.max(1, sh));
+    const drawW = sw * scaleCover;
+    const drawH = sh * scaleCover;
+    const dx = (newW - drawW) / 2;
+    const dy = (newH - drawH) / 2;
+
+    const resizedRgb = document.createElement('canvas');
+    resizedRgb.width = newW;
+    resizedRgb.height = newH;
+    const rCtx = resizedRgb.getContext('2d', { willReadFrequently: true });
+    if (!rCtx) return;
+    rCtx.imageSmoothingEnabled = true;
+    rCtx.imageSmoothingQuality = 'high';
+    rCtx.drawImage(src, dx, dy, drawW, drawH);
+
+    // Аккуратно пересчитываем альфа-маску под новое разрешение
+    const nextMask = new Uint8ClampedArray(newW * newH);
+    if (curMask && curMask.length === sw * sh) {
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = sw;
+      maskCanvas.height = sh;
+      const mCtx = maskCanvas.getContext('2d');
+      const resizedMaskCanvas = document.createElement('canvas');
+      resizedMaskCanvas.width = newW;
+      resizedMaskCanvas.height = newH;
+      const rmCtx = resizedMaskCanvas.getContext('2d', { willReadFrequently: true });
+      if (mCtx && rmCtx) {
+        const mImg = mCtx.createImageData(sw, sh);
+        for (let i = 0; i < sw * sh; i++) {
+          const a = curMask[i];
+          const p = i * 4;
+          mImg.data[p] = a;
+          mImg.data[p + 1] = a;
+          mImg.data[p + 2] = a;
+          mImg.data[p + 3] = 255;
+        }
+        mCtx.putImageData(mImg, 0, 0);
+        rmCtx.imageSmoothingEnabled = true;
+        rmCtx.imageSmoothingQuality = 'high';
+        rmCtx.drawImage(maskCanvas, dx, dy, drawW, drawH);
+        const resData = rmCtx.getImageData(0, 0, newW, newH).data;
+        for (let i = 0; i < newW * newH; i++) {
+          nextMask[i] = resData[i * 4];
+        }
+      } else {
+        nextMask.fill(255);
+      }
+    } else {
+      nextMask.fill(255);
+    }
+
+    sourceCanvasRef.current = resizedRgb;
+    origAlphaRef.current = new Uint8ClampedArray(nextMask);
+    alphaMaskRef.current = nextMask;
+    maskHistoryRef.current = [];
+    setHistoryCount(0);
+    setNaturalSize({ w: newW, h: newH });
+    setLockAspect(false);
+    setKeepPresetDimensionsOnLoad(true);
+    setTargetWidth(newW);
+    setTargetHeight(newH);
+    setPanX(0);
+    setPanY(0);
+    setZoomPct(100);
+    if (newW === 2560 && newH === 1440) {
+      setShowSafeZones(true);
+    }
+    setMaskRevision(r => r + 1);
+    onNotify(
+      `🔍 Базовый кадр и холст приведены к ${newW}×${newH} px (High-Quality Canvas)`,
+      'success'
+    );
+  };
+
+  // Бинарный подбор максимального качества (< 5.8 МБ) для YouTube Баннеров и 4K/QHD экспорта
+  const handleExportYouTubeOptimized6Mb = async () => {
+    if (!sourceCanvasRef.current || isOptimizingYtExport) return;
+    setIsOptimizingYtExport(true);
+    const MAX_YT_BANNER_BYTES = Math.floor(5.8 * 1024 * 1024); // строго < 5.8 МБ (лимит YouTube 6 МБ)
+    const baseName = `aether_art_${targetWidth}x${targetHeight}`;
+
+    try {
+      // Для небольших логотипов/водяных знаков сохраняем PNG если он с запасом меньше 5.8 МБ
+      if (targetWidth <= 800 && targetHeight <= 800) {
+        const pngCanvas = buildFullResExportCanvas();
+        const pngBlob = await canvasToBlobAsync(pngCanvas, 'image/png');
+        if (pngBlob && pngBlob.size <= MAX_YT_BANNER_BYTES) {
+          downloadBlob(pngBlob, `${baseName}_yt.png`);
+          onNotify(
+            `✅ Файл оптимизирован для YouTube (< 6 МБ): ${(pngBlob.size / (1024 * 1024)).toFixed(2)} МБ (PNG Lossless)`,
+            'success'
+          );
+          return;
+        }
+      }
+
+      const off = buildFullResExportCanvas(exportBackdropColor || '#090D16');
+      let bestBlob = await canvasToBlobAsync(off, 'image/jpeg', 0.98);
+      let bestQ = 0.98;
+
+      if (!bestBlob || bestBlob.size > MAX_YT_BANNER_BYTES) {
+        let low = 0.25;
+        let high = 0.97;
+        bestBlob = null;
+        for (let step = 0; step < 8; step++) {
+          const mid = Number(((low + high) / 2).toFixed(3));
+          const candidate = await canvasToBlobAsync(off, 'image/jpeg', mid);
+          if (!candidate) break;
+          if (candidate.size <= MAX_YT_BANNER_BYTES) {
+            bestBlob = candidate;
+            bestQ = mid;
+            low = mid;
+          } else {
+            high = mid;
+          }
+        }
+        if (!bestBlob) {
+          bestBlob = await canvasToBlobAsync(off, 'image/jpeg', 0.2);
+          bestQ = 0.2;
+        }
+      }
+
+      if (!bestBlob) {
+        onNotify('Не удалось сформировать оптимизированный файл для YouTube.', 'error');
+        return;
+      }
+
+      const mbText = (bestBlob.size / (1024 * 1024)).toFixed(2);
+      const qPct = Math.round(bestQ * 100);
+      downloadBlob(bestBlob, `${baseName}_youtube.jpg`);
+      onNotify(
+        `✅ Оптимизировано для YouTube (< 6 МБ): ${mbText} МБ (качество ${qPct}%)`,
+        'success'
+      );
+    } finally {
+      setIsOptimizingYtExport(false);
+    }
+  };
+
   const handleExportFormat = (format: 'png' | 'jpeg' | 'webp' | 'svg') => {
     if (!sourceCanvasRef.current) return;
+    if (dockExportMode === 'youtube_optimized' && (format === 'png' || format === 'jpeg')) {
+      void handleExportYouTubeOptimized6Mb();
+      return;
+    }
     const baseName = `aether_art_${targetWidth}x${targetHeight}`;
 
     if (format === 'svg') {
@@ -2050,7 +2214,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Верхний заголовок и быстрая панель загрузки / возврата */}
-      <div className="aether-surface rounded-2xl p-5 sm:p-6 flex flex-wrap items-center justify-between gap-4 border border-cyan-400/20">
+      <div className="aether-surface rounded-2xl p-4 sm:p-6 flex flex-wrap items-center justify-between gap-4 border border-cyan-400/20">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/25 to-emerald-500/25 border border-cyan-400/40 flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.2)]">
@@ -2059,8 +2223,8 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
             <h2 className="text-base sm:text-lg font-extrabold tracking-tight text-[#f8fafc]">
               🖼️ Арт-Редактор &amp; Удаление фона
             </h2>
-            <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-400/35 text-cyan-300">
-              Offline Canvas Engine
+            <span className="text-[11px] font-mono text-cyan-300/80">
+              Canvas Engine
             </span>
           </div>
           <p className="text-xs text-white/60">
@@ -2102,7 +2266,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
       </div>
 
       {/* Основная рабочая сетка 12 колонок */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
         {/* ЛЕВАЯ КОЛОНКА (5/12): Инструменты фона, ресайз, фильтры и экспорт */}
         <div className="lg:col-span-5 space-y-5 min-w-0">
           {/* 1. УДАЛЕНИЕ ФОНА И ВОЛШЕБНАЯ ПАЛОЧКА */}
@@ -2110,7 +2274,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-            className="aether-surface rounded-2xl p-5 space-y-4 border border-emerald-400/20"
+            className="aether-surface rounded-2xl p-4 sm:p-5 space-y-4 border border-emerald-400/20"
           >
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
@@ -2241,7 +2405,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 360, damping: 28, delay: 0.04 }}
-            className="aether-surface rounded-2xl p-5 space-y-4 border border-white/[0.08]"
+            className="aether-surface rounded-2xl p-4 sm:p-5 space-y-4 border border-white/[0.08]"
           >
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
@@ -2299,7 +2463,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
             </div>
 
             <div className="space-y-2 bg-[#090D16]/70 border border-white/[0.08] rounded-xl p-3">
-              <div className="flex items-center justify-between text-[11px] text-white/70">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/70">
                 <span>🔗 Сохранять пропорции: {lockAspect ? 'ВКЛ' : 'ВЫКЛ'}</span>
                 <button
                   type="button"
@@ -2336,7 +2500,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                       key={mode.id}
                       type="button"
                       onClick={() => setCropFitMode(mode.id)}
-                      className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-left border cursor-pointer transition ${
+                      className={`min-h-[40px] sm:min-h-[36px] px-3 py-1.5 rounded-lg text-[11px] font-semibold text-left border cursor-pointer transition ${
                         cropFitMode === mode.id
                           ? 'bg-cyan-500/20 border-cyan-400/55 text-cyan-200'
                           : 'bg-[#090D16]/75 border-white/[0.08] text-white/60 hover:text-white'
@@ -2356,7 +2520,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                   <Tv className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   <span>📺 Брендинг YouTube-канала</span>
                 </span>
-                <span className="text-[10px] font-mono text-white/55">Официальные спецификации</span>
+                <span className="text-[10px] font-mono text-white/55">Спецификации</span>
               </div>
               <div className="flex flex-col gap-1.5">
                 {YOUTUBE_BRANDING_PRESETS.map(preset => {
@@ -2366,7 +2530,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                       key={preset.id}
                       type="button"
                       onClick={() => applyPresetSize(preset)}
-                      className={`min-h-[38px] px-3 py-1.5 rounded-xl text-[11px] font-bold text-left border cursor-pointer transition flex items-center justify-between gap-2 ${
+                      className={`min-h-[42px] sm:min-h-[38px] px-3 py-1.5 rounded-xl text-[11px] font-bold text-left border cursor-pointer transition flex items-center justify-between gap-2 ${
                         isActive
                           ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.25)]'
                           : 'bg-[#090D16]/85 border-white/[0.08] text-white/75 hover:text-white hover:border-white/25'
@@ -2386,7 +2550,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 type="button"
                 aria-pressed={showSafeZones}
                 onClick={() => setShowSafeZones(prev => !prev)}
-                className={`w-full min-h-[40px] px-3 py-2 rounded-xl border text-[11px] font-bold flex items-center justify-between gap-2 cursor-pointer transition ${
+                className={`w-full min-h-[42px] px-3 py-2 rounded-xl border text-[11px] font-bold flex items-center justify-between gap-2 cursor-pointer transition ${
                   showSafeZones
                     ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
                     : 'bg-[#090D16]/85 border-white/[0.1] text-white/70 hover:text-white'
@@ -2415,7 +2579,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                       key={preset.id}
                       type="button"
                       onClick={() => applyPresetSize(preset)}
-                      className={`min-h-[36px] px-2.5 py-1.5 rounded-xl text-[11px] font-bold font-mono tabular-nums border cursor-pointer transition ${
+                      className={`min-h-[40px] sm:min-h-[36px] px-2.5 py-1.5 rounded-xl text-[11px] font-bold font-mono tabular-nums border cursor-pointer transition ${
                         isActive
                           ? 'bg-amber-400/20 border-amber-400 text-amber-200'
                           : 'bg-[#090D16]/80 border-white/[0.08] text-white/70 hover:text-white hover:border-white/20'
@@ -2428,26 +2592,80 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               </div>
             </div>
 
+            {/* Локальное приведение разрешения и резкости базового холста (HTML5 Canvas) */}
+            <div className="bg-[#090D16]/85 border border-cyan-400/25 rounded-xl p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-200 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>🔍 Разрешение и чёткость холста</span>
+                </span>
+                <span className="text-[10px] font-mono text-white/55">100% локально Canvas</span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { w: 1920, h: 1080, tag: 'Full HD' },
+                  { w: 2560, h: 1440, tag: '2K / Баннер' },
+                  { w: 3840, h: 2160, tag: '4K UHD' }
+                ].map(res => {
+                  const isMatch = naturalSize.w === res.w && naturalSize.h === res.h;
+                  return (
+                    <button
+                      key={`canvas-res-${res.w}`}
+                      type="button"
+                      onClick={() => resampleBaseCanvasToResolution(res.w, res.h)}
+                      className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-[10.5px] font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition ${
+                        isMatch
+                          ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_14px_rgba(34,211,238,0.2)]'
+                          : 'bg-[#0b0f19] border-white/[0.08] text-white/75 hover:text-white hover:border-cyan-400/40'
+                      }`}
+                    >
+                      <span className="tabular-nums">{res.w}×{res.h}</span>
+                      <span className="text-[9px] font-sans text-white/50">{res.tag}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/80 font-semibold">Резкость / микроконтраст (Unsharp 3×3)</span>
+                  <span className="font-mono font-bold text-cyan-300 tabular-nums">{effects.sharpness}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={effects.sharpness}
+                  onChange={e =>
+                    setEffects(prev => ({ ...prev, sharpness: Number(e.target.value) }))
+                  }
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+              </div>
+            </div>
+
             {/* Поворот и отражение */}
-            <div className="grid grid-cols-4 gap-2 pt-1">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setRotationDeg(r => (r + 270) % 360)}
-                className="min-h-[38px] rounded-xl bg-[#090D16]/80 hover:bg-white/[0.08] border border-white/[0.08] text-[11px] font-semibold text-white/80 flex items-center justify-center gap-1 cursor-pointer"
+                className="min-h-[40px] rounded-xl bg-[#090D16]/80 hover:bg-white/[0.08] border border-white/[0.08] text-[11px] font-semibold text-white/80 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> -90°
               </button>
               <button
                 type="button"
                 onClick={() => setRotationDeg(r => (r + 90) % 360)}
-                className="min-h-[38px] rounded-xl bg-[#090D16]/80 hover:bg-white/[0.08] border border-white/[0.08] text-[11px] font-semibold text-white/80 flex items-center justify-center gap-1 cursor-pointer"
+                className="min-h-[40px] rounded-xl bg-[#090D16]/80 hover:bg-white/[0.08] border border-white/[0.08] text-[11px] font-semibold text-white/80 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <RotateCw className="w-3.5 h-3.5" /> +90°
               </button>
               <button
                 type="button"
                 onClick={() => setFlipH(v => !v)}
-                className={`min-h-[38px] rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
+                className={`min-h-[40px] rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
                   flipH
                     ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
                     : 'bg-[#090D16]/80 border-white/[0.08] text-white/80'
@@ -2458,7 +2676,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               <button
                 type="button"
                 onClick={() => setFlipV(v => !v)}
-                className={`min-h-[38px] rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
+                className={`min-h-[40px] rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
                   flipV
                     ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
                     : 'bg-[#090D16]/80 border-white/[0.08] text-white/80'
@@ -2474,7 +2692,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 360, damping: 28, delay: 0.08 }}
-            className="aether-surface rounded-2xl p-5 space-y-4 border border-amber-400/20"
+            className="aether-surface rounded-2xl p-4 sm:p-5 space-y-4 border border-amber-400/20"
           >
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
@@ -2518,7 +2736,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                   { key: 'contrast', label: 'Контраст', min: 50, max: 170, step: 1, unit: '%' },
                   { key: 'saturation', label: 'Насыщенность', min: 0, max: 200, step: 1, unit: '%' },
                   { key: 'warmth', label: 'Теплота (Warmth)', min: -50, max: 50, step: 1, unit: '' },
-                  { key: 'sharpness', label: 'Резкость / Чёткость', min: 0, max: 100, step: 1, unit: '%' },
+                  { key: 'sharpness', label: 'Резкость / Чёткость', min: 0, max: 100, step: 5, unit: '%' },
                   { key: 'vignette', label: 'Виньетка', min: 0, max: 100, step: 1, unit: '%' },
                   { key: 'blur', label: 'Размытие (Blur)', min: 0, max: 20, step: 0.5, unit: 'px' }
                 ] as const
@@ -2726,7 +2944,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               const file = e.dataTransfer.files?.[0];
               if (file) handleUploadFile(file);
             }}
-            className={`aether-surface rounded-2xl p-5 space-y-4 border transition ${
+            className={`aether-surface rounded-2xl p-4 sm:p-5 space-y-3.5 sm:space-y-4 border transition ${
               isDragOver ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/[0.08]'
             }`}
           >
@@ -2735,20 +2953,34 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981] shrink-0" />
                 <span className="text-xs font-bold text-[#f8fafc] truncate">{sourceLabel}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-amber-300 bg-[#090D16] border border-white/[0.1] px-2.5 py-0.5 rounded-full tabular-nums">
+              <div className="flex items-center gap-2 text-[11px] font-mono tabular-nums">
+                <span className="text-amber-300 font-semibold">
                   {targetWidth} × {targetHeight} px
                 </span>
-                <span className="text-[11px] font-mono text-white/60 bg-[#090D16] border border-white/[0.1] px-2.5 py-0.5 rounded-full">
+                <span className="text-white/25">•</span>
+                <span className="text-white/60">
                   {cropFitMode.toUpperCase()}
                 </span>
               </div>
             </div>
 
+            {wandActive && (
+              <div className="rounded-xl bg-amber-500/15 border border-amber-400/60 text-amber-200 text-[11px] font-bold px-3 py-2 flex items-center justify-between gap-2">
+                <span>🪄 Режим Волшебной палочки активен — кликните по фону на холсте</span>
+                <button
+                  type="button"
+                  onClick={() => setWandActive(false)}
+                  className="text-[10px] underline text-amber-300 cursor-pointer shrink-0"
+                >
+                  Выкл
+                </button>
+              </div>
+            )}
+
             {/* Checkerboard Canvas Frame + Interactive Safe Zone Overlay + Floating Dock */}
             <div
               ref={canvasFrameRef}
-              className="relative w-full rounded-2xl overflow-hidden border border-white/[0.12] shadow-2xl flex items-center justify-center min-h-[360px] max-h-[600px] px-3 pt-3 pb-20 select-none"
+              className="relative w-full rounded-2xl overflow-hidden border border-white/[0.12] shadow-2xl flex items-center justify-center min-h-[290px] sm:min-h-[360px] max-h-[600px] px-2.5 sm:px-3 pt-3 pb-[76px] sm:pb-20 select-none"
               style={{
                 backgroundColor: '#131B2E',
                 backgroundImage:
@@ -2909,36 +3141,25 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 )}
               </div>
 
-              {wandActive ? (
-                <div className="pointer-events-none absolute top-3 left-3 z-20 bg-[#090D16]/90 border border-amber-400/70 text-amber-200 text-[11px] font-bold px-3 py-1 rounded-lg shadow-lg">
-                  🪄 Режим палочки активен — кликните по фону
-                </div>
-              ) : (
-                <div className="pointer-events-none absolute top-3 left-3 z-20 bg-[#090D16]/85 border border-white/15 text-white/75 text-[10.5px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                  <Move className="w-3 h-3 text-cyan-300" />
-                  <span>Тяните картинку мышью • Колёсико = Zoom</span>
-                </div>
-              )}
-
-              {/* ПЛАВАЮЩИЙ ДОК-БАР ИНСТРУМЕНТОВ (Interactive Floating Dock) */}
-              <div className="pointer-events-none absolute bottom-3 inset-x-3 z-30 flex justify-center">
+              {/* ПЛАВАЮЩИЙ ДОК-БАР ИНСТРУМЕНТОВ (Interactive Floating Dock — одна строка с горизонтальным свайпом на узких экранах) */}
+              <div className="pointer-events-none absolute bottom-2.5 inset-x-2.5 z-30 flex justify-center">
                 <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                  className="pointer-events-auto backdrop-blur-xl bg-[#090D16]/85 border border-white/10 rounded-2xl shadow-2xl px-2 py-1.5 flex flex-wrap sm:flex-nowrap items-center justify-center gap-1.5"
+                  className="pointer-events-auto max-w-full overflow-x-auto no-scrollbar backdrop-blur-xl bg-[#090D16]/88 border border-white/10 rounded-2xl shadow-2xl px-2 py-1.5 flex flex-nowrap items-center justify-start sm:justify-center gap-1.5"
                   role="toolbar"
                   aria-label="Быстрые инструменты холста Арт-Редактора"
                 >
                   <motion.button
                     type="button"
-                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileHover={{ scale: 1.06, y: -2 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 460, damping: 24 }}
                     onClick={handleAutoRemoveBackground}
                     disabled={isRemovingBg}
                     title="Автоматически удалить фон (1 клик)"
-                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 text-emerald-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 text-emerald-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
                   >
                     <Scissors className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
                     <span>{isRemovingBg ? 'Маска...' : '✂️ Удалить фон'}</span>
@@ -2946,13 +3167,13 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
 
                   <motion.button
                     type="button"
-                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileHover={{ scale: 1.06, y: -2 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 460, damping: 24 }}
                     onClick={() => setShowSafeZones(prev => !prev)}
                     aria-pressed={showSafeZones}
                     title="Быстрый показ/скрытие сетки YouTube Safe Zones (2560×1440 / 800×800)"
-                    className={`min-h-[36px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors ${
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
                       showSafeZones
                         ? 'bg-cyan-500/25 border-cyan-400/70 text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.28)]'
                         : 'bg-white/[0.05] hover:bg-white/[0.12] border-white/10 text-white/80'
@@ -2964,12 +3185,12 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
 
                   <motion.button
                     type="button"
-                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileHover={{ scale: 1.06, y: -2 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 460, damping: 24 }}
                     onClick={handleDockFitCenter}
                     title="Вписать в безопасную зону баннера или отцентрировать на холсте"
-                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-[#FDE047] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-[#FDE047] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   >
                     <Target className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                     <span>🎯 Вписать в центр</span>
@@ -2977,28 +3198,73 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
 
                   <motion.button
                     type="button"
-                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileHover={{ scale: 1.06, y: -2 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 460, damping: 24 }}
                     onClick={resetLayerPosition}
                     title="Сбросить позицию (X/Y) и масштаб (100%)"
-                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 text-white/85 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 text-white/85 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   >
                     <RotateCcw className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                     <span>🔄 Сброс</span>
                   </motion.button>
 
+                  {/* Компактный переключатель режима экспорта рядом с кнопкой сохранения */}
+                  <div
+                    role="group"
+                    aria-label="Режим веса экспорта"
+                    className="flex items-center bg-[#080c14]/90 border border-white/[0.1] rounded-xl p-0.5 shrink-0"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDockExportMode('png_lossless')}
+                      className={`min-h-[36px] px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap cursor-pointer transition ${
+                        dockExportMode === 'png_lossless'
+                          ? 'bg-white/[0.14] text-white'
+                          : 'text-white/55 hover:text-white'
+                      }`}
+                    >
+                      PNG Lossless
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDockExportMode('youtube_optimized')}
+                      className={`min-h-[36px] px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap cursor-pointer transition ${
+                        dockExportMode === 'youtube_optimized'
+                          ? 'bg-amber-400/25 text-[#FDE047] border border-amber-400/40'
+                          : 'text-white/55 hover:text-white'
+                      }`}
+                    >
+                      YouTube &lt; 6 МБ
+                    </button>
+                  </div>
+
                   <motion.button
                     type="button"
-                    whileHover={{ scale: 1.1, y: -3 }}
+                    whileHover={{ scale: 1.06, y: -2 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 460, damping: 24 }}
-                    onClick={() => handleExportFormat('png')}
-                    title={`Быстрый экспорт PNG (${targetWidth}×${targetHeight} px)`}
-                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 whitespace-nowrap"
+                    disabled={isOptimizingYtExport}
+                    onClick={() =>
+                      dockExportMode === 'youtube_optimized'
+                        ? void handleExportYouTubeOptimized6Mb()
+                        : handleExportFormat('png')
+                    }
+                    title={
+                      dockExportMode === 'youtube_optimized'
+                        ? `Оптимизировать под лимит YouTube < 5.8 МБ (${targetWidth}×${targetHeight} px)`
+                        : `Быстрый экспорт PNG Lossless (${targetWidth}×${targetHeight} px)`
+                    }
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 whitespace-nowrap shrink-0 disabled:opacity-60"
                   >
                     <Download className="w-3.5 h-3.5 shrink-0" />
-                    <span>💾 PNG</span>
+                    <span>
+                      {isOptimizingYtExport
+                        ? 'Оптимизация...'
+                        : dockExportMode === 'youtube_optimized'
+                        ? '📦 Экспорт YT < 6МБ'
+                        : '💾 PNG'}
+                    </span>
                   </motion.button>
                 </motion.div>
               </div>
@@ -3009,7 +3275,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-[#f8fafc]">
                   <ZoomIn className="w-4 h-4 text-cyan-400 shrink-0" />
-                  <span>🔍 Масштаб картинки (Zoom: 20% – 250%)</span>
+                  <span>🔍 Масштаб и сдвиг (Drag = позиция • Wheel = Zoom)</span>
                 </div>
                 <div className="flex items-center gap-2.5 text-[11px] font-mono tabular-nums">
                   <span className="text-white/60">
@@ -3035,7 +3301,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 <button
                   type="button"
                   onClick={fitImageIntoBannerSafeZone}
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-amber-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  className="min-h-[42px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-amber-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
                 >
                   <Target className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                   <span>🎯 Вписать в безопасную зону (1546×423)</span>
@@ -3044,7 +3310,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 <button
                   type="button"
                   onClick={fillEntireBannerCanvas}
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-cyan-400/35 text-cyan-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  className="min-h-[42px] px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-cyan-400/35 text-cyan-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
                 >
                   <span>↔️ Заполнить всю шапку (2560×1440)</span>
                 </button>
@@ -3052,7 +3318,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 <button
                   type="button"
                   onClick={resetLayerPosition}
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.1] text-white/75 text-[11px] font-semibold cursor-pointer transition ml-auto"
+                  className="min-h-[42px] px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.1] text-white/75 text-[11px] font-semibold cursor-pointer transition sm:ml-auto"
                 >
                   Сбросить позицию
                 </button>
@@ -3143,7 +3409,7 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
               </div>
             </div>
 
-            {/* 4 кнопки скачивания форматов */}
+            {/* 4 кнопки скачивания форматов + умная кнопка под лимит баннера YouTube (< 6 МБ) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
@@ -3151,7 +3417,21 @@ export const ImageArtEditorView: React.FC<ImageArtEditorViewProps> = ({
                 className="min-h-[48px] btn-primary-action px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4 shrink-0" />
-                <span>Скачать PNG (с прозрачным фоном)</span>
+                <span>Скачать PNG (Lossless)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isOptimizingYtExport}
+                onClick={() => void handleExportYouTubeOptimized6Mb()}
+                className="min-h-[48px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition disabled:opacity-60"
+              >
+                <Download className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>
+                  {isOptimizingYtExport
+                    ? 'Подбор качества...'
+                    : '📦 YouTube Optimized (< 6 МБ)'}
+                </span>
               </button>
 
               <button

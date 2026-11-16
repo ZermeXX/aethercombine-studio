@@ -2571,7 +2571,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const filledScenesCount = narrativeScenes.filter(s => Boolean(s.file_name.trim())).length;
 
   return (
-    <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-6">
+    <div className="bg-[#111622] border border-slate-800 rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
       {/* Шапка вкладки «Повествовательный монтаж (8–16 мин / 100+ сцен)» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div className="space-y-1.5">
@@ -2588,7 +2588,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               value={projectName}
               onChange={e => handleProjectNameUpdate(e.target.value)}
               placeholder="Narrative Movie 4K"
-              className="bg-slate-900 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1 text-xs font-mono text-indigo-200 outline-none w-56"
+              className="bg-slate-900 border border-slate-700 focus:border-indigo-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-indigo-200 outline-none w-full sm:w-56"
             />
             <span className="text-slate-500">
               • Динамический таймлайн • Прямая выгрузка в Google Drive &amp;{' '}
@@ -2608,7 +2608,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           <button
             type="button"
             onClick={() => scenarioJsonInputRef.current?.click()}
-            className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-500/20"
+            className="min-h-[40px] bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-500/20"
           >
             <FolderUp className="w-4 h-4" /> Загрузить JSON-сценарий (N-Сцен / 100–200+)
           </button>
@@ -2616,7 +2616,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           <button
             type="button"
             onClick={handleExportScenarioJson}
-            className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+            className="min-h-[40px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-indigo-400" /> Экспорт JSON
           </button>
@@ -2624,7 +2624,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           <button
             type="button"
             onClick={handleExportInteractiveStoryboardHtml}
-            className="bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/50 text-cyan-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+            className="min-h-[40px] bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/50 text-cyan-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
             title="Скачать автономный однофайловый HTML для вычитки сценария, камер и сцен с телефона перед 4K-рендером"
           >
             <Eye className="w-3.5 h-3.5 text-cyan-300" /> 👁️ Скачать интерактивную раскадровку (.html)
@@ -2678,9 +2678,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 2. Двухслойный аудио-микшер (Эмбиент + Мастер-дорожка)
               </h3>
             </div>
-            <span className="text-[10px] font-mono bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded">
-              2-Layer Audio Mixer
-            </span>
           </div>
 
           <div className="space-y-4">
@@ -2748,7 +2745,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     setMasterAudio(prev => ({ ...prev, file_name: e.target.value }))
                   }
                   placeholder="Напр.: master_voiceover.wav или выберите локальный файл →"
-                  className="flex-1 bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
+                  className="flex-1 min-w-0 bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-2 text-xs font-mono text-amber-300 outline-none"
                 />
                 <input
                   ref={masterAudioInputRef}
@@ -2760,7 +2757,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <button
                   type="button"
                   onClick={() => masterAudioInputRef.current?.click()}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
+                  className="min-h-[40px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
                 >
                   🎵 Выбрать .mp3 / .wav
                 </button>
@@ -3126,7 +3123,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               <button
                 type="button"
                 onClick={syncScenesDurationToMasterAudio}
-                className="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
+                className="min-h-[40px] bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({masterAudioDurationSec}с)
               </button>
@@ -3263,21 +3260,21 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={() => srtFileInputRef.current?.click()}
-              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
+              className="min-h-[40px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
             >
               📎 Прикрепить .srt / текстовый скрипт
             </button>
             <button
               type="button"
               onClick={generateSrtFromScenes}
-              className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
+              className="min-h-[40px] bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition"
             >
               ⚡ Перевести и сгенерировать .SRT ({getShortSubtitleLangCode(subtitleLanguage)})
             </button>
             <button
               type="button"
               onClick={handleDownloadSrtFile}
-              className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+              className="min-h-[40px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm"
             >
               📥 Скачать .SRT файл
             </button>
@@ -3592,7 +3589,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={handleExportPatchManifest}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
+              className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
                 flaggedRevisionScenes.length > 0
                   ? 'bg-rose-500/20 hover:bg-rose-500/30 border-rose-400/60 text-rose-200 shadow-sm shadow-rose-500/10'
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
@@ -3608,7 +3605,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={() => generateNScenesTemplate(80)}
-              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
               title="Сгенерировать каркас на 80 сцен (~8 минут)"
             >
               80 сцен (~8м)
@@ -3616,7 +3613,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={() => generateNScenesTemplate(120)}
-              className="bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
               title="Сгенерировать каркас на 120 сцен (~12 минут)"
             >
               120 сцен (~12м)
@@ -3624,7 +3621,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={() => generateNScenesTemplate(160)}
-              className="bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
               title="Сгенерировать каркас на 160 сцен (~16 минут)"
             >
               160 сцен (~16м)
@@ -3632,13 +3629,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={() => generateNScenesTemplate(200)}
-              className="bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
+              className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition cursor-pointer"
               title="Сгенерировать каркас на 200 сцен"
             >
               200 сцен
             </button>
 
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1">
+            <div className="min-h-[40px] flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1">
               <input
                 type="number"
                 min={1}
@@ -3651,7 +3648,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               <button
                 type="button"
                 onClick={() => generateNScenesTemplate(customScenesCountInput)}
-                className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                className="min-h-[32px] px-1 text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer"
               >
                 Задать N
               </button>
@@ -3660,7 +3657,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={addScene}
-              className="bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition cursor-pointer"
+              className="min-h-[40px] bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" /> +1 сцена
             </button>
@@ -3670,7 +3667,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               onClick={() =>
                 setNarrativeScenes(prev => prev.map(s => ({ ...s, file_name: '' })))
               }
-              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-rose-300 px-2.5 py-1.5 rounded-lg text-[11px] transition cursor-pointer"
+              className="min-h-[40px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-rose-300 px-2.5 py-1.5 rounded-lg text-[11px] transition cursor-pointer"
             >
               Очистить имена
             </button>
@@ -3707,73 +3704,78 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </span>
         </div>
 
-        {/* Шапка колонок компактной строчной таблицы */}
-        <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-t-xl text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          <div className="col-span-2">⋮⋮ № / ID / Камера</div>
-          <div className="col-span-3">Видеофайл (file_name)</div>
-          <div className="col-span-2 text-center">Старт / Длит. (с)</div>
-          <div className="col-span-2">Переход / Титр</div>
-          <div className="col-span-3">🔄 На пересборку &amp; Заметка</div>
-        </div>
-
-        {/* Таймлайн сцен с Drag-to-Reorder (Motion Reorder.Group) или виртуализацией при поиске / >220 сцен */}
-        <div
-          ref={scrollContainerRef}
-          onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
-          style={{ height: `${VIEWPORT_HEIGHT}px` }}
-          className="overflow-y-auto custom-scroll border-x border-b border-slate-800 rounded-b-xl bg-[#090d16]"
-        >
-          {!searchQuery.trim() && narrativeScenes.length <= 220 ? (
-            <Reorder.Group
-              axis="y"
-              values={sceneKeys}
-              onReorder={handleReorderScenesByKeys}
-              as="div"
-              className="divide-y divide-slate-800/70"
-            >
-              {narrativeScenes.map((sc, idx) => {
-                const rowKey = getSceneRowKey(sc);
-                return (
-                  <DraggableSceneRow
-                    key={rowKey}
-                    rowKey={rowKey}
-                    sc={sc}
-                    idx={idx}
-                    canDrag={true}
-                    updateScene={updateScene}
-                    removeScene={removeScene}
-                    onCopyPrompt={(sceneIdx, prompt) => {
-                      navigator.clipboard.writeText(prompt);
-                      onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
-                    }}
-                    onDragEndNotify={handleSceneDragEndNotify}
-                  />
-                );
-              })}
-            </Reorder.Group>
-          ) : (
-            <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
-              {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
-                const rowKey = getSceneRowKey(sc);
-                return (
-                  <DraggableSceneRow
-                    key={rowKey}
-                    rowKey={rowKey}
-                    sc={sc}
-                    idx={idx}
-                    canDrag={false}
-                    updateScene={updateScene}
-                    removeScene={removeScene}
-                    onCopyPrompt={(sceneIdx, prompt) => {
-                      navigator.clipboard.writeText(prompt);
-                      onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
-                    }}
-                    onDragEndNotify={handleSceneDragEndNotify}
-                  />
-                );
-              })}
+        {/* Горизонтальный контейнер для узких экранов (< 960px) чтобы строки 12-колонной таблицы не сжимались */}
+        <div className="overflow-x-auto custom-scroll border border-slate-800 rounded-xl bg-[#090d16]">
+          <div className="min-w-[960px]">
+            {/* Шапка колонок компактной строчной таблицы */}
+            <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <div className="col-span-2">⋮⋮ № / ID / Камера</div>
+              <div className="col-span-3">Видеофайл (file_name)</div>
+              <div className="col-span-2 text-center">Старт / Длит. (с)</div>
+              <div className="col-span-2">Переход / Титр</div>
+              <div className="col-span-3">🔄 На пересборку &amp; Заметка</div>
             </div>
-          )}
+
+            {/* Таймлайн сцен с Drag-to-Reorder (Motion Reorder.Group) или виртуализацией при поиске / >220 сцен */}
+            <div
+              ref={scrollContainerRef}
+              onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+              style={{ height: `${VIEWPORT_HEIGHT}px` }}
+              className="overflow-y-auto custom-scroll bg-[#090d16]"
+            >
+              {!searchQuery.trim() && narrativeScenes.length <= 220 ? (
+                <Reorder.Group
+                  axis="y"
+                  values={sceneKeys}
+                  onReorder={handleReorderScenesByKeys}
+                  as="div"
+                  className="divide-y divide-slate-800/70"
+                >
+                  {narrativeScenes.map((sc, idx) => {
+                    const rowKey = getSceneRowKey(sc);
+                    return (
+                      <DraggableSceneRow
+                        key={rowKey}
+                        rowKey={rowKey}
+                        sc={sc}
+                        idx={idx}
+                        canDrag={true}
+                        updateScene={updateScene}
+                        removeScene={removeScene}
+                        onCopyPrompt={(sceneIdx, prompt) => {
+                          navigator.clipboard.writeText(prompt);
+                          onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
+                        }}
+                        onDragEndNotify={handleSceneDragEndNotify}
+                      />
+                    );
+                  })}
+                </Reorder.Group>
+              ) : (
+                <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
+                  {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
+                    const rowKey = getSceneRowKey(sc);
+                    return (
+                      <DraggableSceneRow
+                        key={rowKey}
+                        rowKey={rowKey}
+                        sc={sc}
+                        idx={idx}
+                        canDrag={false}
+                        updateScene={updateScene}
+                        removeScene={removeScene}
+                        onCopyPrompt={(sceneIdx, prompt) => {
+                          navigator.clipboard.writeText(prompt);
+                          onNotify(`📋 Промпт сцены #${sceneIdx + 1} скопирован в буфер`, 'success');
+                        }}
+                        onDragEndNotify={handleSceneDragEndNotify}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3800,7 +3802,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <button
               type="button"
               onClick={handleExportInteractiveStoryboardHtml}
-              className="flex items-center gap-2 bg-[#111827] hover:bg-slate-800 border border-cyan-400/45 text-cyan-200 font-bold px-4 py-3.5 rounded-xl transition text-xs cursor-pointer"
+              className="min-h-[44px] flex items-center gap-2 bg-[#111827] hover:bg-slate-800 border border-cyan-400/45 text-cyan-200 font-bold px-4 py-3 rounded-xl transition text-xs cursor-pointer"
             >
               <Eye className="w-4 h-4 text-cyan-300" />
               <span>👁️ Раскадровка (.html)</span>
@@ -3810,7 +3812,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               type="button"
               onClick={startNarrativeScenesRender}
               disabled={isDispatching || isRunnerBusy}
-              className={`flex items-center gap-2.5 font-bold px-6 py-3.5 rounded-xl shadow-lg transition text-xs ${
+              className={`min-h-[44px] flex items-center gap-2.5 font-bold px-6 py-3 rounded-xl shadow-lg transition text-xs ${
                 isRunnerBusy || isDispatching
                   ? 'bg-slate-800 border border-amber-500/40 text-amber-300 cursor-not-allowed opacity-85 shadow-none'
                   : 'bg-gradient-to-r from-indigo-500 via-indigo-600 to-amber-500 hover:from-indigo-400 hover:to-amber-400 text-slate-950 shadow-indigo-500/25 cursor-pointer'
@@ -3828,7 +3830,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 href={terminalRunUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 rounded-xl border border-indigo-400/40 bg-indigo-500/15 hover:bg-indigo-500/25 px-3.5 py-3.5 text-xs font-mono font-semibold text-indigo-200 transition"
+                className="min-h-[44px] flex items-center gap-1.5 rounded-xl border border-indigo-400/40 bg-indigo-500/15 hover:bg-indigo-500/25 px-3.5 py-3 text-xs font-mono font-semibold text-indigo-200 transition"
               >
                 <span>GitHub Run</span>
                 <ExternalLink className="w-3.5 h-3.5" />
