@@ -1,259 +1,355 @@
-#!/usr/bin/env python3
-"""
-assemble_scenes.py
-Сборка повествовательного видео и слотов по JSON-манифесту
-с кэшированием скомпилированных видео-слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 ... + быстрая склейка concat -c copy),
-гибкими режимами субтитров (Hardsub / Softsub / .SRT), авто-нарезкой Shorts 9:16 и уведомлениями в Telegram.
-"""
-
-import base64
 import json
 import os
+import shutil
 import subprocess
-import urllib.request
+import sys
+from pathlib import Path
 
 
-def load_manifest() -> dict:
-    b64_payload = os.environ.get("MANIFEST_B64", "").strip()
-    if b64_payload:
-        raw_json = base64.b64decode(b64_payload).decode("utf-8")
-        with open("config.json", "w", encoding="utf-8") as f:
-            f.write(raw_json)
-        with open("manifest.json", "w", encoding="utf-8") as mf:
-            mf.write(raw_json)
-        return json.loads(raw_json)
-    if os.path.exists("manifest.json"):
-        with open("manifest.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    if os.path.exists("config.json"):
-        with open("config.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    raise RuntimeError("Не найден MANIFEST_B64, manifest.json или config.json")
+def run_cmd(cmd: list[str]) -> None:
+    print("▶", " ".join(cmd))
+    subprocess.run(cmd, check=True)
 
 
-def send_telegram_alert(cfg: dict, text: str) -> None:
-    tg = cfg.get("telegram_notifications") or {}
-    bot_token = (tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
-    chat_id = (tg.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
-    if not bot_token or not chat_id:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as exc:
-        print(f"Telegram alert warning: {exc}")
+def has_audio_stream(media_path: Path) -> bool:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        str(media_path),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    return bool(res.stdout.strip())
 
 
-def is_valid_cached_slot(slot_path: str) -> bool:
-    """Проверяет, существует ли скомпилированный слот в ./temp_render/ и валиден ли он."""
-    return os.path.exists(slot_path) and os.path.getsize(slot_path) > 1024
+def resolve_asset(filename: str | None, work_dir: Path, folder_id: str | None) -> Path | None:
+    if not filename:
+        return None
+
+    candidates = [
+        work_dir / filename,
+        Path("assets") / filename,
+        Path("input") / filename,
+        Path(filename),
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+
+    if folder_id:
+        remote = os.getenv("GDRIVE_REMOTE", "gdrive")
+        dest = work_dir / Path(filename).name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        run_cmd([
+            "rclone",
+            "copyto",
+            f"{remote}:{filename}",
+            str(dest),
+            "--drive-root-folder-id",
+            folder_id,
+        ])
+        if dest.is_file():
+            return dest
+
+    return None
 
 
-def slice_viral_shorts(cfg: dict, scenes: list, fps: int, folder_id: str) -> None:
-    shorts_cfg = cfg.get("shorts_config") or (cfg.get("export_settings") or {}).get("shorts") or {}
-    if not shorts_cfg.get("enabled", False):
-        return
+def get_normalized_scenes(manifest: dict) -> list[dict]:
+    raw_scenes = manifest.get("timeline") or manifest.get("scenes") or []
+    normalized = []
 
-    count = max(1, min(3, int(shorts_cfg.get("count") or 3)))
-    shorts_dir = shorts_cfg.get("output_dir") or "./output/shorts"
-    os.makedirs(shorts_dir, exist_ok=True)
-    clips_meta = shorts_cfg.get("clips") or []
+    for item in raw_scenes:
+        scene = dict(item)
+        assets = scene.get("assets") or {}
+        vid_proc = scene.get("video_processing") or {}
+        aud_proc = scene.get("audio_processing") or {}
+        trans_in = vid_proc.get("transition_in") or {}
+        trans_out = vid_proc.get("transition_out") or {}
 
-    valid_scenes = [s for s in scenes if str(s.get("file_name") or s.get("filename") or "").strip()]
-    if not valid_scenes:
-        return
-
-    for idx in range(min(count, len(valid_scenes))):
-        sc = valid_scenes[idx]
-        src_file = str(sc.get("file_name") or sc.get("filename")).strip()
-        clip_info = clips_meta[idx] if idx < len(clips_meta) else {}
-        hook_text = str(
-            clip_info.get("hook_text_en")
-            or sc.get("subtitle_text")
-            or f"SECRET ARCHIVE SCENE #{idx + 1}"
-        ).upper()
-        safe_hook = hook_text.replace("'", "").replace(":", " -")[:42]
-        out_short = os.path.join(shorts_dir, f"short_{idx + 1}_9x16.mp4")
-
-        vf_chain = (
-            "crop=ih*9/16:ih,scale=1080:1920,setsar=1,"
-            f"drawtext=text='{safe_hook}':fontcolor=white:fontsize=52:"
-            "box=1:boxcolor=black@0.65:boxborderw=18:x=(w-text_w)/2:y=180"
+        video_file = (
+            scene.get("file_name")
+            or scene.get("video_file")
+            or assets.get("video_file")
+            or assets.get("image_reference")
         )
-        short_cmd = [
-            "ffmpeg", "-y",
-            "-i", src_file,
-            "-vf", vf_chain,
-            "-t", "15",
-            "-r", str(fps),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
-            out_short,
-        ]
-        print(f"Generating 9:16 Short #{idx + 1}:", " ".join(short_cmd))
-        subprocess.run(short_cmd, check=True)
-
-    if folder_id and shorts_cfg.get("upload_to_gdrive", True):
-        subprocess.run(
-            ["rclone", "copy", shorts_dir, "gdrive:shorts", "--drive-root-folder-id", folder_id, "-P"],
-            check=True,
+        voice_file = (
+            scene.get("voiceover_file")
+            or scene.get("audio_file")
+            or assets.get("voiceover_file")
         )
+
+        scene["file_name"] = video_file
+        scene["video_file"] = video_file
+        if voice_file:
+            scene["voiceover_file"] = voice_file
+            scene["audio_file"] = voice_file
+
+        if "transition" not in scene and trans_in:
+            scene["transition"] = trans_in.get("type", "cut")
+            scene["transition_duration"] = float(trans_in.get("duration_sec", 0.0))
+
+        if "transition_out_type" not in scene and trans_out:
+            scene["transition_out_type"] = trans_out.get("type", "none")
+            scene["transition_out_duration"] = float(trans_out.get("duration_sec", 0.0))
+
+        if "mute_audio" not in scene and "video_ambient_mute" in aud_proc:
+            scene["mute_audio"] = bool(aud_proc["video_ambient_mute"])
+        if "ambient_gain_db" not in scene and "video_ambient_gain_db" in aud_proc:
+            scene["ambient_gain_db"] = float(aud_proc["video_ambient_gain_db"])
+        if "voiceover_gain_db" not in scene and "voiceover_gain_db" in aud_proc:
+            scene["voiceover_gain_db"] = float(aud_proc["voiceover_gain_db"])
+
+        normalized.append(scene)
+
+    return normalized
+
+
+def prepare_scene(
+    scene: dict,
+    idx: int,
+    width: int,
+    height: int,
+    fps: int,
+    folder_id: str | None,
+) -> tuple[Path, float, float]:
+    assets = scene.get("assets") or {}
+    video_name = (
+        scene.get("file_name")
+        or scene.get("video_file")
+        or assets.get("video_file")
+        or assets.get("image_reference")
+    )
+    if not video_name:
+        raise KeyError(f"В сцене #{idx + 1} не указано имя видеофайла (file_name / video_file)")
+
+    voice_name = (
+        scene.get("voiceover_file")
+        or scene.get("audio_file")
+        or assets.get("voiceover_file")
+    )
+
+    dur = float(scene.get("duration_sec") or scene.get("duration") or 10.0)
+    cf_dur = float(scene.get("transition_duration") or 0.0)
+    if (scene.get("transition") or "cut") == "cut":
+        cf_dur = 0.0
+
+    work_dir = Path("build/scenes")
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    src_video = resolve_asset(video_name, work_dir, folder_id)
+    if not src_video or not src_video.is_file():
+        raise FileNotFoundError(f"Не найден видеофайл для сцены #{idx + 1}: {video_name}")
+
+    src_voice = resolve_asset(voice_name, work_dir, folder_id) if voice_name else None
+
+    out_path = work_dir / f"norm_{idx + 1:03d}.mp4"
+    is_image = src_video.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+
+    v_filters = [
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
+        f"fps={fps}",
+        "setsar=1",
+        "format=yuv420p",
+        "setpts=PTS-STARTPTS",
+    ]
+    if idx == 0 and cf_dur > 0 and scene.get("transition") in {"fade", "fadeblack"}:
+        v_filters.append(f"fade=t=in:st=0:d={cf_dur:.3f}")
+        cf_dur = 0.0
+
+    out_trans = scene.get("transition_out_type", "none")
+    out_trans_dur = float(scene.get("transition_out_duration") or 0.0)
+    if out_trans in {"fade_to_black", "fadeblack", "fade"} and out_trans_dur > 0:
+        fade_start = max(0.0, dur - out_trans_dur)
+        v_filters.append(f"fade=t=out:st={fade_start:.3f}:d={out_trans_dur:.3f}")
+
+    cmd = ["ffmpeg", "-y"]
+    if is_image:
+        cmd += ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(src_video)]
+    else:
+        cmd += ["-i", str(src_video)]
+
+    filter_parts = [f"[0:v]{','.join(v_filters)}[vout]"]
+    mute_ambient = bool(scene.get("mute_audio", False))
+    ambient_gain = float(scene.get("ambient_gain_db", -22.0))
+    voice_gain = float(scene.get("voiceover_gain_db", 0.0))
+    video_has_audio = (not is_image) and has_audio_stream(src_video)
+
+    if src_voice and src_voice.is_file():
+        cmd += ["-i", str(src_voice)]
+        filter_parts.append(
+            f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"volume={voice_gain}dB,apad,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS[avo]"
+        )
+        if video_has_audio and not mute_ambient and ambient_gain > -90.0:
+            filter_parts.append(
+                f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={ambient_gain}dB,apad,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS[aamb]"
+            )
+            filter_parts.append("[avo][aamb]amix=inputs=2:duration=first:normalize=0[aout]")
+        else:
+            filter_parts.append("[avo]acopy[aout]")
+    elif video_has_audio and not mute_ambient and ambient_gain > -90.0:
+        filter_parts.append(
+            f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"volume={ambient_gain}dB,apad,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS[aout]"
+        )
+    else:
+        filter_parts.append(f"anullsrc=r=48000:cl=stereo:d={dur:.3f}[aout]")
+
+    cmd += [
+        "-filter_complex",
+        ";".join(filter_parts),
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        "-t",
+        f"{dur:.3f}",
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "16",
+        "-preset",
+        "fast",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "320k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        str(out_path),
+    ]
+    run_cmd(cmd)
+    return out_path, dur, cf_dur
 
 
 def main() -> None:
-    cfg = load_manifest()
-    exp = cfg.get("export_settings") or {}
-    res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
-    draft_mode = bool(exp.get("draft_mode") or res == "720p")
-    v_codec = str(exp.get("video_codec") or cfg.get("video_codec") or "libx264")
-    preset = str(
-        exp.get("preset")
-        or ("ultrafast" if draft_mode else ("veryfast" if v_codec == "libx264" else "medium"))
-    )
-    fps = int(exp.get("fps") or cfg.get("fps") or 24)
-    crf = str(exp.get("crf") or cfg.get("crf") or ("20" if v_codec == "libx264" else "22"))
-    a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps') or 320)}k"
+    manifest_path = Path(sys.argv[1] if len(sys.argv) > 1 else os.getenv("MANIFEST_PATH", "manifest.json"))
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Манифест не найден: {manifest_path}")
 
-    scale_map = {
-        "4k": "3840:2160",
-        "2k": "2560:1440",
-        "1080p": "1920:1080",
-        "720p": "1280:720",
-    }
-    scale_wh = scale_map.get(res, "3840:2160")
-    folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
 
-    os.makedirs("./output", exist_ok=True)
-    os.makedirs("./temp_render", exist_ok=True)
+    scenes = get_normalized_scenes(manifest)
+    if not scenes:
+        raise ValueError("В манифесте отсутствуют сцены (timeline / scenes пуст)")
 
-    # Чтение гибких настроек субтитров
-    subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
-    subs_enabled = bool(subs_cfg.get("enabled", False))
-    burn_in = bool(subs_cfg.get("burn_in", False))
-    upload_srt = bool(subs_cfg.get("upload_srt", False))
-    srt_content = str(subs_cfg.get("srt_content") or "").strip()
+    render_cfg = manifest.get("render_settings") or {}
+    res_str = str(render_cfg.get("resolution", "3840x2160")).split()[0]
+    width, height = (int(x) for x in res_str.lower().split("x"))
+    fps = int(render_cfg.get("fps", 24))
+    crf = int(render_cfg.get("crf", 18))
+    preset = str(render_cfg.get("preset", "slow"))
+    audio_bitrate = str(render_cfg.get("audio_bitrate", "320k"))
+    folder_id = os.getenv("GDRIVE_FOLDER_ID") or manifest.get("gdrive_folder_id") or manifest.get("folder_id")
 
-    if not srt_content and subs_cfg.get("srt_content_base64"):
-        srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
+    prepared: list[tuple[Path, float, float, str]] = []
+    for idx, scene in enumerate(scenes):
+        sc_path, dur, cf_dur = prepare_scene(scene, idx, width, height, fps, folder_id)
+        trans_type = str(scene.get("transition") or "cut")
+        prepared.append((sc_path, dur, cf_dur, trans_type))
 
-    output_srt_path = "./output/subtitles.srt"
-    if subs_enabled and (upload_srt or burn_in) and srt_content:
-        with open(output_srt_path, "w", encoding="utf-8") as sf:
-            sf.write(srt_content)
-        with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
-            sf_root.write(srt_content)
-        print(f"Saved subtitles to {output_srt_path} ({len(srt_content)} chars)")
+    project_name = manifest.get("project_name", "output")
+    out_dir = Path("output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    final_video = out_dir / f"{project_name}.mp4"
 
-    scenes = cfg.get("scenes") or []
-    valid_scenes = [sc for sc in scenes if str(sc.get("file_name") or sc.get("filename") or "").strip()]
-    if not valid_scenes:
-        send_telegram_alert(cfg, "❌ Сбой рендера AetherCombine: в манифесте нет заполненных видеофайлов сцен.")
-        raise RuntimeError("В манифесте нет заполненных видеофайлов сцен (scenes[].file_name)")
+    if len(prepared) == 1:
+        shutil.copy2(prepared[0][0], final_video)
+        return
 
-    # 1. Кэширование слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 и т.д.)
-    # Если файлы слотов уже существуют в temp_render и валидны, пропускаем их тяжелый перерендер
-    slot_files = []
-    for idx, sc in enumerate(valid_scenes):
-        slot_num = idx + 1
-        slot_path = f"./temp_render/slot_{slot_num}.mp4"
-        file_name = str(sc.get("file_name") or sc.get("filename")).strip()
-        dur = max(0.5, float(sc.get("duration") or 6.0))
+    cmd = ["ffmpeg", "-y"]
+    for sc_path, _, _, _ in prepared:
+        cmd += ["-i", str(sc_path)]
 
-        if is_valid_cached_slot(slot_path):
-            print(f"[CACHE HIT] Слот {slot_path} найден в ./temp_render/ — пропускаем тяжелый перерендер.")
-        else:
-            print(f"[CACHE MISS] Рендеринг слота #{slot_num} -> {slot_path} ...")
-            slot_cmd = [
-                "ffmpeg", "-y",
-                "-i", file_name,
-                "-vf", f"scale={scale_wh},setsar=1,fps={fps},trim=duration={dur},setpts=PTS-STARTPTS",
-                "-r", str(fps),
-                "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-                "-an",
-                slot_path,
-            ]
-            subprocess.run(slot_cmd, check=True)
-        slot_files.append(slot_path)
+    filters = []
+    cur_v = "[0:v]"
+    cur_a = "[0:a]"
+    total_dur = prepared[0][1]
 
-    # 2. Быстрая склейка кэшированных слотов (concat -c copy) + наложение новой аудиодорожки
-    concat_list_path = "./temp_render/slots_concat.txt"
-    with open(concat_list_path, "w", encoding="utf-8") as cf:
-        for sp in slot_files:
-            abs_sp = os.path.abspath(sp)
-            cf.write(f"file '{abs_sp}'\n")
+    for idx in range(1, len(prepared)):
+        _, dur_i, cf_dur_i, trans_type = prepared[idx]
+        next_v = f"[v{idx}]"
+        next_a = f"[a{idx}]"
 
-    concat_video_path = "./temp_render/concatenated_video.mp4"
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path, "-c", "copy", concat_video_path],
-        check=True,
-    )
-
-    master_audio_cfg = cfg.get("master_audio") or {}
-    master_audio_file = str(
-        master_audio_cfg.get("file_name") or cfg.get("audio_filename") or ""
-    ).strip()
-
-    out_video = "./output/final_narrative_master.mp4"
-
-    # Если требуется вшивание субтитров (burn_in), применяем поверх склеенного потока; иначе быстрое копирование видеопотока (-c:v copy)
-    if subs_enabled and burn_in and srt_content:
-        sub_style = (
-            "FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,"
-            "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45"
-        )
-        cmd = ["ffmpeg", "-y", "-i", concat_video_path]
-        if master_audio_file and os.path.exists(master_audio_file):
-            cmd += ["-i", master_audio_file, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
-        cmd += [
-            "-vf", f"subtitles=subtitles.srt:force_style='{sub_style}'",
-            "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", a_bitrate,
-            "-movflags", "+faststart",
-            out_video,
-        ]
-    else:
-        cmd = ["ffmpeg", "-y", "-i", concat_video_path]
-        if master_audio_file and os.path.exists(master_audio_file):
-            cmd += [
-                "-i", master_audio_file,
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", a_bitrate,
-                "-shortest",
-                "-movflags", "+faststart",
-                out_video,
-            ]
-        else:
-            cmd += ["-c", "copy", "-movflags", "+faststart", out_video]
-
-    print("Running FFmpeg final assembly:", " ".join(cmd))
-    try:
-        subprocess.run(cmd, check=True)
-        if os.path.exists(out_video):
-            import shutil
-            shutil.copyfile(out_video, "./output.mp4")
-        slice_viral_shorts(cfg, scenes, fps, folder_id)
-    except Exception as exc:
-        send_telegram_alert(cfg, f"❌ Ошибка сборки FFmpeg: {exc}. Проверьте лог FFmpeg.")
-        raise
-
-    if folder_id:
-        subprocess.run(
-            ["rclone", "copy", out_video, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
-            check=True,
-        )
-        if subs_enabled and upload_srt and os.path.exists(output_srt_path):
-            subprocess.run(
-                ["rclone", "copy", output_srt_path, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
-                check=True,
+        if cf_dur_i > 0.0 and trans_type != "cut":
+            offset = max(0.0, total_dur - cf_dur_i)
+            filters.append(
+                f"{cur_v}[{idx}:v]xfade=transition={trans_type}:duration={cf_dur_i:.3f}:offset={offset:.3f}{next_v}"
             )
+            filters.append(
+                f"{cur_a}[{idx}:a]acrossfade=d={cf_dur_i:.3f}:c1=tri:c2=tri{next_a}"
+            )
+            total_dur = total_dur + dur_i - cf_dur_i
+        else:
+            filters.append(f"{cur_v}[{idx}:v]concat=n=2:v=1:a=0{next_v}")
+            filters.append(f"{cur_a}[{idx}:a]concat=n=2:v=0:a=1{next_a}")
+            total_dur += dur_i
 
-    send_telegram_alert(
-        cfg,
-        "✅ Рендеринг и выгрузка успешно завершены!",
-    )
+        cur_v = next_v
+        cur_a = next_a
+
+    loudnorm = render_cfg.get("loudness_normalization") or {}
+    if loudnorm.get("enabled", True):
+        lufs = float(loudnorm.get("target_lufs", -14.0))
+        tp = float(loudnorm.get("true_peak_db", -1.0))
+        lra = float(loudnorm.get("lra", 7.0))
+        filters.append(f"{cur_a}loudnorm=I={lufs}:TP={tp}:LRA={lra}[afinal]")
+        cur_a = "[afinal]"
+
+    cmd += [
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        cur_v,
+        "-map",
+        cur_a,
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "high",
+        "-level",
+        "5.1",
+        "-crf",
+        str(crf),
+        "-preset",
+        preset,
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        str(final_video),
+    ]
+    run_cmd(cmd)
+    print(f"✅ Render complete: {final_video} ({total_dur:.2f}s)")
 
 
 if __name__ == "__main__":
