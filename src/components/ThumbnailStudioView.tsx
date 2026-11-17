@@ -1310,6 +1310,161 @@ function drawGoldenCandle(
   ctx.restore();
 }
 
+export type ThumbnailSlotId = 'A' | 'B' | 'C';
+
+export interface ThumbnailSlotConfig {
+  title: string;
+  badges: CinematicBadgeId[];
+  badgeScalePct: number;
+  fontStyle: ThumbnailFontStyleId;
+  fontEntry: StudioFontEntry;
+  applyFontToBadges: boolean;
+  royalDecorEnabled: boolean;
+  magicDecorEnabled: boolean;
+  textColor: string;
+  strokeColor: string;
+  strokeWidthPct: number;
+  shadowColor: string;
+  shadowBlurPct: number;
+  hookLayout: HookTextLayout;
+}
+
+interface PersistedSlotState {
+  title?: string;
+  badges?: CinematicBadgeId[];
+  badgeScalePct?: number;
+  fontStyle?: ThumbnailFontStyleId;
+  fontId?: string;
+  applyFontToBadges?: boolean;
+  royalDecorEnabled?: boolean;
+  magicDecorEnabled?: boolean;
+  textColor?: string;
+  strokeColor?: string;
+  strokeWidthPct?: number;
+  shadowColor?: string;
+  shadowBlurPct?: number;
+  hookLayout?: HookTextLayout;
+}
+
+const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v1';
+
+const DEFAULT_SLOT_FONT_ENTRY: StudioFontEntry =
+  GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0];
+
+const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => {
+  if (slot === 'B') {
+    return {
+      title: 'SEALED 50 YEARS',
+      badges: ['3_hours', 'no_ads_seamless', 'deep_sleep'],
+      badgeScalePct: 100,
+      fontStyle: 'cinematic_sans',
+      fontEntry: DEFAULT_SLOT_FONT_ENTRY,
+      applyFontToBadges: false,
+      royalDecorEnabled: true,
+      magicDecorEnabled: true,
+      textColor: '',
+      strokeColor: '#000000',
+      strokeWidthPct: 100,
+      shadowColor: '#000000',
+      shadowBlurPct: 100,
+      hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+    };
+  }
+  if (slot === 'C') {
+    return {
+      title: 'CLASSIFIED TAPE',
+      badges: ['4k_ultra_hd', 'true_story'],
+      badgeScalePct: 100,
+      fontStyle: 'gold_ice_magic',
+      fontEntry: GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_cinzel') || DEFAULT_SLOT_FONT_ENTRY,
+      applyFontToBadges: false,
+      royalDecorEnabled: true,
+      magicDecorEnabled: true,
+      textColor: '',
+      strokeColor: '#000000',
+      strokeWidthPct: 100,
+      shadowColor: '#000000',
+      shadowBlurPct: 100,
+      hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+    };
+  }
+  return {
+    title: 'SEALED ARCHIVE',
+    badges: ['4k_ultra_hd', 'documentary', 'lost_archives'],
+    badgeScalePct: 100,
+    fontStyle: 'cinematic_sans',
+    fontEntry: DEFAULT_SLOT_FONT_ENTRY,
+    applyFontToBadges: false,
+    royalDecorEnabled: true,
+    magicDecorEnabled: true,
+    textColor: '',
+    strokeColor: '#000000',
+    strokeWidthPct: 100,
+    shadowColor: '#000000',
+    shadowBlurPct: 100,
+    hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+  };
+};
+
+const hydrateSlotConfig = (
+  slot: ThumbnailSlotId,
+  raw?: PersistedSlotState | null
+): ThumbnailSlotConfig => {
+  const base = createDefaultSlotConfig(slot);
+  if (!raw || typeof raw !== 'object') return base;
+  const matchedFont = raw.fontId
+    ? GOOGLE_FONT_PRESETS.find(f => f.id === raw.fontId)
+    : undefined;
+  const validBadges = Array.isArray(raw.badges)
+    ? raw.badges.filter((id): id is CinematicBadgeId => VALID_BADGE_IDS.has(id)).slice(0, 3)
+    : base.badges;
+  return {
+    ...base,
+    title: typeof raw.title === 'string' ? raw.title : base.title,
+    badges: validBadges,
+    badgeScalePct:
+      typeof raw.badgeScalePct === 'number'
+        ? Math.max(60, Math.min(150, raw.badgeScalePct))
+        : base.badgeScalePct,
+    fontStyle: raw.fontStyle || base.fontStyle,
+    fontEntry: matchedFont || base.fontEntry,
+    applyFontToBadges:
+      typeof raw.applyFontToBadges === 'boolean' ? raw.applyFontToBadges : base.applyFontToBadges,
+    royalDecorEnabled:
+      typeof raw.royalDecorEnabled === 'boolean' ? raw.royalDecorEnabled : base.royalDecorEnabled,
+    magicDecorEnabled:
+      typeof raw.magicDecorEnabled === 'boolean' ? raw.magicDecorEnabled : base.magicDecorEnabled,
+    textColor: typeof raw.textColor === 'string' ? raw.textColor : base.textColor,
+    strokeColor: typeof raw.strokeColor === 'string' ? raw.strokeColor : base.strokeColor,
+    strokeWidthPct:
+      typeof raw.strokeWidthPct === 'number'
+        ? Math.max(0, Math.min(200, raw.strokeWidthPct))
+        : base.strokeWidthPct,
+    shadowColor: typeof raw.shadowColor === 'string' ? raw.shadowColor : base.shadowColor,
+    shadowBlurPct:
+      typeof raw.shadowBlurPct === 'number'
+        ? Math.max(0, Math.min(200, raw.shadowBlurPct))
+        : base.shadowBlurPct,
+    hookLayout:
+      raw.hookLayout && typeof raw.hookLayout.xPct === 'number'
+        ? {
+            xPct: Math.max(4, Math.min(96, raw.hookLayout.xPct)),
+            yPct: Math.max(6, Math.min(94, raw.hookLayout.yPct)),
+            fontScalePct: Math.max(60, Math.min(150, raw.hookLayout.fontScalePct || 100))
+          }
+        : base.hookLayout
+  };
+};
+
+const TEXT_COLOR_PRESETS = [
+  { id: '', label: 'Авто' },
+  { id: '#FFFFFF', label: 'Белый' },
+  { id: '#FDE047', label: 'Золотой' },
+  { id: '#38BDF8', label: 'Ледяной' },
+  { id: '#F87171', label: 'Алый' },
+  { id: '#34D399', label: 'Изумруд' }
+] as const;
+
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   thumbTitle,
   onThumbTitleChange,
@@ -1324,53 +1479,120 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   scriptContext,
   onNotify
 }) => {
-  const canvasARef = useRef<HTMLCanvasElement | null>(null);
-  const canvasBRef = useRef<HTMLCanvasElement | null>(null);
+  const mainCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mobileCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const feedCanvasARef = useRef<HTMLCanvasElement | null>(null);
+  const feedCanvasBRef = useRef<HTMLCanvasElement | null>(null);
+  const feedCanvasCRef = useRef<HTMLCanvasElement | null>(null);
+  const mobileFeedCanvasARef = useRef<HTMLCanvasElement | null>(null);
+  const mobileFeedCanvasBRef = useRef<HTMLCanvasElement | null>(null);
+  const mobileFeedCanvasCRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [imgA, setImgA] = useState<HTMLImageElement | null>(null);
-  const [imgB, setImgB] = useState<HTMLImageElement | null>(null);
-  const [titleB, setTitleB] = useState<string>('SEALED 50 YEARS');
-  const [badgesB, setBadgesB] = useState<CinematicBadgeId[]>([
-    '3_hours',
-    'no_ads_seamless',
-    'deep_sleep'
-  ]);
-  const [fontStyle, setFontStyle] = useState<ThumbnailFontStyleId>('cinematic_sans');
-  const [selectedFontEntry, setSelectedFontEntry] = useState<StudioFontEntry>(
-    () => GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0]
+  const [activeSlot, setActiveSlot] = useState<ThumbnailSlotId>('A');
+  const [slotImages, setSlotImages] = useState<Record<ThumbnailSlotId, HTMLImageElement | null>>({
+    A: null,
+    B: null,
+    C: null
+  });
+
+  const [slotConfigs, setSlotConfigs] = useState<Record<ThumbnailSlotId, ThumbnailSlotConfig>>(() => {
+    let parsed: Partial<Record<ThumbnailSlotId, PersistedSlotState>> | null = null;
+    try {
+      const raw = localStorage.getItem(THUMB_ABC_SLOTS_STORAGE_KEY);
+      if (raw) {
+        parsed = JSON.parse(raw) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+      }
+    } catch {
+      parsed = null;
+    }
+    const cfgA = hydrateSlotConfig('A', parsed?.A);
+    const cfgB = hydrateSlotConfig('B', parsed?.B);
+    const cfgC = hydrateSlotConfig('C', parsed?.C);
+    cfgA.title = thumbTitle;
+    cfgA.badges = parseBadgeIds(thumbBadge);
+    return { A: cfgA, B: cfgB, C: cfgC };
+  });
+
+  // Синхронизация Слота A с внешними пропсами thumbTitle / thumbBadge для полной обратной совместимости
+  useEffect(() => {
+    setSlotConfigs(prev => {
+      const parsedBadges = parseBadgeIds(thumbBadge);
+      const sameTitle = prev.A.title === thumbTitle;
+      const sameBadges =
+        prev.A.badges.length === parsedBadges.length &&
+        prev.A.badges.every((b, idx) => b === parsedBadges[idx]);
+      if (sameTitle && sameBadges) return prev;
+      return {
+        ...prev,
+        A: {
+          ...prev.A,
+          title: thumbTitle,
+          badges: parsedBadges
+        }
+      };
+    });
+  }, [thumbTitle, thumbBadge]);
+
+  // Сохранение A/B/C настроек в localStorage (с поддержкой миграции старых проектов A/B)
+  useEffect(() => {
+    try {
+      const serializable: Record<ThumbnailSlotId, PersistedSlotState> = {
+        A: { ...slotConfigs.A, fontId: slotConfigs.A.fontEntry.id },
+        B: { ...slotConfigs.B, fontId: slotConfigs.B.fontEntry.id },
+        C: { ...slotConfigs.C, fontId: slotConfigs.C.fontEntry.id }
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.A as any).fontEntry;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.B as any).fontEntry;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.C as any).fontEntry;
+      localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(serializable));
+    } catch {
+      // ignore quota errors
+    }
+  }, [slotConfigs]);
+
+  const updateSlotConfig = useCallback(
+    (slot: ThumbnailSlotId, updater: (prev: ThumbnailSlotConfig) => ThumbnailSlotConfig) => {
+      setSlotConfigs(prev => ({
+        ...prev,
+        [slot]: updater(prev[slot])
+      }));
+    },
+    []
   );
-  const [applyFontToBadges, setApplyFontToBadges] = useState<boolean>(false);
+
+  const activeConfig = slotConfigs[activeSlot];
+  const imgA = slotImages.A;
 
   useEffect(() => {
     if (externalFontStyle) {
-      setFontStyle(externalFontStyle);
       const mappedId = DEFAULT_FONT_ID_BY_STYLE[externalFontStyle];
       const matched = GOOGLE_FONT_PRESETS.find(f => f.id === mappedId);
-      if (matched) setSelectedFontEntry(matched);
+      updateSlotConfig('A', prev => ({
+        ...prev,
+        fontStyle: externalFontStyle,
+        fontEntry: matched || prev.fontEntry
+      }));
       onConsumeExternalFontStyle?.();
     }
-  }, [externalFontStyle, onConsumeExternalFontStyle]);
+  }, [externalFontStyle, onConsumeExternalFontStyle, updateSlotConfig]);
 
   useEffect(() => {
     if (!externalCoverAImageUrl) return;
     const editedImg = new Image();
     editedImg.onload = () => {
-      setImgA(editedImg);
+      setSlotImages(prev => ({ ...prev, A: editedImg }));
       window.selectedMasterThumbnail = externalCoverAImageUrl;
       onConsumeExternalCoverAImage?.();
     };
     editedImg.src = externalCoverAImageUrl;
   }, [externalCoverAImageUrl, onConsumeExternalCoverAImage]);
 
-  const [royalDecorEnabled, setRoyalDecorEnabled] = useState<boolean>(true);
-  const [magicDecorEnabled, setMagicDecorEnabled] = useState<boolean>(true);
-  const [hookLayoutA, setHookLayoutA] = useState<HookTextLayout>({ ...DEFAULT_HOOK_LAYOUT });
-  const [hookLayoutB, setHookLayoutB] = useState<HookTextLayout>({ ...DEFAULT_HOOK_LAYOUT });
-  const [hookBoxA, setHookBoxA] = useState<HookBoundingBoxPct | null>(null);
-  const [hookBoxB, setHookBoxB] = useState<HookBoundingBoxPct | null>(null);
-  const [draggingSlot, setDraggingSlot] = useState<'A' | 'B' | null>(null);
-  const [hoveredSlot, setHoveredSlot] = useState<'A' | 'B' | null>(null);
+  const [activeHookBox, setActiveHookBox] = useState<HookBoundingBoxPct | null>(null);
+  const [draggingSlot, setDraggingSlot] = useState<ThumbnailSlotId | null>(null);
+  const [hoveredSlot, setHoveredSlot] = useState<ThumbnailSlotId | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
 
   // Локальная подготовка разрешения, 3x3 резкости базового кадра и умный экспорт < 2 МБ
@@ -1379,8 +1601,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     'original' | '1920x1080' | '2560x1440' | '3840x2160'
   >('original');
   const [isOptimizingYtThumb, setIsOptimizingYtThumb] = useState<boolean>(false);
-
-  const selectedBadgesA = parseBadgeIds(thumbBadge);
+  const [batchExportStatus, setBatchExportStatus] = useState<string>('');
+  const [showCopyMenu, setShowCopyMenu] = useState<boolean>(false);
 
   // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
@@ -1395,7 +1617,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generationStatusText, setGenerationStatusText] = useState<string>('');
   const [buttonQueueStatus, setButtonQueueStatus] = useState<string>('');
-  const [generatingTargetSlot, setGeneratingTargetSlot] = useState<'A' | 'B' | null>(null);
+  const [generatingTargetSlot, setGeneratingTargetSlot] = useState<ThumbnailSlotId | null>(null);
   const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
   const [variantLabels, setVariantLabels] = useState<string[]>([...LOCAL_SCENE_LABELS]);
   const [isSlicingLocalMedia, setIsSlicingLocalMedia] = useState<boolean>(false);
@@ -1469,8 +1691,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     };
   }, []);
 
-  // Режим A/B тестирования и Ч/Б контрастный фильтр силуэтов
-  const [abModeEnabled, setAbModeEnabled] = useState<boolean>(false);
+  // Режим сравнения A/B/C в ленте YouTube и Ч/Б контрастный фильтр силуэтов
+  const [compareFeedEnabled, setCompareFeedEnabled] = useState<boolean>(false);
+  const [feedViewportMode, setFeedViewportMode] = useState<'both' | 'desktop' | 'mobile'>('both');
   const [bwContrastFilter, setBwContrastFilter] = useState<boolean>(false);
 
   // Оверлей интерфейса YouTube (таймкод 3:00:00, аватарка, мобильный масштаб 160x90)
@@ -1519,7 +1742,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    ensureFontEntryLoaded(selectedFontEntry).then(() => {
+    const uniqueFonts = Array.from(
+      new Map<string, StudioFontEntry>([
+        [slotConfigs.A.fontEntry.id, slotConfigs.A.fontEntry],
+        [slotConfigs.B.fontEntry.id, slotConfigs.B.fontEntry],
+        [slotConfigs.C.fontEntry.id, slotConfigs.C.fontEntry]
+      ]).values()
+    );
+    Promise.all(uniqueFonts.map(entry => ensureFontEntryLoaded(entry))).then(() => {
       if (!cancelled) {
         setFontsReadyTick(t => t + 1);
       }
@@ -1527,38 +1757,64 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedFontEntry]);
+  }, [slotConfigs.A.fontEntry, slotConfigs.B.fontEntry, slotConfigs.C.fontEntry]);
 
-  const toggleBadgeA = (badgeId: CinematicBadgeId) => {
-    const exists = selectedBadgesA.includes(badgeId);
+  const toggleBadgeForSlot = (slot: ThumbnailSlotId, badgeId: CinematicBadgeId) => {
+    const current = slotConfigs[slot].badges;
+    const exists = current.includes(badgeId);
     let next: CinematicBadgeId[];
     if (exists) {
-      next = selectedBadgesA.filter(id => id !== badgeId);
+      next = current.filter(id => id !== badgeId);
     } else {
-      if (selectedBadgesA.length >= 3) {
+      if (current.length >= 3) {
         onNotify('Максимум 3 бейджа', 'info');
         return;
       }
-      next = [...selectedBadgesA, badgeId];
+      next = [...current, badgeId];
     }
-    onThumbBadgeChange(next.length > 0 ? next.join(',') : 'none');
+    if (slot === 'A') {
+      onThumbBadgeChange(next.length > 0 ? next.join(',') : 'none');
+    } else {
+      updateSlotConfig(slot, prev => ({ ...prev, badges: next }));
+    }
   };
 
-  const toggleBadgeB = (badgeId: CinematicBadgeId) => {
-    if (badgesB.includes(badgeId)) {
-      setBadgesB(prev => prev.filter(id => id !== badgeId));
-      return;
+  const handleCopySlotSettingsTo = (targetSlot: ThumbnailSlotId) => {
+    if (targetSlot === activeSlot) return;
+    const sourceCfg = slotConfigs[activeSlot];
+    const clonedCfg: ThumbnailSlotConfig = {
+      ...sourceCfg,
+      badges: [...sourceCfg.badges],
+      hookLayout: { ...sourceCfg.hookLayout }
+    };
+    if (targetSlot === 'A') {
+      onThumbTitleChange(clonedCfg.title);
+      onThumbBadgeChange(clonedCfg.badges.length > 0 ? clonedCfg.badges.join(',') : 'none');
     }
-    if (badgesB.length >= 3) {
-      onNotify('Максимум 3 бейджа', 'info');
-      return;
+    setSlotConfigs(prev => ({
+      ...prev,
+      [targetSlot]: clonedCfg
+    }));
+    const sourceImg = slotImages[activeSlot] || slotImages.A;
+    if (sourceImg) {
+      setSlotImages(prev => ({
+        ...prev,
+        [targetSlot]: sourceImg
+      }));
     }
-    setBadgesB(prev => [...prev, badgeId]);
+    setShowCopyMenu(false);
+    setActiveSlot(targetSlot);
+    onNotify(`📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`, 'success');
   };
 
   // Автогенератор визуального промпта на английском языке
   const generatedCoverPrompt = (() => {
-    const rawContext = (scriptContext || thumbTitle || 'abandoned alpine weather station mystery')
+    const rawContext = (
+      scriptContext ||
+      activeConfig.title ||
+      thumbTitle ||
+      'abandoned alpine weather station mystery'
+    )
       .replace(/[а-яёА-ЯЁ]+/g, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -1578,7 +1834,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         'Anomalous signal documentary thumbnail, glowing green oscilloscope waveform spiking in dark bunker, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k octane render realism'
     };
 
-    const trimmedTitle = (thumbTitle || '').trim();
+    const trimmedTitle = (activeConfig.title || '').trim();
     const hookWords = trimmedTitle
       ? trimmedTitle.split(/\s+/).slice(0, 3).join(' ')
       : '';
@@ -1592,16 +1848,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
-  // Свободный ввод текста-хука без авто-обрезки (поддерживает Enter для переноса на 2 строки)
-  const handleThumbHookChange = (val: string) => {
-    onThumbTitleChange(val);
+  const handleSlotHookChange = (slot: ThumbnailSlotId, val: string) => {
+    if (slot === 'A') {
+      onThumbTitleChange(val);
+    } else {
+      updateSlotConfig(slot, prev => ({ ...prev, title: val }));
+    }
   };
 
-  // Интерактивное перетаскивание мышкой и пальцем исключительно для заголовка (текста-хука)
+  // Интерактивное перетаскивание мышкой и пальцем исключительно для заголовка (текста-хука) активного слота
   const startHookDrag = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>, slot: 'A' | 'B') => {
+    (e: React.PointerEvent<HTMLDivElement>, slot: ThumbnailSlotId) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-      const canvasEl = slot === 'A' ? canvasARef.current : canvasBRef.current;
+      const canvasEl = mainCanvasRef.current;
       if (!canvasEl) return;
 
       e.preventDefault();
@@ -1610,8 +1869,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const rect = canvasEl.getBoundingClientRect();
       const startX = e.clientX;
       const startY = e.clientY;
-      const initialLayout = slot === 'A' ? hookLayoutA : hookLayoutB;
-      const setLayout = slot === 'A' ? setHookLayoutA : setHookLayoutB;
+      const initialLayout = slotConfigs[slot].hookLayout;
 
       setDraggingSlot(slot);
 
@@ -1620,7 +1878,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const dyPct = ((moveEv.clientY - startY) / Math.max(1, rect.height)) * 100;
         const nextX = Math.max(4, Math.min(96, Number((initialLayout.xPct + dxPct).toFixed(2))));
         const nextY = Math.max(6, Math.min(94, Number((initialLayout.yPct + dyPct).toFixed(2))));
-        setLayout(prev => ({ ...prev, xPct: nextX, yPct: nextY }));
+        updateSlotConfig(slot, prev => ({
+          ...prev,
+          hookLayout: { ...prev.hookLayout, xPct: nextX, yPct: nextY }
+        }));
       };
 
       const onPointerUp = () => {
@@ -1634,7 +1895,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerUp);
     },
-    [hookLayoutA, hookLayoutB]
+    [slotConfigs, updateSlotConfig]
   );
 
   // Отрисовка обложки на выбранном Canvas (320x180, 1280x720 или 3840x2160) без водяных знаков
@@ -1649,7 +1910,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       showMagicDecor: boolean,
       hookLayout: HookTextLayout,
       variantLabel?: string,
-      fontOptions?: { fontEntry?: StudioFontEntry; applyToBadges?: boolean },
+      fontOptions?: {
+        fontEntry?: StudioFontEntry;
+        applyToBadges?: boolean;
+        badgeScalePct?: number;
+        textColor?: string;
+        strokeColor?: string;
+        strokeWidthPct?: number;
+        shadowColor?: string;
+        shadowBlurPct?: number;
+      },
       baseSharpenPercent: number = 0
     ): HookBoundingBoxPct | null => {
       if (!canvas) return null;
@@ -1796,8 +2066,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу в аккуратном горизонтальном ряду.
-      // Бейджи полностью отвязаны от селектора шрифтов: всегда единый строгий жирный гротеск (Inter / Montserrat, 800, uppercase, чёткий трекинг).
+      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу с индивидуальным масштабом слота
       const badgesToDraw = activeBadges
         .map(id => BADGE_LABEL_BY_ID[id])
         .filter((lbl): lbl is string => Boolean(lbl))
@@ -1805,7 +2074,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         .slice(0, 3);
 
       if (badgesToDraw.length > 0) {
-        const badgeFontPx = 13.5 * scale;
+        const badgeUserScale = Math.max(0.6, Math.min(1.5, (fontOptions?.badgeScalePct ?? 100) / 100));
+        const bScale = scale * badgeUserScale;
+        const badgeFontPx = 13.5 * bScale;
         const badgeFontFamily =
           fontOptions?.applyToBadges && fontOptions?.fontEntry
             ? fontOptions.fontEntry.cssFamily
@@ -1814,7 +2085,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           fontOptions?.applyToBadges && fontOptions?.fontEntry
             ? fontOptions.fontEntry.weight || '800'
             : '800';
-        const baseTrackingPx = 1.4 * scale;
+        const baseTrackingPx = 1.4 * bScale;
 
         const measureTrackedWidth = (text: string, trackingPx: number): number => {
           const chars = Array.from(text);
@@ -1845,11 +2116,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
         ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
 
-        const horizontalPad = 36 * scale;
-        const badgeGap = 12 * scale;
-        const badgeH = 42 * scale;
+        const horizontalPad = 36 * bScale;
+        const badgeGap = 12 * bScale;
+        const badgeH = 42 * bScale;
         const rawWidths = badgesToDraw.map(lbl =>
-          Math.max(112 * scale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
+          Math.max(112 * bScale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
         );
         const totalRawW =
           rawWidths.reduce((sum, bw) => sum + bw, 0) +
@@ -1876,9 +2147,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.save();
           ctx.fillStyle = 'rgba(9, 13, 22, 0.90)';
           ctx.strokeStyle = '#FACC15';
-          ctx.lineWidth = Math.max(1.5, 2 * scale);
+          ctx.lineWidth = Math.max(1.5, 2 * bScale * fitFactor);
           ctx.beginPath();
-          ctx.roundRect(bx, topY, bw, effectiveH, 9 * scale);
+          ctx.roundRect(bx, topY, bw, effectiveH, 9 * bScale * fitFactor);
           ctx.fill();
           ctx.stroke();
 
@@ -1890,7 +2161,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      // Отрисовка текста-хука (с точным сохранением введённого текста, переносами и координатами x/y)
+      // Отрисовка текста-хука (с точным сохранением текста, цвета, обводки, тени, переносов и координат x/y)
       if (!hasHook) {
         return null;
       }
@@ -1898,6 +2169,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       let returnBox: HookBoundingBoxPct | null = null;
       const customFamily = fontOptions?.fontEntry?.cssFamily;
       const customWeight = fontOptions?.fontEntry?.weight || '800';
+      const customTextColor = (fontOptions?.textColor || '').trim();
+      const customStrokeColor = fontOptions?.strokeColor || '#000000';
+      const strokeMult = Math.max(0, Math.min(2, (fontOptions?.strokeWidthPct ?? 100) / 100));
+      const customShadowColor = fontOptions?.shadowColor || '#000000';
+      const shadowMult = Math.max(0, Math.min(2, (fontOptions?.shadowBlurPct ?? 100) / 100));
+      const hasCustomStrokeColor = customStrokeColor.toLowerCase() !== '#000000';
+      const hasCustomShadowColor = customShadowColor.toLowerCase() !== '#000000';
+
       ctx.save();
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'center';
@@ -1946,7 +2225,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           const isTopGoldLine = lineIdx === 0;
 
           if (isTopGoldLine) {
-            // 1. 3D-экструзия для тёплого золотого текста
             const depthSteps = 5;
             for (let d = depthSteps; d >= 1; d--) {
               ctx.save();
@@ -1954,60 +2232,70 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               ctx.textAlign = 'center';
               ctx.textBaseline = 'alphabetic';
               ctx.lineJoin = 'round';
-              if (d === depthSteps) {
-                ctx.shadowColor = 'rgba(0, 0, 0, 0.92)';
-                ctx.shadowBlur = 18 * effScale;
-                ctx.shadowOffsetY = 5 * effScale;
+              if (d === depthSteps && shadowMult > 0) {
+                ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.92)';
+                ctx.shadowBlur = 18 * effScale * shadowMult;
+                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
               } else {
                 ctx.shadowBlur = 0;
               }
-              ctx.strokeStyle = '#291102';
-              ctx.lineWidth = Math.max(2, 9.5 * effScale);
+              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#291102';
+              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9.5 * effScale * strokeMult) : 0;
               const ox = d * 0.45 * effScale;
               const oy = d * 1.15 * effScale;
-              ctx.strokeText(line, centerX + ox, baselineY + oy);
+              if (strokeMult > 0) {
+                ctx.strokeText(line, centerX + ox, baselineY + oy);
+              }
               ctx.fillStyle = '#3B1903';
               ctx.fillText(line, centerX + ox, baselineY + oy);
               ctx.restore();
             }
 
-            // 2. Тёмно-коричневая обводка и тёплое золотое свечение
-            ctx.save();
-            ctx.font = fontStr;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'alphabetic';
-            ctx.lineJoin = 'round';
-            ctx.shadowColor = 'rgba(255, 190, 55, 0.78)';
-            ctx.shadowBlur = 24 * effScale;
-            ctx.strokeStyle = '#3A1B02';
-            ctx.lineWidth = Math.max(2, 9 * effScale);
-            ctx.strokeText(line, centerX, baselineY);
-            ctx.restore();
+            if (strokeMult > 0 || shadowMult > 0) {
+              ctx.save();
+              ctx.font = fontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.lineJoin = 'round';
+              if (shadowMult > 0) {
+                ctx.shadowColor = hasCustomShadowColor
+                  ? customShadowColor
+                  : 'rgba(255, 190, 55, 0.78)';
+                ctx.shadowBlur = 24 * effScale * shadowMult;
+              }
+              if (strokeMult > 0) {
+                ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#3A1B02';
+                ctx.lineWidth = Math.max(1, 9 * effScale * strokeMult);
+                ctx.strokeText(line, centerX, baselineY);
+              }
+              ctx.restore();
+            }
 
-            // 3. Тёплый золотой 3D-градиент (#FFE58F -> #F5A623 -> #B86B00)
             ctx.save();
             ctx.font = fontStr;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'alphabetic';
-            const goldGrad = ctx.createLinearGradient(
-              0,
-              baselineY - fontSize * 0.78,
-              0,
-              baselineY + fontSize * 0.1
-            );
-            goldGrad.addColorStop(0.0, '#FFF7CC');
-            goldGrad.addColorStop(0.2, '#FFE58F');
-            goldGrad.addColorStop(0.56, '#F5A623');
-            goldGrad.addColorStop(0.9, '#B86B00');
-            goldGrad.addColorStop(1.0, '#8A4800');
-            ctx.fillStyle = goldGrad;
+            if (customTextColor) {
+              ctx.fillStyle = customTextColor;
+            } else {
+              const goldGrad = ctx.createLinearGradient(
+                0,
+                baselineY - fontSize * 0.78,
+                0,
+                baselineY + fontSize * 0.1
+              );
+              goldGrad.addColorStop(0.0, '#FFF7CC');
+              goldGrad.addColorStop(0.2, '#FFE58F');
+              goldGrad.addColorStop(0.56, '#F5A623');
+              goldGrad.addColorStop(0.9, '#B86B00');
+              goldGrad.addColorStop(1.0, '#8A4800');
+              ctx.fillStyle = goldGrad;
+            }
             ctx.fillText(line, centerX, baselineY);
             ctx.restore();
           } else {
-            // Нижняя строка: морозный ледяной градиент (#FFFFFF -> #BCE6FF -> #5B9BD5) + холодная синяя обводка + фактура инея
             const lineW = ctx.measureText(line).width;
 
-            // 1. 3D-экструзия в глубокий арктический синий
             const depthSteps = 5;
             for (let d = depthSteps; d >= 1; d--) {
               ctx.save();
@@ -2015,135 +2303,152 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               ctx.textAlign = 'center';
               ctx.textBaseline = 'alphabetic';
               ctx.lineJoin = 'round';
-              if (d === depthSteps) {
-                ctx.shadowColor = 'rgba(2, 12, 28, 0.94)';
-                ctx.shadowBlur = 18 * effScale;
-                ctx.shadowOffsetY = 5 * effScale;
+              if (d === depthSteps && shadowMult > 0) {
+                ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(2, 12, 28, 0.94)';
+                ctx.shadowBlur = 18 * effScale * shadowMult;
+                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
               } else {
                 ctx.shadowBlur = 0;
               }
-              ctx.strokeStyle = '#091E3A';
-              ctx.lineWidth = Math.max(2, 9.5 * effScale);
+              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#091E3A';
+              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9.5 * effScale * strokeMult) : 0;
               const ox = d * 0.45 * effScale;
               const oy = d * 1.15 * effScale;
-              ctx.strokeText(line, centerX + ox, baselineY + oy);
+              if (strokeMult > 0) {
+                ctx.strokeText(line, centerX + ox, baselineY + oy);
+              }
               ctx.fillStyle = '#0D2B4F';
               ctx.fillText(line, centerX + ox, baselineY + oy);
               ctx.restore();
             }
 
-            // 2. Холодная синяя обводка + ледяное свечение
-            ctx.save();
-            ctx.font = fontStr;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'alphabetic';
-            ctx.lineJoin = 'round';
-            ctx.shadowColor = 'rgba(120, 210, 255, 0.82)';
-            ctx.shadowBlur = 24 * effScale;
-            ctx.strokeStyle = '#123A68';
-            ctx.lineWidth = Math.max(2, 9 * effScale);
-            ctx.strokeText(line, centerX, baselineY);
-            ctx.restore();
-
-            // 3. Ледяной градиент + фактура инея на offscreen canvas
-            const padX = Math.ceil(36 * effScale);
-            const padY = Math.ceil(32 * effScale);
-            const boxW = Math.max(8, Math.ceil(lineW + padX * 2));
-            const boxH = Math.max(8, Math.ceil(fontSize * 1.25 + padY * 2));
-            const off = document.createElement('canvas');
-            off.width = boxW;
-            off.height = boxH;
-            const octx = off.getContext('2d');
-
-            if (octx) {
-              const localCx = boxW / 2;
-              const localBaselineY = padY + fontSize * 0.92;
-              octx.font = fontStr;
-              octx.textAlign = 'center';
-              octx.textBaseline = 'alphabetic';
-
-              const iceGrad = octx.createLinearGradient(
-                0,
-                localBaselineY - fontSize * 0.78,
-                0,
-                localBaselineY + fontSize * 0.1
-              );
-              iceGrad.addColorStop(0.0, '#FFFFFF');
-              iceGrad.addColorStop(0.4, '#BCE6FF');
-              iceGrad.addColorStop(0.82, '#5B9BD5');
-              iceGrad.addColorStop(1.0, '#3C7AB8');
-              octx.fillStyle = iceGrad;
-              octx.fillText(line, localCx, localBaselineY);
-
-              // Клиппинг фактуры инея строго внутрь букв
-              octx.globalCompositeOperation = 'source-atop';
-
-              const facetSeed = Array.from(line).reduce(
-                (acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 7),
-                41
-              );
-              const facetCount = Math.max(14, Math.round(lineW / Math.max(8, 18 * effScale)));
-              for (let f = 0; f < facetCount; f++) {
-                const fx = padX + ((f * 73 + facetSeed * 13) % Math.max(10, Math.round(lineW)));
-                const fy = padY + ((f * 37 + facetSeed * 5) % Math.max(10, Math.round(fontSize * 0.95)));
-                const fw = (14 + (f % 5) * 8) * effScale;
-                const fh = (18 + (f % 4) * 9) * effScale;
-                octx.fillStyle =
-                  f % 2 === 0 ? 'rgba(255, 255, 255, 0.25)' : 'rgba(125, 211, 252, 0.22)';
-                octx.beginPath();
-                octx.moveTo(fx, fy);
-                octx.lineTo(fx + fw, fy - fh * 0.35);
-                octx.lineTo(fx + fw * 0.45, fy + fh);
-                octx.closePath();
-                octx.fill();
+            if (strokeMult > 0 || shadowMult > 0) {
+              ctx.save();
+              ctx.font = fontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.lineJoin = 'round';
+              if (shadowMult > 0) {
+                ctx.shadowColor = hasCustomShadowColor
+                  ? customShadowColor
+                  : 'rgba(120, 210, 255, 0.82)';
+                ctx.shadowBlur = 24 * effScale * shadowMult;
               }
-
-              const speckCount = Math.min(
-                360,
-                Math.max(80, Math.round((lineW * fontSize) / Math.max(12, 110 * effScale * effScale)))
-              );
-              for (let s = 0; s < speckCount; s++) {
-                const sx = padX + ((s * 137 + facetSeed * 19) % Math.max(10, Math.round(lineW)));
-                const sy = padY + ((s * 67 + facetSeed * 11) % Math.max(10, Math.round(fontSize * 0.96)));
-                const sr = (0.7 + (s % 4) * 0.45) * effScale;
-                octx.fillStyle =
-                  s % 3 === 0 ? 'rgba(255, 255, 255, 0.65)' : 'rgba(210, 240, 255, 0.45)';
-                octx.beginPath();
-                octx.arc(sx, sy, sr, 0, Math.PI * 2);
-                octx.fill();
+              if (strokeMult > 0) {
+                ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#123A68';
+                ctx.lineWidth = Math.max(1, 9 * effScale * strokeMult);
+                ctx.strokeText(line, centerX, baselineY);
               }
+              ctx.restore();
+            }
 
-              octx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
-              octx.lineWidth = Math.max(0.7, 1.1 * effScale);
-              const veinCount = Math.max(8, Math.round(lineW / Math.max(12, 34 * effScale)));
-              for (let v = 0; v < veinCount; v++) {
-                const vx = padX + ((v * 97 + facetSeed * 23) % Math.max(10, Math.round(lineW)));
-                const vy = localBaselineY - fontSize * (0.1 + ((v * 17) % 60) / 100);
-                const len = (8 + (v % 4) * 6) * effScale;
-                const ang = ((v % 6) - 2.5) * 0.45;
-                octx.beginPath();
-                octx.moveTo(vx, vy);
-                octx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
-                octx.lineTo(
-                  vx + Math.cos(ang + 0.5) * len * 1.4,
-                  vy + Math.sin(ang + 0.5) * len * 1.4
-                );
-                octx.stroke();
-              }
-
-              ctx.drawImage(off, centerX - localCx, baselineY - localBaselineY);
-            } else {
-              const iceFallback = ctx.createLinearGradient(
-                0,
-                baselineY - fontSize * 0.78,
-                0,
-                baselineY + fontSize * 0.1
-              );
-              iceFallback.addColorStop(0.0, '#FFFFFF');
-              iceFallback.addColorStop(0.45, '#BCE6FF');
-              iceFallback.addColorStop(1.0, '#5B9BD5');
-              ctx.fillStyle = iceFallback;
+            if (customTextColor) {
+              ctx.save();
+              ctx.font = fontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.fillStyle = customTextColor;
               ctx.fillText(line, centerX, baselineY);
+              ctx.restore();
+            } else {
+              const padX = Math.ceil(36 * effScale);
+              const padY = Math.ceil(32 * effScale);
+              const boxW = Math.max(8, Math.ceil(lineW + padX * 2));
+              const boxH = Math.max(8, Math.ceil(fontSize * 1.25 + padY * 2));
+              const off = document.createElement('canvas');
+              off.width = boxW;
+              off.height = boxH;
+              const octx = off.getContext('2d');
+
+              if (octx) {
+                const localCx = boxW / 2;
+                const localBaselineY = padY + fontSize * 0.92;
+                octx.font = fontStr;
+                octx.textAlign = 'center';
+                octx.textBaseline = 'alphabetic';
+
+                const iceGrad = octx.createLinearGradient(
+                  0,
+                  localBaselineY - fontSize * 0.78,
+                  0,
+                  localBaselineY + fontSize * 0.1
+                );
+                iceGrad.addColorStop(0.0, '#FFFFFF');
+                iceGrad.addColorStop(0.4, '#BCE6FF');
+                iceGrad.addColorStop(0.82, '#5B9BD5');
+                iceGrad.addColorStop(1.0, '#3C7AB8');
+                octx.fillStyle = iceGrad;
+                octx.fillText(line, localCx, localBaselineY);
+
+                octx.globalCompositeOperation = 'source-atop';
+
+                const facetSeed = Array.from(line).reduce(
+                  (acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 7),
+                  41
+                );
+                const facetCount = Math.max(14, Math.round(lineW / Math.max(8, 18 * effScale)));
+                for (let f = 0; f < facetCount; f++) {
+                  const fx = padX + ((f * 73 + facetSeed * 13) % Math.max(10, Math.round(lineW)));
+                  const fy = padY + ((f * 37 + facetSeed * 5) % Math.max(10, Math.round(fontSize * 0.95)));
+                  const fw = (14 + (f % 5) * 8) * effScale;
+                  const fh = (18 + (f % 4) * 9) * effScale;
+                  octx.fillStyle =
+                    f % 2 === 0 ? 'rgba(255, 255, 255, 0.25)' : 'rgba(125, 211, 252, 0.22)';
+                  octx.beginPath();
+                  octx.moveTo(fx, fy);
+                  octx.lineTo(fx + fw, fy - fh * 0.35);
+                  octx.lineTo(fx + fw * 0.45, fy + fh);
+                  octx.closePath();
+                  octx.fill();
+                }
+
+                const speckCount = Math.min(
+                  360,
+                  Math.max(80, Math.round((lineW * fontSize) / Math.max(12, 110 * effScale * effScale)))
+                );
+                for (let s = 0; s < speckCount; s++) {
+                  const sx = padX + ((s * 137 + facetSeed * 19) % Math.max(10, Math.round(lineW)));
+                  const sy = padY + ((s * 67 + facetSeed * 11) % Math.max(10, Math.round(fontSize * 0.96)));
+                  const sr = (0.7 + (s % 4) * 0.45) * effScale;
+                  octx.fillStyle =
+                    s % 3 === 0 ? 'rgba(255, 255, 255, 0.65)' : 'rgba(210, 240, 255, 0.45)';
+                  octx.beginPath();
+                  octx.arc(sx, sy, sr, 0, Math.PI * 2);
+                  octx.fill();
+                }
+
+                octx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+                octx.lineWidth = Math.max(0.7, 1.1 * effScale);
+                const veinCount = Math.max(8, Math.round(lineW / Math.max(12, 34 * effScale)));
+                for (let v = 0; v < veinCount; v++) {
+                  const vx = padX + ((v * 97 + facetSeed * 23) % Math.max(10, Math.round(lineW)));
+                  const vy = localBaselineY - fontSize * (0.1 + ((v * 17) % 60) / 100);
+                  const len = (8 + (v % 4) * 6) * effScale;
+                  const ang = ((v % 6) - 2.5) * 0.45;
+                  octx.beginPath();
+                  octx.moveTo(vx, vy);
+                  octx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
+                  octx.lineTo(
+                    vx + Math.cos(ang + 0.5) * len * 1.4,
+                    vy + Math.sin(ang + 0.5) * len * 1.4
+                  );
+                  octx.stroke();
+                }
+
+                ctx.drawImage(off, centerX - localCx, baselineY - localBaselineY);
+              } else {
+                const iceFallback = ctx.createLinearGradient(
+                  0,
+                  baselineY - fontSize * 0.78,
+                  0,
+                  baselineY + fontSize * 0.1
+                );
+                iceFallback.addColorStop(0.0, '#FFFFFF');
+                iceFallback.addColorStop(0.45, '#BCE6FF');
+                iceFallback.addColorStop(1.0, '#5B9BD5');
+                ctx.fillStyle = iceFallback;
+                ctx.fillText(line, centerX, baselineY);
+              }
             }
           }
         });
@@ -2213,22 +2518,30 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         hookLines.forEach((line, idx) => {
           const baselineY = firstBaselineY + idx * lineHeight;
           ctx.save();
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.96)';
-          ctx.shadowBlur = 20 * scale;
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 5 * scale;
-          ctx.strokeStyle = 'rgba(10, 6, 2, 0.96)';
-          ctx.lineWidth = Math.max(2, 10 * scale * fontScale);
-          ctx.strokeText(line, centerX, baselineY);
+          if (shadowMult > 0) {
+            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.96)';
+            ctx.shadowBlur = 20 * scale * shadowMult;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 5 * scale * Math.min(1.4, shadowMult);
+          }
+          if (strokeMult > 0) {
+            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(10, 6, 2, 0.96)';
+            ctx.lineWidth = Math.max(1, 10 * scale * fontScale * strokeMult);
+            ctx.strokeText(line, centerX, baselineY);
+          }
 
           ctx.shadowBlur = 0;
           ctx.shadowOffsetY = 0;
-          const goldGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.88, 0, baselineY + 6 * scale);
-          goldGrad.addColorStop(0, '#FFF5B8');
-          goldGrad.addColorStop(0.45, '#F6D365');
-          goldGrad.addColorStop(0.78, '#D4AF37');
-          goldGrad.addColorStop(1, '#C59B27');
-          ctx.fillStyle = goldGrad;
+          if (customTextColor) {
+            ctx.fillStyle = customTextColor;
+          } else {
+            const goldGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.88, 0, baselineY + 6 * scale);
+            goldGrad.addColorStop(0, '#FFF5B8');
+            goldGrad.addColorStop(0.45, '#F6D365');
+            goldGrad.addColorStop(0.78, '#D4AF37');
+            goldGrad.addColorStop(1, '#C59B27');
+            ctx.fillStyle = goldGrad;
+          }
           ctx.fillText(line, centerX, baselineY);
           ctx.restore();
         });
@@ -2270,16 +2583,24 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         hookLines.forEach((line, idx) => {
           const baselineY = firstBaselineY + idx * lineHeight;
           ctx.save();
-          ctx.shadowColor = 'rgba(245, 158, 11, 0.65)';
-          ctx.shadowBlur = 24 * scale;
-          ctx.strokeStyle = 'rgba(10, 7, 4, 0.94)';
-          ctx.lineWidth = Math.max(2, 6 * scale * fontScale);
-          ctx.strokeText(line, centerX, baselineY);
+          if (shadowMult > 0) {
+            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(245, 158, 11, 0.65)';
+            ctx.shadowBlur = 24 * scale * shadowMult;
+          }
+          if (strokeMult > 0) {
+            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(10, 7, 4, 0.94)';
+            ctx.lineWidth = Math.max(1, 6 * scale * fontScale * strokeMult);
+            ctx.strokeText(line, centerX, baselineY);
+          }
 
-          const parchmentGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.85, 0, baselineY);
-          parchmentGrad.addColorStop(0, '#FFFBEB');
-          parchmentGrad.addColorStop(1, '#FDE68A');
-          ctx.fillStyle = parchmentGrad;
+          if (customTextColor) {
+            ctx.fillStyle = customTextColor;
+          } else {
+            const parchmentGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.85, 0, baselineY);
+            parchmentGrad.addColorStop(0, '#FFFBEB');
+            parchmentGrad.addColorStop(1, '#FDE68A');
+            ctx.fillStyle = parchmentGrad;
+          }
           ctx.fillText(line, centerX, baselineY);
           ctx.restore();
         });
@@ -2321,13 +2642,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         hookLines.forEach((line, idx) => {
           const baselineY = firstBaselineY + idx * lineHeight;
           ctx.save();
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.88)';
-          ctx.shadowBlur = 12 * scale;
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.82)';
-          ctx.lineWidth = Math.max(1.5, 4.5 * scale * fontScale);
-          ctx.strokeText(line, centerX, baselineY);
+          if (shadowMult > 0) {
+            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.88)';
+            ctx.shadowBlur = 12 * scale * shadowMult;
+          }
+          if (strokeMult > 0) {
+            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(0, 0, 0, 0.82)';
+            ctx.lineWidth = Math.max(1, 4.5 * scale * fontScale * strokeMult);
+            ctx.strokeText(line, centerX, baselineY);
+          }
 
-          ctx.fillStyle = '#F8FAFC';
+          ctx.fillStyle = customTextColor || '#F8FAFC';
           ctx.fillText(line, centerX, baselineY);
           ctx.restore();
         });
@@ -2370,13 +2695,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         hookLines.forEach((line, idx) => {
           const baselineY = firstBaselineY + idx * lineHeight;
           ctx.save();
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-          ctx.shadowBlur = 18 * scale;
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.88)';
-          ctx.lineWidth = Math.max(2, 7 * scale * fontScale);
-          ctx.strokeText(line, centerX, baselineY);
+          if (shadowMult > 0) {
+            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.95)';
+            ctx.shadowBlur = 18 * scale * shadowMult;
+          }
+          if (strokeMult > 0) {
+            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(0, 0, 0, 0.88)';
+            ctx.lineWidth = Math.max(1, 7 * scale * fontScale * strokeMult);
+            ctx.strokeText(line, centerX, baselineY);
+          }
 
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = customTextColor || '#ffffff';
           ctx.fillText(line, centerX, baselineY);
           ctx.restore();
         });
@@ -2401,100 +2730,72 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     []
   );
 
+  const renderSlotToCanvas = useCallback(
+    (
+      canvas: HTMLCanvasElement | null,
+      slot: ThumbnailSlotId,
+      fallbackLabel?: string
+    ): HookBoundingBoxPct | null => {
+      const cfg = slotConfigs[slot];
+      const img = slotImages[slot] || slotImages.A;
+      return drawCoverOnCanvas(
+        canvas,
+        img,
+        cfg.title,
+        cfg.badges,
+        cfg.fontStyle,
+        cfg.royalDecorEnabled,
+        cfg.magicDecorEnabled,
+        cfg.hookLayout,
+        fallbackLabel,
+        {
+          fontEntry: cfg.fontEntry,
+          applyToBadges: cfg.applyFontToBadges,
+          badgeScalePct: cfg.badgeScalePct,
+          textColor: cfg.textColor,
+          strokeColor: cfg.strokeColor,
+          strokeWidthPct: cfg.strokeWidthPct,
+          shadowColor: cfg.shadowColor,
+          shadowBlurPct: cfg.shadowBlurPct
+        },
+        baseSharpenPct
+      );
+    },
+    [drawCoverOnCanvas, slotConfigs, slotImages, baseSharpenPct]
+  );
+
   const renderAllCanvases = useCallback(() => {
-    const fontOpts = {
-      fontEntry: selectedFontEntry,
-      applyToBadges: applyFontToBadges
-    };
-
-    const nextBoxA = drawCoverOnCanvas(
-      canvasARef.current,
-      imgA,
-      thumbTitle,
-      selectedBadgesA,
-      fontStyle,
-      royalDecorEnabled,
-      magicDecorEnabled,
-      hookLayoutA,
-      'Обложка A',
-      fontOpts,
-      baseSharpenPct
+    const nextBox = renderSlotToCanvas(
+      mainCanvasRef.current,
+      activeSlot,
+      `Вариант ${activeSlot}`
     );
-    setHookBoxA(prev => {
-      if (!prev && !nextBoxA) return prev;
+    setActiveHookBox(prev => {
+      if (!prev && !nextBox) return prev;
       if (
         prev &&
-        nextBoxA &&
-        Math.abs(prev.leftPct - nextBoxA.leftPct) < 0.05 &&
-        Math.abs(prev.topPct - nextBoxA.topPct) < 0.05 &&
-        Math.abs(prev.widthPct - nextBoxA.widthPct) < 0.05 &&
-        Math.abs(prev.heightPct - nextBoxA.heightPct) < 0.05
+        nextBox &&
+        Math.abs(prev.leftPct - nextBox.leftPct) < 0.05 &&
+        Math.abs(prev.topPct - nextBox.topPct) < 0.05 &&
+        Math.abs(prev.widthPct - nextBox.widthPct) < 0.05 &&
+        Math.abs(prev.heightPct - nextBox.heightPct) < 0.05
       ) {
         return prev;
       }
-      return nextBoxA;
+      return nextBox;
     });
 
-    const nextBoxB = drawCoverOnCanvas(
-      canvasBRef.current,
-      imgB || imgA,
-      titleB,
-      badgesB,
-      fontStyle,
-      royalDecorEnabled,
-      magicDecorEnabled,
-      hookLayoutB,
-      'Обложка B',
-      fontOpts,
-      baseSharpenPct
-    );
-    setHookBoxB(prev => {
-      if (!prev && !nextBoxB) return prev;
-      if (
-        prev &&
-        nextBoxB &&
-        Math.abs(prev.leftPct - nextBoxB.leftPct) < 0.05 &&
-        Math.abs(prev.topPct - nextBoxB.topPct) < 0.05 &&
-        Math.abs(prev.widthPct - nextBoxB.widthPct) < 0.05 &&
-        Math.abs(prev.heightPct - nextBoxB.heightPct) < 0.05
-      ) {
-        return prev;
-      }
-      return nextBoxB;
-    });
+    renderSlotToCanvas(mobileCanvasRef.current, activeSlot);
 
-    drawCoverOnCanvas(
-      mobileCanvasRef.current,
-      imgA,
-      thumbTitle,
-      selectedBadgesA,
-      fontStyle,
-      royalDecorEnabled,
-      magicDecorEnabled,
-      hookLayoutA,
-      undefined,
-      fontOpts,
-      baseSharpenPct
-    );
-  }, [
-    drawCoverOnCanvas,
-    imgA,
-    imgB,
-    thumbTitle,
-    selectedBadgesA,
-    titleB,
-    badgesB,
-    fontStyle,
-    selectedFontEntry,
-    applyFontToBadges,
-    royalDecorEnabled,
-    magicDecorEnabled,
-    hookLayoutA,
-    hookLayoutB,
-    abModeEnabled,
-    fontsReadyTick,
-    baseSharpenPct
-  ]);
+    if (compareFeedEnabled) {
+      renderSlotToCanvas(feedCanvasARef.current, 'A', 'Вариант A');
+      renderSlotToCanvas(feedCanvasBRef.current, 'B', 'Вариант B');
+      renderSlotToCanvas(feedCanvasCRef.current, 'C', 'Вариант C');
+      renderSlotToCanvas(mobileFeedCanvasARef.current, 'A');
+      renderSlotToCanvas(mobileFeedCanvasBRef.current, 'B');
+      renderSlotToCanvas(mobileFeedCanvasCRef.current, 'C');
+    }
+  }, [renderSlotToCanvas, activeSlot, compareFeedEnabled, fontsReadyTick, feedViewportMode]);
 
   useEffect(() => {
     renderAllCanvases();
@@ -2505,13 +2806,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     if (!imgA && batchVariants[0]) {
       window.selectedMasterThumbnail = batchVariants[0];
       const initImg = new Image();
-      initImg.onload = () => setImgA(initImg);
+      initImg.onload = () => setSlotImages(prev => ({ ...prev, A: initImg }));
       initImg.src = batchVariants[0];
     }
   }, [imgA, batchVariants]);
 
   // Выбор любого из 4-х вариантов сетки 2x2 как «Выбранный мастер-кадр»
-  const handleSelectBatchVariant = (idx: number, targetSlot: 'A' | 'B' = 'A') => {
+  const handleSelectBatchVariant = (idx: number, targetSlot: ThumbnailSlotId = activeSlot) => {
     const url = batchVariants[idx];
     if (!url) return;
     setSelectedMasterVariantIdx(idx);
@@ -2519,24 +2820,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
     const selectedImage = new Image();
     selectedImage.onload = () => {
-      if (targetSlot === 'A') {
-        setImgA(selectedImage);
-      } else {
-        setAbModeEnabled(true);
-        setImgB(selectedImage);
-      }
+      setSlotImages(prev => ({ ...prev, [targetSlot]: selectedImage }));
       onNotify(
-        `✨ Вариант #${idx + 1} сохранен как selectedMasterThumbnail и установлен на Обложку ${targetSlot}!`,
+        `✨ Вариант #${idx + 1} установлен на Вариант ${targetSlot}!`,
         'success'
       );
     };
     selectedImage.src = url;
   };
 
-  // Кнопка «📥 Скачать мастер-кадр» (экспорт в честном 4K PNG)
+  // Кнопка «📥 Скачать мастер-кадр» (экспорт в честном 4K PNG со стилем активного слота)
   const handleDownloadVariantFromGrid = (idx: number) => {
     const url = batchVariants[idx];
     if (!url) return;
+    const cfg = slotConfigs[activeSlot];
     const tempImg = new Image();
     tempImg.onload = () => {
       const offscreen = document.createElement('canvas');
@@ -2545,14 +2842,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       drawCoverOnCanvas(
         offscreen,
         tempImg,
-        thumbTitle,
-        selectedBadgesA,
-        fontStyle,
-        royalDecorEnabled,
-        magicDecorEnabled,
-        hookLayoutA,
+        cfg.title,
+        cfg.badges,
+        cfg.fontStyle,
+        cfg.royalDecorEnabled,
+        cfg.magicDecorEnabled,
+        cfg.hookLayout,
         undefined,
-        { fontEntry: selectedFontEntry, applyToBadges: applyFontToBadges },
+        {
+          fontEntry: cfg.fontEntry,
+          applyToBadges: cfg.applyFontToBadges,
+          badgeScalePct: cfg.badgeScalePct,
+          textColor: cfg.textColor,
+          strokeColor: cfg.strokeColor,
+          strokeWidthPct: cfg.strokeWidthPct,
+          shadowColor: cfg.shadowColor,
+          shadowBlurPct: cfg.shadowBlurPct
+        },
         baseSharpenPct
       );
       const link = document.createElement('a');
@@ -2576,7 +2882,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         'youtube_release_thumbnail',
         JSON.stringify({
           variantIndex: idx + 1,
-          titleHook: thumbTitle,
+          titleHook: slotConfigs.A.title,
           badge: thumbBadge,
           attachedAt: new Date().toISOString()
         })
@@ -2584,15 +2890,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     } catch {
       // ignore storage quota errors
     }
-    handleSelectBatchVariant(idx, 'A');
+    handleSelectBatchVariant(idx, activeSlot);
     onNotify(
-      `🚀 Мастер-кадр #${idx + 1} успешно привязан к YouTube релизу (window.selectedMasterThumbnail)!`,
+      `🚀 Мастер-кадр #${idx + 1} успешно привязан к YouTube релизу (Слот ${activeSlot})!`,
       'success'
     );
   };
 
   // Автономная генерация 4-х 4K кадров на Canvas (локальный бесплатный генератор)
-  const handleGenerateProceduralBatchFallback = (targetSlot: 'A' | 'B' = 'A') => {
+  const handleGenerateProceduralBatchFallback = (targetSlot: ThumbnailSlotId = activeSlot) => {
     const fallbackUrls = [0, 1, 2, 3].map(idx =>
       renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
     );
@@ -2605,12 +2911,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
-      if (targetSlot === 'A') setImgA(fallbackImg);
-      else {
-        setAbModeEnabled(true);
-        setImgB(fallbackImg);
-      }
-      onNotify('🎨 Сгенерированы 4 локальных 4K фона (16:9) в сетку 2×2!', 'success');
+      setSlotImages(prev => ({ ...prev, [targetSlot]: fallbackImg }));
+      onNotify(`🎨 Сгенерированы 4 локальных 4K фона (16:9) для Варианта ${targetSlot}!`, 'success');
     };
     fallbackImg.src = fallbackUrls[0];
   };
@@ -2712,7 +3014,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         window.selectedMasterThumbnail = slicedUrls[0];
 
         const firstImg = new Image();
-        firstImg.onload = () => setImgA(firstImg);
+        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
 
         onNotify(`🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`, 'success');
@@ -2774,7 +3076,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         window.selectedMasterThumbnail = slicedUrls[0];
 
         const firstImg = new Image();
-        firstImg.onload = () => setImgA(firstImg);
+        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
 
         onNotify(`🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`, 'success');
@@ -2789,10 +3091,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   // ============================================================================
   // ПАКЕТНАЯ ГЕНЕРАЦИЯ 4 ЧИСТЫХ 16:9 ОБЛОЖЕК БЕЗ ВОДЯНЫХ ЗНАКОВ
-  // Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell) если заполнены ключи,
-  // иначе бесплатный AI Horde API (Flux.1-Schnell, 1344x768, поллинг каждые 3 сек)
   // ============================================================================
-  const handleGenerateFluxCover = async (targetSlot: 'A' | 'B' = 'A') => {
+  const handleGenerateFluxCover = async (targetSlot: ThumbnailSlotId = activeSlot) => {
     generationAbortRef.current?.abort();
     const controller = new AbortController();
     generationAbortRef.current = controller;
@@ -2840,13 +3140,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       const generatedImg = new Image();
       generatedImg.onload = () => {
-        if (targetSlot === 'A') setImgA(generatedImg);
-        else {
-          setAbModeEnabled(true);
-          setImgB(generatedImg);
-        }
+        setSlotImages(prev => ({ ...prev, [targetSlot]: generatedImg }));
+        setActiveSlot(targetSlot);
         onNotify(
-          `🎨 4 чистые 16:9 обложки сгенерированы (${result.modelUsed}) и установлены в Обложку ${targetSlot}!`,
+          `🎨 4 чистые 16:9 обложки сгенерированы (${result.modelUsed}) и установлены в Вариант ${targetSlot}!`,
           'success'
         );
       };
@@ -2879,7 +3176,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   const handleLoadImageForSlot = (
     e: React.ChangeEvent<HTMLInputElement>,
-    slot: 'A' | 'B'
+    slot: ThumbnailSlotId
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2889,9 +3186,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       if (typeof result === 'string') {
         const img = new Image();
         img.onload = () => {
-          if (slot === 'A') setImgA(img);
-          else setImgB(img);
-          onNotify(`Изображение загружено в Обложку ${slot}!`, 'success');
+          setSlotImages(prev => ({ ...prev, [slot]: img }));
+          if (slot === 'A') {
+            window.selectedMasterThumbnail = result;
+          }
+          onNotify(`Изображение загружено в Вариант ${slot}!`, 'success');
         };
         img.src = result;
       }
@@ -2921,7 +3220,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  const capture4KKeyframe = (targetSlot: 'A' | 'B' | 'download') => {
+  const capture4KKeyframe = (targetSlot: ThumbnailSlotId | 'download') => {
     const video = videoRef.current;
     if (!video || !videoUrl) {
       onNotify('Сначала выберите видеофайл для захвата 4K стоп-кадра!', 'error');
@@ -2954,13 +3253,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
     const capturedImg = new Image();
     capturedImg.onload = () => {
+      setSlotImages(prev => ({ ...prev, [targetSlot]: capturedImg }));
+      setActiveSlot(targetSlot);
       if (targetSlot === 'A') {
-        setImgA(capturedImg);
-      } else {
-        setImgB(capturedImg);
+        window.selectedMasterThumbnail = dataUrl;
       }
       onNotify(
-        `📸 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) установлен на Обложку ${targetSlot}!`,
+        `📸 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) установлен на Вариант ${targetSlot}!`,
         'success'
       );
     };
@@ -2970,7 +3269,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   // Локальное приведение базового изображения к целевому разрешению (1920x1080, 2560x1440, 3840x2160)
   const resampleBaseSlotToResolution = (targetW: number, targetH: number) => {
     const presetKey = `${targetW}x${targetH}` as '1920x1080' | '2560x1440' | '3840x2160';
-    const resampleSingleImage = (srcImg: HTMLImageElement | null, onDone: (img: HTMLImageElement, url: string) => void) => {
+    const resampleSingleImage = (
+      srcImg: HTMLImageElement | null,
+      onDone: (img: HTMLImageElement, url: string) => void
+    ) => {
       if (!srcImg) return;
       const off = document.createElement('canvas');
       off.width = targetW;
@@ -2994,70 +3296,37 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       nextImg.src = dataUrl;
     };
 
-    if (!imgA && !imgB) {
+    const targetImg = slotImages[activeSlot] || slotImages.A;
+    if (!targetImg) {
       onNotify('Сначала выберите или загрузите базовый кадр для изменения разрешения.', 'info');
       return;
     }
 
-    resampleSingleImage(imgA, (nextImgA, urlA) => {
-      setImgA(nextImgA);
-      window.selectedMasterThumbnail = urlA;
+    const slotToUpdate: ThumbnailSlotId = slotImages[activeSlot] ? activeSlot : 'A';
+    resampleSingleImage(targetImg, (nextImg, url) => {
+      setSlotImages(prev => ({ ...prev, [slotToUpdate]: nextImg }));
+      if (slotToUpdate === 'A') {
+        window.selectedMasterThumbnail = url;
+      }
       setBaseResolutionPreset(presetKey);
       onNotify(
-        `🔍 Базовый кадр приведён к ${targetW}×${targetH} px (High-Quality Canvas)`,
+        `🔍 Кадр Варианта ${slotToUpdate} приведён к ${targetW}×${targetH} px (High-Quality Canvas)`,
         'success'
       );
     });
-    if (abModeEnabled && imgB) {
-      resampleSingleImage(imgB, nextImgB => {
-        setImgB(nextImgB);
-      });
-    }
   };
 
   // Сборка полноразмерного 4K Canvas (3840x2160) с резкой базой + векторными титрами и бейджами
-  const buildFullResThumbnailCanvas = (slot: 'A' | 'B'): HTMLCanvasElement => {
+  const buildFullResThumbnailCanvas = (slot: ThumbnailSlotId): HTMLCanvasElement => {
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
     offscreen.height = 2160;
-    const fontOpts = {
-      fontEntry: selectedFontEntry,
-      applyToBadges: applyFontToBadges
-    };
-    if (slot === 'A') {
-      drawCoverOnCanvas(
-        offscreen,
-        imgA,
-        thumbTitle,
-        selectedBadgesA,
-        fontStyle,
-        royalDecorEnabled,
-        magicDecorEnabled,
-        hookLayoutA,
-        undefined,
-        fontOpts,
-        baseSharpenPct
-      );
-    } else {
-      drawCoverOnCanvas(
-        offscreen,
-        imgB || imgA,
-        titleB,
-        badgesB,
-        fontStyle,
-        royalDecorEnabled,
-        magicDecorEnabled,
-        hookLayoutB,
-        undefined,
-        fontOpts,
-        baseSharpenPct
-      );
-    }
+    renderSlotToCanvas(offscreen, slot);
     return offscreen;
   };
 
   // Кнопка «📥 Скачать 4K обложку» (финальный экспорт 3840×2160 PNG с сохранёнными x/y и масштабом)
-  const downloadCover4K = (slot: 'A' | 'B') => {
+  const downloadCover4K = (slot: ThumbnailSlotId) => {
     const offscreen = buildFullResThumbnailCanvas(slot);
     const link = document.createElement('a');
     link.download = `thumbnail_4k_3840x2160_${slot}.png`;
@@ -3066,62 +3335,71 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     onNotify(`📥 4K обложка ${slot} (3840×2160 PNG без водяных знаков) скачана!`, 'success');
   };
 
-  // Умный экспорт обложки под лимит YouTube (< 2 МБ): бинарный подбор максимального JPEG-качества
-  const downloadCoverYouTube2Mb = async (slot: 'A' | 'B') => {
-    if (isOptimizingYtThumb) return;
-    setIsOptimizingYtThumb(true);
-    const MAX_YT_THUMB_BYTES = Math.floor(1.95 * 1024 * 1024); // строго <= 1.95 МБ
-
+  // Бинарный подбор JPEG-качества строго <= 1.95 МБ для требований YouTube
+  const compressCanvasToYouTubeJpeg = async (
+    offscreen: HTMLCanvasElement
+  ): Promise<{ blob: Blob; quality: number } | null> => {
+    const MAX_YT_THUMB_BYTES = Math.floor(1.95 * 1024 * 1024);
     const toJpegBlob = (canvas: HTMLCanvasElement, q: number): Promise<Blob | null> =>
       new Promise(resolve => {
         canvas.toBlob(blob => resolve(blob), 'image/jpeg', q);
       });
 
-    try {
-      const offscreen = buildFullResThumbnailCanvas(slot);
-      let bestBlob = await toJpegBlob(offscreen, 0.95);
-      let bestQ = 0.95;
+    let bestBlob = await toJpegBlob(offscreen, 0.95);
+    let bestQ = 0.95;
 
-      if (!bestBlob || bestBlob.size > MAX_YT_THUMB_BYTES) {
-        let low = 0.20;
-        let high = 0.94;
-        bestBlob = null;
-        for (let step = 0; step < 8; step++) {
-          const mid = Number(((low + high) / 2).toFixed(3));
-          const candidate = await toJpegBlob(offscreen, mid);
-          if (!candidate) break;
-          if (candidate.size <= MAX_YT_THUMB_BYTES) {
-            bestBlob = candidate;
-            bestQ = mid;
-            low = mid;
-          } else {
-            high = mid;
-          }
-        }
-        if (!bestBlob) {
-          bestBlob = await toJpegBlob(offscreen, 0.15);
-          bestQ = 0.15;
+    if (!bestBlob || bestBlob.size > MAX_YT_THUMB_BYTES) {
+      let low = 0.2;
+      let high = 0.94;
+      bestBlob = null;
+      for (let step = 0; step < 8; step++) {
+        const mid = Number(((low + high) / 2).toFixed(3));
+        const candidate = await toJpegBlob(offscreen, mid);
+        if (!candidate) break;
+        if (candidate.size <= MAX_YT_THUMB_BYTES) {
+          bestBlob = candidate;
+          bestQ = mid;
+          low = mid;
+        } else {
+          high = mid;
         }
       }
-
       if (!bestBlob) {
+        bestBlob = await toJpegBlob(offscreen, 0.15);
+        bestQ = 0.15;
+      }
+    }
+
+    return bestBlob ? { blob: bestBlob, quality: bestQ } : null;
+  };
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1800);
+  };
+
+  // Умный экспорт одной обложки под лимит YouTube (< 2 МБ)
+  const downloadCoverYouTube2Mb = async (slot: ThumbnailSlotId) => {
+    if (isOptimizingYtThumb) return;
+    setIsOptimizingYtThumb(true);
+    try {
+      const offscreen = buildFullResThumbnailCanvas(slot);
+      const result = await compressCanvasToYouTubeJpeg(offscreen);
+      if (!result) {
         onNotify('Не удалось сформировать оптимизированную обложку для YouTube.', 'error');
         return;
       }
-
-      const url = URL.createObjectURL(bestBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `thumbnail_youtube_4k_3840x2160_${slot}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-
-      const mbText = (bestBlob.size / (1024 * 1024)).toFixed(2);
-      const qPct = Math.round(bestQ * 100);
+      triggerBlobDownload(result.blob, `thumb_${slot}_yt.jpg`);
+      const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
+      const qPct = Math.round(result.quality * 100);
       onNotify(
-        `✅ Обложка оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
+        `✅ Обложка ${slot} оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
         'success'
       );
     } finally {
@@ -3129,10 +3407,49 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
+  // Пакетный экспорт всех 3 вариантов (thumb_A_yt.jpg, thumb_B_yt.jpg, thumb_C_yt.jpg) < 2 МБ
+  const downloadAll3CoversYouTube2Mb = async () => {
+    if (isOptimizingYtThumb) return;
+    setIsOptimizingYtThumb(true);
+    const slots: ThumbnailSlotId[] = ['A', 'B', 'C'];
+    const summaryParts: string[] = [];
+
+    try {
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
+        setBatchExportStatus(`Рендер 4K и сжатие ${slot} (${i + 1}/3)...`);
+        await new Promise(resolve => window.setTimeout(resolve, 25));
+
+        const offscreen = buildFullResThumbnailCanvas(slot);
+        const result = await compressCanvasToYouTubeJpeg(offscreen);
+        if (result) {
+          triggerBlobDownload(result.blob, `thumb_${slot}_yt.jpg`);
+          const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
+          summaryParts.push(`${slot}: ${mbText} МБ`);
+          if (i < slots.length - 1) {
+            await new Promise(resolve => window.setTimeout(resolve, 180));
+          }
+        }
+      }
+
+      if (summaryParts.length === 3) {
+        onNotify(
+          `📦 Все 3 обложки A/B/C скачаны для YouTube (${summaryParts.join(' • ')})`,
+          'success'
+        );
+      } else {
+        onNotify('Часть обложек не удалось экспортировать.', 'error');
+      }
+    } finally {
+      setBatchExportStatus('');
+      setIsOptimizingYtThumb(false);
+    }
+  };
+
   // Передача чистого арта или скомпонованного кадра в модуль «🖼️ Арт-Редактор & Фон»
-  const handleOpenSlotInArtEditor = (slot: 'A' | 'B') => {
+  const handleOpenSlotInArtEditor = (slot: ThumbnailSlotId) => {
     if (!onSendToArtEditor) return;
-    const rawImg = slot === 'A' ? imgA : imgB || imgA;
+    const rawImg = slotImages[slot] || slotImages.A;
     let exportDataUrl = '';
     if (rawImg && rawImg.naturalWidth > 0 && rawImg.naturalHeight > 0) {
       const off = document.createElement('canvas');
@@ -3145,16 +3462,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
     }
     if (!exportDataUrl) {
-      const canvas = slot === 'A' ? canvasARef.current : canvasBRef.current;
-      if (canvas) {
-        exportDataUrl = canvas.toDataURL('image/png');
-      }
+      const offscreen = buildFullResThumbnailCanvas(slot);
+      exportDataUrl = offscreen.toDataURL('image/png');
     }
     if (!exportDataUrl) {
       onNotify('Сначала выберите или сгенерируйте обложку для передачи в Арт-Редактор.', 'info');
       return;
     }
-    onSendToArtEditor(exportDataUrl, slot === 'A' ? 'Обложка A (4K Превью)' : 'Обложка B (4K Превью)');
+    onSendToArtEditor(exportDataUrl, `Вариант ${slot} (4K Превью)`);
   };
 
   // Кнопка «📋 Скопировать промпт для веб-генератора»
@@ -3168,8 +3483,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
-  const lineCountHookA = splitHookLines(thumbTitle, fontStyle === 'gold_ice_magic').length;
-  const lineCountHookB = splitHookLines(titleB, fontStyle === 'gold_ice_magic').length;
+  const activeLineCountHook = splitHookLines(
+    activeConfig.title,
+    activeConfig.fontStyle === 'gold_ice_magic'
+  ).length;
 
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
@@ -3241,16 +3558,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Левая колонка (5/12): Настройки Обложки A / B, AI Horde / Cloudflare Flux.1-Schnell и пилюли-переключатели */}
-        <div className="lg:col-span-5 aether-surface rounded-2xl p-4 sm:p-6 space-y-5 min-w-0">
+        {/* Левая колонка (5/12): Переключатель A / B / C, настройки активного слота и пакетный экспорт */}
+        <div className="lg:col-span-5 aether-surface rounded-2xl p-4 sm:p-6 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3.5">
             <div>
               <h2 className="text-base font-bold text-[#f8fafc] flex items-center gap-2 tracking-tight">
                 <Sparkles className="text-emerald-400 w-5 h-5 shrink-0" />
-                <span>4K Превью &amp; Арт-цех</span>
+                <span>4K Превью &amp; A/B/C Тест</span>
               </h2>
               <p className="text-[11px] text-white/55 mt-0.5">
-                Интерактивный холст 3840×2160 • Drag &amp; Drop заголовка
+                3 независимых обложки 3840×2160 • Drag &amp; Drop заголовка
               </p>
             </div>
             <span
@@ -3260,6 +3577,109 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             >
               {isCloudflareConfigured ? 'Cloudflare Flux • 16:9' : 'Flux.1 AI Horde • 16:9'}
             </span>
+          </div>
+
+          {/* 1. КОМПАКТНАЯ ГРУППА ТРЁХ СЛОТОВ (🅰️ Вариант A / 🅱️ Вариант B / 🅲 Вариант C) + КОПИРОВАНИЕ */}
+          <div className="aether-card rounded-2xl p-3 space-y-2.5 border border-white/[0.1] bg-[#080c14]/75">
+            <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label="Слоты A/B/C тестирования">
+              {(
+                [
+                  { id: 'A', emoji: '🅰️', label: 'Вариант A', accent: 'amber' },
+                  { id: 'B', emoji: '🅱️', label: 'Вариант B', accent: 'emerald' },
+                  { id: 'C', emoji: '🅲', label: 'Вариант C', accent: 'cyan' }
+                ] as const
+              ).map(tab => {
+                const isSelected = activeSlot === tab.id;
+                const hasOwnImage = Boolean(slotImages[tab.id]);
+                return (
+                  <button
+                    key={`slot-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      setActiveSlot(tab.id);
+                      setShowCopyMenu(false);
+                    }}
+                    className={`relative min-h-[44px] px-2 py-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-0.5 border cursor-pointer overflow-hidden transition ${
+                      isSelected
+                        ? tab.accent === 'amber'
+                          ? 'border-amber-400/65 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.18)]'
+                          : tab.accent === 'emerald'
+                            ? 'border-emerald-400/65 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.18)]'
+                            : 'border-cyan-400/65 text-cyan-200 shadow-[0_0_20px_rgba(6,182,212,0.18)]'
+                        : 'bg-[#0b0f19]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
+                    }`}
+                  >
+                    {isSelected && (
+                      <motion.div
+                        layoutId="activeAbcSlotTab"
+                        className={`absolute inset-0 -z-0 ${
+                          tab.accent === 'amber'
+                            ? 'bg-amber-500/15'
+                            : tab.accent === 'emerald'
+                              ? 'bg-emerald-500/15'
+                              : 'bg-cyan-500/15'
+                        }`}
+                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center gap-1 whitespace-nowrap">
+                      <span>{tab.emoji}</span>
+                      <span>{tab.label}</span>
+                    </span>
+                    <span className="relative z-10 text-[9.5px] font-mono text-white/50 truncate max-w-full">
+                      {tab.id === 'A'
+                        ? slotImages.A
+                          ? 'свой фон'
+                          : 'пусто'
+                        : hasOwnImage
+                          ? 'свой фон'
+                          : 'общий с A'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="relative flex flex-wrap items-center justify-between gap-2 pt-0.5">
+              <span className="text-[10.5px] font-mono text-white/55">
+                Редактируется: <strong className="text-[#f8fafc]">Слот {activeSlot}</strong>
+                {activeSlot !== 'A' && !slotImages[activeSlot] && ' (фон от A)'}
+              </span>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowCopyMenu(prev => !prev)}
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[11px] font-semibold text-amber-300 flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <Copy className="w-3.5 h-3.5 shrink-0" />
+                  <span>📋 Скопировать настройки в...</span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform ${showCopyMenu ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {showCopyMenu && (
+                  <div className="absolute right-0 mt-1.5 z-30 w-52 rounded-xl bg-[#0b0f19]/95 backdrop-blur-xl border border-white/[0.14] shadow-2xl p-1.5 space-y-1">
+                    {(['A', 'B', 'C'] as const)
+                      .filter(target => target !== activeSlot)
+                      .map(target => (
+                        <button
+                          key={`copy-to-${target}`}
+                          type="button"
+                          onClick={() => handleCopySlotSettingsTo(target)}
+                          className="w-full min-h-[38px] px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#f8fafc] hover:bg-white/[0.09] flex items-center justify-between cursor-pointer"
+                        >
+                          <span>Скопировать в Вариант {target}</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Пакетная генерация 2x2 (4 варианта 16:9 без водяных знаков) */}
@@ -3280,42 +3700,41 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => handleGenerateFluxCover('A')}
+                onClick={() => handleGenerateFluxCover(activeSlot)}
                 disabled={isGeneratingCovers}
-                className="min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                className="flex-1 min-w-[180px] min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
-                {isGeneratingCovers && generatingTargetSlot === 'A' ? (
+                {isGeneratingCovers && generatingTargetSlot === activeSlot ? (
                   <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
                 ) : (
                   <Wand2 className="w-4 h-4 shrink-0" />
                 )}
                 <span className="truncate">
-                  {isGeneratingCovers && generatingTargetSlot === 'A'
+                  {isGeneratingCovers && generatingTargetSlot === activeSlot
                     ? buttonQueueStatus || 'Ожидание...'
-                    : 'Flux.1 (2×2) → Обложка A'}
+                    : `Flux.1 (2×2) → Слот ${activeSlot}`}
                 </span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => handleGenerateFluxCover('B')}
-                disabled={isGeneratingCovers}
-                className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-emerald-400/35 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
-              >
-                {isGeneratingCovers && generatingTargetSlot === 'B' ? (
-                  <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                ) : (
-                  <Wand2 className="w-4 h-4 shrink-0" />
-                )}
-                <span className="truncate">
-                  {isGeneratingCovers && generatingTargetSlot === 'B'
-                    ? buttonQueueStatus || 'Ожидание...'
-                    : 'Flux.1 (2×2) → Обложка B'}
-                </span>
-              </button>
+              {(['A', 'B', 'C'] as const).map(target => (
+                <button
+                  key={`flux-slot-${target}`}
+                  type="button"
+                  disabled={isGeneratingCovers}
+                  onClick={() => handleGenerateFluxCover(target)}
+                  title={`Сгенерировать 2×2 фон сразу в Вариант ${target}`}
+                  className={`min-h-[44px] px-3 rounded-xl border text-xs font-bold cursor-pointer disabled:opacity-60 transition ${
+                    activeSlot === target
+                      ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                      : 'bg-white/[0.05] hover:bg-white/[0.1] border-white/[0.1] text-white/75'
+                  }`}
+                >
+                  → {target}
+                </button>
+              ))}
             </div>
 
             {isGeneratingCovers && (
@@ -3402,7 +3821,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               )}
             </div>
 
-            {/* Компактный блок ошибки генерации */}
             {generationError && (
               <div
                 role="alert"
@@ -3428,7 +3846,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleGenerateProceduralBatchFallback('A')}
+                  onClick={() => handleGenerateProceduralBatchFallback(activeSlot)}
                   className="min-h-[38px] bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-semibold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer"
                 >
                   🎨 Сгенерировать 4 локальных 4K фона (Canvas 2×2)
@@ -3437,18 +3855,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             )}
           </div>
 
-          {/* Пилюли-переключатели режимов предпросмотра: YouTube UI Grid, A/B-тестер и Ч/Б фильтр контрастности */}
+          {/* Кнопки режимов предпросмотра: YouTube UI, Сравнить A/B/C в ленте, Ч/Б контраст */}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setShowYoutubeOverlay(prev => !prev)}
-              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
+              className={`min-h-[44px] flex-1 min-w-[125px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-1.5 cursor-pointer ${
                 showYoutubeOverlay
                   ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
                   : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2 truncate">
+              <span className="flex items-center gap-1.5 truncate">
                 <Eye className="w-4 h-4 shrink-0" />
                 <span className="truncate">YouTube UI</span>
               </span>
@@ -3459,32 +3877,32 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={() => setAbModeEnabled(prev => !prev)}
-              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
-                abModeEnabled
-                  ? 'bg-amber-500/15 border-amber-400/50 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
-                  : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
+              onClick={() => setCompareFeedEnabled(prev => !prev)}
+              className={`min-h-[44px] flex-1 min-w-[175px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-1.5 cursor-pointer ${
+                compareFeedEnabled
+                  ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_22px_rgba(245,158,11,0.22)]'
+                  : 'bg-[#080c14]/70 border-white/[0.08] text-white/75 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2 truncate">
+              <span className="flex items-center gap-1.5 truncate">
                 <Columns className="w-4 h-4 shrink-0" />
-                <span className="truncate">A/B-тестер</span>
+                <span className="truncate">👁️ Сравнить A / B / C в ленте</span>
               </span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30">
-                {abModeEnabled ? 'A vs B' : '1x'}
+                {compareFeedEnabled ? 'FEED' : '1x'}
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => setBwContrastFilter(prev => !prev)}
-              className={`min-h-[44px] flex-1 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
+              className={`min-h-[44px] flex-1 min-w-[125px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-1.5 cursor-pointer ${
                 bwContrastFilter
                   ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-200 shadow-[0_0_20px_rgba(6,182,212,0.15)]'
                   : 'bg-[#080c14]/70 border-white/[0.08] text-white/60 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-2 truncate">
+              <span className="flex items-center gap-1.5 truncate">
                 <Contrast className="w-4 h-4 shrink-0" />
                 <span className="truncate">Ч/Б Контраст</span>
               </span>
@@ -3494,7 +3912,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </button>
           </div>
 
-          {/* Компактный селектор шрифтов (CapCut-Style) + шейдеры заголовка */}
+          {/* Шрифт, цвет, обводка и тень активного слота */}
           <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
             <div className="flex items-center justify-between gap-2">
               <label
@@ -3502,21 +3920,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2"
               >
                 <Type className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Шрифт и эффект заголовка</span>
+                <span>Шрифт и эффект • Слот {activeSlot}</span>
               </label>
               <span className="text-[11px] font-mono text-amber-300/85">
                 3840×2160 Canvas
               </span>
             </div>
 
-            {/* Компактное выпадающее окно выбора шрифта (Кино/Игры 25+ • ИИ-подбор • Google Fonts • Свой .ttf/.otf/.woff2) */}
             <CompactFontSelector
-              selectedFontId={selectedFontEntry.id}
+              selectedFontId={activeConfig.fontEntry.id}
               onSelectFont={entry => {
-                setSelectedFontEntry(entry);
-                if (entry.source === 'custom') {
-                  setApplyFontToBadges(true);
-                }
+                updateSlotConfig(activeSlot, prev => ({
+                  ...prev,
+                  fontEntry: entry,
+                  applyFontToBadges: entry.source === 'custom' ? true : prev.applyFontToBadges
+                }));
               }}
               onFontLoaded={() => setFontsReadyTick(t => t + 1)}
               onNotify={onNotify}
@@ -3526,18 +3944,26 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <label className="flex items-center gap-2 text-[11px] text-white/75 cursor-pointer select-none pt-0.5">
               <input
                 type="checkbox"
-                checked={applyFontToBadges}
-                onChange={e => setApplyFontToBadges(e.target.checked)}
+                checked={activeConfig.applyFontToBadges}
+                onChange={e => {
+                  const checked = e.target.checked;
+                  updateSlotConfig(activeSlot, prev => ({
+                    ...prev,
+                    applyFontToBadges: checked
+                  }));
+                }}
                 className="accent-amber-400 rounded cursor-pointer"
               />
-              <span>Применять выбранный шрифт также к верхним бейджам</span>
+              <span>Применять выбранный шрифт также к верхним бейджам ({activeSlot})</span>
             </label>
 
-            {/* Скрытый синхронизированный select для обратной совместимости */}
             <select
               id="thumb-font-style-select"
-              value={fontStyle}
-              onChange={e => setFontStyle(e.target.value as ThumbnailFontStyleId)}
+              value={activeConfig.fontStyle}
+              onChange={e => {
+                const nextStyle = e.target.value as ThumbnailFontStyleId;
+                updateSlotConfig(activeSlot, prev => ({ ...prev, fontStyle: nextStyle }));
+              }}
               className="sr-only"
               aria-label="Эффект и декор заголовка"
             >
@@ -3548,29 +3974,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               ))}
             </select>
 
-            {/* Компактная строка визуальных эффектов/градиентов для выбранного шрифта */}
             <div className="space-y-1.5 pt-1 border-t border-white/[0.07]">
               <span className="text-[10px] text-white/50 uppercase font-semibold tracking-wider block">
                 Визуальный стиль текста (шейдер / декор):
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {FONT_STYLE_OPTIONS.map(opt => {
-                  const isSelected = fontStyle === opt.id;
+                  const isSelected = activeConfig.fontStyle === opt.id;
                   return (
                     <button
                       key={opt.id}
                       type="button"
                       onClick={() => {
-                        setFontStyle(opt.id);
                         const defaultFontId = DEFAULT_FONT_ID_BY_STYLE[opt.id];
                         const defaultEntry = GOOGLE_FONT_PRESETS.find(f => f.id === defaultFontId);
-                        if (
-                          defaultEntry &&
-                          selectedFontEntry.source === 'google' &&
-                          Object.values(DEFAULT_FONT_ID_BY_STYLE).includes(selectedFontEntry.id)
-                        ) {
-                          setSelectedFontEntry(defaultEntry);
-                        }
+                        updateSlotConfig(activeSlot, prev => {
+                          const shouldSwapFont =
+                            defaultEntry &&
+                            prev.fontEntry.source === 'google' &&
+                            Object.values(DEFAULT_FONT_ID_BY_STYLE).includes(prev.fontEntry.id);
+                          return {
+                            ...prev,
+                            fontStyle: opt.id,
+                            fontEntry: shouldSwapFont ? defaultEntry : prev.fontEntry
+                          };
+                        });
                       }}
                       className={`relative min-h-[34px] px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer overflow-hidden border transition ${
                         isSelected
@@ -3599,16 +4027,126 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            <p className="text-[11px] text-white/55 leading-relaxed">
-              {FONT_STYLE_OPTIONS.find(o => o.id === fontStyle)?.subtitle}
-            </p>
+            {/* Цвет текста, обводка и тень для активного слота */}
+            <div className="space-y-2.5 pt-2 border-t border-white/[0.07]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider">
+                  Цвет текста ({activeSlot}):
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {TEXT_COLOR_PRESETS.map(preset => {
+                    const isColorActive = activeConfig.textColor === preset.id;
+                    return (
+                      <button
+                        key={`color-${preset.id || 'auto'}`}
+                        type="button"
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({ ...prev, textColor: preset.id }))
+                        }
+                        title={preset.label}
+                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer flex items-center gap-1 transition ${
+                          isColorActive
+                            ? 'border-amber-400 bg-amber-500/15 text-amber-200'
+                            : 'border-white/[0.1] bg-[#080c14]/80 text-white/65 hover:text-white'
+                        }`}
+                      >
+                        {preset.id && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-white/30 shrink-0"
+                            style={{ backgroundColor: preset.id }}
+                          />
+                        )}
+                        <span>{preset.label}</span>
+                      </button>
+                    );
+                  })}
+                  <label className="min-h-[28px] px-1.5 rounded-lg border border-white/[0.1] bg-[#080c14]/80 flex items-center gap-1 cursor-pointer text-[10px] text-white/70">
+                    <input
+                      type="color"
+                      value={activeConfig.textColor || '#FFFFFF'}
+                      onChange={e =>
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, textColor: e.target.value }))
+                      }
+                      className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
+                      aria-label="Свой цвет заголовка"
+                    />
+                    <span>HEX</span>
+                  </label>
+                </div>
+              </div>
 
-            {fontStyle === 'gold_ice_magic' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="bg-[#080c14]/70 border border-white/[0.06] rounded-xl p-2.5 space-y-1">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Обводка: {activeConfig.strokeWidthPct}%</span>
+                    <input
+                      type="color"
+                      value={activeConfig.strokeColor}
+                      onChange={e =>
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, strokeColor: e.target.value }))
+                      }
+                      aria-label="Цвет обводки"
+                      className="w-5 h-4 bg-transparent border-0 cursor-pointer p-0"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={activeConfig.strokeWidthPct}
+                    onChange={e =>
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        strokeWidthPct: Number(e.target.value)
+                      }))
+                    }
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="bg-[#080c14]/70 border border-white/[0.06] rounded-xl p-2.5 space-y-1">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Тень: {activeConfig.shadowBlurPct}%</span>
+                    <input
+                      type="color"
+                      value={activeConfig.shadowColor}
+                      onChange={e =>
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, shadowColor: e.target.value }))
+                      }
+                      aria-label="Цвет тени"
+                      className="w-5 h-4 bg-transparent border-0 cursor-pointer p-0"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={activeConfig.shadowBlurPct}
+                    onChange={e =>
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        shadowBlurPct: Number(e.target.value)
+                      }))
+                    }
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {activeConfig.fontStyle === 'gold_ice_magic' && (
               <button
                 type="button"
-                onClick={() => setMagicDecorEnabled(prev => !prev)}
+                onClick={() =>
+                  updateSlotConfig(activeSlot, prev => ({
+                    ...prev,
+                    magicDecorEnabled: !prev.magicDecorEnabled
+                  }))
+                }
                 className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
-                  magicDecorEnabled
+                  activeConfig.magicDecorEnabled
                     ? 'bg-gradient-to-r from-amber-500/20 via-sky-500/20 to-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]'
                     : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
                 }`}
@@ -3618,17 +4156,22 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <span>Магическое сияние и снежинки (завитки, блики, иней)</span>
                 </span>
                 <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
-                  {magicDecorEnabled ? 'ON' : 'OFF'}
+                  {activeConfig.magicDecorEnabled ? 'ON' : 'OFF'}
                 </span>
               </button>
             )}
 
-            {fontStyle === 'royal_gold_laurels' && (
+            {activeConfig.fontStyle === 'royal_gold_laurels' && (
               <button
                 type="button"
-                onClick={() => setRoyalDecorEnabled(prev => !prev)}
+                onClick={() =>
+                  updateSlotConfig(activeSlot, prev => ({
+                    ...prev,
+                    royalDecorEnabled: !prev.royalDecorEnabled
+                  }))
+                }
                 className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
-                  royalDecorEnabled
+                  activeConfig.royalDecorEnabled
                     ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
                     : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
                 }`}
@@ -3638,30 +4181,52 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <span>Декор: свеча сверху + золотые лавры по бокам</span>
                 </span>
                 <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
-                  {royalDecorEnabled ? 'ON' : 'OFF'}
+                  {activeConfig.royalDecorEnabled ? 'ON' : 'OFF'}
                 </span>
               </button>
             )}
           </div>
 
-          {/* Настройки Обложки A */}
+          {/* Настройки активного слота (фон, текст, масштаб, бейджи до 3 и размер бейджей) */}
           <div className="aether-card rounded-2xl p-4 space-y-3.5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                Вариант A (Основная обложка)
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    activeSlot === 'A'
+                      ? 'bg-amber-400'
+                      : activeSlot === 'B'
+                        ? 'bg-emerald-400'
+                        : 'bg-cyan-400'
+                  }`}
+                />
+                Вариант {activeSlot} ({activeSlot === 'A' ? 'Основной' : 'Тестовый слот'})
               </span>
-              <span className="text-[10px] font-mono text-white/55">SLOT A</span>
+              <span className="text-[10px] font-mono text-white/55">SLOT {activeSlot}</span>
             </div>
 
-            <div>
-              <label className="text-[11px] text-white/55 block mb-1.5">
-                Загрузить свой арт (Обложка A):
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[11px] text-white/55">
+                  Загрузить свой фон (только для Варианта {activeSlot}):
+                </label>
+                {activeSlot !== 'A' && slotImages[activeSlot] && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
+                      onNotify(`Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`, 'info');
+                    }}
+                    className="text-[10px] text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
+                  >
+                    Использовать фон A
+                  </button>
+                )}
+              </div>
               <input
                 type="file"
                 accept="image/*"
-                onChange={e => handleLoadImageForSlot(e, 'A')}
+                onChange={e => handleLoadImageForSlot(e, activeSlot)}
                 className="w-full text-xs text-white/60 file:mr-3 file:min-h-[38px] file:py-1.5 file:px-3.5 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-white/[0.06] file:text-amber-300 hover:file:bg-white/[0.12] cursor-pointer"
               />
             </div>
@@ -3669,16 +4234,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-[11px] text-white/55">
-                  Текст-хук A (Enter — на 2 строки):
+                  Текст-хук {activeSlot} (Enter — на 2 строки):
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono text-amber-300 tabular-nums">
-                    {lineCountHookA} {lineCountHookA === 1 ? 'строка' : 'строки'}
+                    {activeLineCountHook} {activeLineCountHook === 1 ? 'строка' : 'строки'}
                   </span>
-                  {thumbTitle.length > 0 && (
+                  {activeConfig.title.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => onThumbTitleChange('')}
+                      onClick={() => handleSlotHookChange(activeSlot, '')}
                       className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                       title="Очистить текст-хук (оставить чистый арт)"
                     >
@@ -3689,23 +4254,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
               <textarea
                 rows={2}
-                value={thumbTitle}
-                onChange={e => handleThumbHookChange(e.target.value)}
-                placeholder="Введите заголовок (Enter для 2-й строки, пусто = чистый арт)"
+                value={activeConfig.title}
+                onChange={e => handleSlotHookChange(activeSlot, e.target.value)}
+                placeholder={`Введите заголовок ${activeSlot} (Enter для 2-й строки, пусто = чистый арт)`}
                 className="w-full bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2.5 text-xs text-[#f8fafc] font-bold outline-none focus:border-amber-400 resize-none leading-snug"
               />
             </div>
 
-            {/* Размер шрифта и позиция текста-хука A */}
+            {/* Размер шрифта и позиция текста-хука активного слота */}
             <div className="bg-[#080c14]/75 border border-white/[0.08] rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#f8fafc] font-semibold">Размер шрифта A:</span>
+                <span className="text-[#f8fafc] font-semibold">Размер шрифта {activeSlot}:</span>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-mono text-white/55 tabular-nums">
-                    X:{Math.round(hookLayoutA.xPct)}% Y:{Math.round(hookLayoutA.yPct)}%
+                    X:{Math.round(activeConfig.hookLayout.xPct)}% Y:{Math.round(activeConfig.hookLayout.yPct)}%
                   </span>
                   <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
-                    {hookLayoutA.fontScalePct}%
+                    {activeConfig.hookLayout.fontScalePct}%
                   </span>
                 </div>
               </div>
@@ -3714,10 +4279,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 min={60}
                 max={150}
                 step={1}
-                value={hookLayoutA.fontScalePct}
+                value={activeConfig.hookLayout.fontScalePct}
                 onChange={e => {
                   const val = Number(e.target.value);
-                  setHookLayoutA(prev => ({ ...prev, fontScalePct: val }));
+                  updateSlotConfig(activeSlot, prev => ({
+                    ...prev,
+                    hookLayout: { ...prev.hookLayout, fontScalePct: val }
+                  }));
                 }}
                 className="w-full accent-amber-400 cursor-pointer"
               />
@@ -3727,7 +4295,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setHookLayoutA({ ...DEFAULT_HOOK_LAYOUT })}
+                  onClick={() =>
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+                    }))
+                  }
                   className="min-h-[38px] text-[11px] font-semibold text-amber-300 hover:text-amber-200 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -3736,25 +4309,53 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
+            {/* Бейджи активного слота (до 3) + размер бейджей */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] text-white/55">
-                  Кинематографичные бейджи A (верхний правый угол, до 3):
+                  Кинематографичные бейджи {activeSlot} (верхний правый угол, до 3):
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-mono text-amber-300 tabular-nums">
-                    {selectedBadgesA.length}/3
+                    {activeConfig.badges.length}/3
                   </span>
-                  {selectedBadgesA.length > 0 && (
+                  {activeConfig.badges.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => onThumbBadgeChange('none')}
+                      onClick={() => {
+                        if (activeSlot === 'A') {
+                          onThumbBadgeChange('none');
+                        } else {
+                          updateSlotConfig(activeSlot, prev => ({ ...prev, badges: [] }));
+                        }
+                      }}
                       className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
                     >
                       Сброс
                     </button>
                   )}
                 </div>
+              </div>
+
+              <div className="bg-[#080c14]/70 border border-white/[0.07] rounded-xl p-2.5 space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/75 font-semibold">Размер бейджей {activeSlot}:</span>
+                  <span className="font-mono font-bold text-[#FDE047] tabular-nums">
+                    {activeConfig.badgeScalePct}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={60}
+                  max={150}
+                  step={2}
+                  value={activeConfig.badgeScalePct}
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
+                  }}
+                  className="w-full accent-amber-400 cursor-pointer"
+                />
               </div>
 
               {/* Категория 1: Документальные / Исторические (@Histoviva) */}
@@ -3764,13 +4365,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {HISTOVIVA_BADGE_OPTIONS.map(badge => {
-                    const isActive = selectedBadgesA.includes(badge.id);
+                    const isActive = activeConfig.badges.includes(badge.id);
                     return (
                       <button
-                        key={`badge-a-${badge.id}`}
+                        key={`badge-${activeSlot}-${badge.id}`}
                         type="button"
                         aria-pressed={isActive}
-                        onClick={() => toggleBadgeA(badge.id)}
+                        onClick={() => toggleBadgeForSlot(activeSlot, badge.id)}
                         className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
                           isActive
                             ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
@@ -3791,13 +4392,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {AMBIENT_BADGE_OPTIONS.map(badge => {
-                    const isActive = selectedBadgesA.includes(badge.id);
+                    const isActive = activeConfig.badges.includes(badge.id);
                     return (
                       <button
-                        key={`badge-a-${badge.id}`}
+                        key={`badge-${activeSlot}-${badge.id}`}
                         type="button"
                         aria-pressed={isActive}
-                        onClick={() => toggleBadgeA(badge.id)}
+                        onClick={() => toggleBadgeForSlot(activeSlot, badge.id)}
                         className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
                           isActive
                             ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
@@ -3812,177 +4413,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
           </div>
-
-          {/* Настройки Обложки B (если включен A/B-тестер) */}
-          {abModeEnabled && (
-            <div className="aether-card rounded-2xl p-4 space-y-3.5 border border-emerald-400/25">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  Вариант B (Конкурентный тест A/B)
-                </span>
-                <span className="text-[10px] font-mono text-white/55">SLOT B</span>
-              </div>
-
-              <div>
-                <label className="text-[11px] text-white/55 block mb-1.5">
-                  Исходный арт (Обложка B):
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => handleLoadImageForSlot(e, 'B')}
-                  className="w-full text-xs text-white/60 file:mr-3 file:min-h-[38px] file:py-1.5 file:px-3.5 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-white/[0.06] file:text-emerald-300 hover:file:bg-white/[0.12] cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] text-white/55">
-                    Текст-хук B (Enter — на 2 строки):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-emerald-300 tabular-nums">
-                      {lineCountHookB} {lineCountHookB === 1 ? 'строка' : 'строки'}
-                    </span>
-                    {titleB.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setTitleB('')}
-                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                        title="Очистить текст-хук B (оставить чистый арт)"
-                      >
-                        Очистить
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <textarea
-                  rows={2}
-                  value={titleB}
-                  onChange={e => setTitleB(e.target.value)}
-                  placeholder="Введите заголовок B (Enter для 2-й строки, пусто = чистый арт)"
-                  className="w-full bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2.5 text-xs text-[#f8fafc] font-bold outline-none focus:border-emerald-400 resize-none leading-snug"
-                />
-              </div>
-
-              {/* Размер шрифта и позиция текста-хука B */}
-              <div className="bg-[#080c14]/75 border border-white/[0.08] rounded-xl p-3 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#f8fafc] font-semibold">Размер шрифта B:</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-white/55 tabular-nums">
-                      X:{Math.round(hookLayoutB.xPct)}% Y:{Math.round(hookLayoutB.yPct)}%
-                    </span>
-                    <span className="text-xs font-mono font-bold text-emerald-300 tabular-nums">
-                      {hookLayoutB.fontScalePct}%
-                    </span>
-                  </div>
-                </div>
-                <input
-                  type="range"
-                  min={60}
-                  max={150}
-                  step={1}
-                  value={hookLayoutB.fontScalePct}
-                  onChange={e => {
-                    const val = Number(e.target.value);
-                    setHookLayoutB(prev => ({ ...prev, fontScalePct: val }));
-                  }}
-                  className="w-full accent-emerald-400 cursor-pointer"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[10px] font-mono text-white/55">
-                    60% – 150% • Drag &amp; Drop на превью B
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setHookLayoutB({ ...DEFAULT_HOOK_LAYOUT })}
-                    className="min-h-[38px] text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Сбросить позицию текста</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] text-white/55">
-                    Кинематографичные бейджи B (до 3):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-emerald-300 tabular-nums">
-                      {badgesB.length}/3
-                    </span>
-                    {badgesB.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setBadgesB([])}
-                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                      >
-                        Сброс
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Категория 1: Документальные / Исторические (@Histoviva) */}
-                <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300/90 block">
-                    🏛️ Документальные / Исторические (@Histoviva)
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {HISTOVIVA_BADGE_OPTIONS.map(badge => {
-                      const isActive = badgesB.includes(badge.id);
-                      return (
-                        <button
-                          key={`badge-b-${badge.id}`}
-                          type="button"
-                          aria-pressed={isActive}
-                          onClick={() => toggleBadgeB(badge.id)}
-                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
-                            isActive
-                              ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
-                              : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                          }`}
-                        >
-                          {badge.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Категория 2: Эмбиент / Многочасовой Луп */}
-                <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300/90 block">
-                    🌙 Эмбиент / Многочасовой Луп
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {AMBIENT_BADGE_OPTIONS.map(badge => {
-                      const isActive = badgesB.includes(badge.id);
-                      return (
-                        <button
-                          key={`badge-b-${badge.id}`}
-                          type="button"
-                          aria-pressed={isActive}
-                          onClick={() => toggleBadgeB(badge.id)}
-                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
-                            isActive
-                              ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
-                              : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                          }`}
-                        >
-                          {badge.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* ЛОКАЛЬНЫЙ РЕСАЙЗ И ПОВЫШЕНИЕ ЧЁТКОСТИ БАЗОВОГО КАДРА (100% HTML5 Canvas) */}
           <div className="aether-card rounded-2xl p-4 space-y-3 border border-cyan-400/25 bg-[#080c14]/70">
@@ -4045,220 +4475,110 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
 
-          {/* Главный экшен: экспорт 4K обложки (PNG Lossless + YouTube < 2 МБ) и передача в Арт-Редактор */}
+          {/* Экспорт: активный слот (4K PNG / YouTube < 2 МБ) + Пакетная выгрузка A/B/C (< 2 МБ) */}
           <div className="space-y-2.5 pt-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => downloadCover4K('A')}
-                className="w-full min-h-[48px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                onClick={() => downloadCover4K(activeSlot)}
+                className="w-full min-h-[46px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Download className="w-4 h-4 shrink-0" />
-                <span>📥 4K PNG Обложка A</span>
+                <span>📥 4K PNG Вариант {activeSlot}</span>
               </button>
               <button
                 type="button"
                 disabled={isOptimizingYtThumb}
-                onClick={() => void downloadCoverYouTube2Mb('A')}
-                className="w-full min-h-[48px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+                onClick={() => void downloadCoverYouTube2Mb(activeSlot)}
+                className="w-full min-h-[46px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
                 <Download className="w-4 h-4 text-amber-300 shrink-0" />
                 <span>
-                  {isOptimizingYtThumb ? 'Сжатие...' : '📦 Скачать для YouTube (< 2 МБ)'}
+                  {isOptimizingYtThumb && !batchExportStatus
+                    ? 'Сжатие...'
+                    : `📦 YouTube ${activeSlot} (< 2 МБ)`}
                 </span>
               </button>
             </div>
 
+            <button
+              type="button"
+              disabled={isOptimizingYtThumb}
+              onClick={() => void downloadAll3CoversYouTube2Mb()}
+              className="w-full min-h-[48px] bg-gradient-to-r from-amber-400/25 via-emerald-500/20 to-cyan-500/25 hover:brightness-110 border border-amber-400/60 text-[#FDE047] font-extrabold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-[0_8px_24px_-8px_rgba(245,158,11,0.35)] disabled:opacity-60"
+            >
+              {isOptimizingYtThumb && batchExportStatus ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-300 shrink-0" />
+              ) : (
+                <Download className="w-4 h-4 text-amber-300 shrink-0" />
+              )}
+              <span>
+                {batchExportStatus || '📦 Скачать все 3 обложки A/B/C для YouTube (< 2 МБ)'}
+              </span>
+            </button>
+
             {onSendToArtEditor && (
-              <div className={`grid gap-2 ${abModeEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-                <button
-                  type="button"
-                  onClick={() => handleOpenSlotInArtEditor('A')}
-                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-cyan-400/40 text-cyan-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                >
-                  <ImageIcon className="w-4 h-4 text-cyan-400 shrink-0" />
-                  <span>Открыть A в Арт-Редакторе</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
-                </button>
-                {abModeEnabled && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenSlotInArtEditor('B')}
-                    className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                  >
-                    <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Открыть B в Арт-Редакторе</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                  </button>
-                )}
-              </div>
-            )}
-            {abModeEnabled && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => downloadCover4K('B')}
-                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-emerald-400/40 text-emerald-300 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>📥 4K PNG Обложка B</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isOptimizingYtThumb}
-                  onClick={() => void downloadCoverYouTube2Mb('B')}
-                  className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-amber-400/45 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
-                >
-                  <Download className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span>📦 YouTube B (&lt; 2 МБ)</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenSlotInArtEditor(activeSlot)}
+                className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-cyan-400/40 text-cyan-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+              >
+                <ImageIcon className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>Открыть Вариант {activeSlot} в Арт-Редакторе</span>
+                <ArrowRight className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+              </button>
             )}
           </div>
         </div>
 
-        {/* Правая зона (7/12): 4K Холст A (или A vs B) в аккуратной рамке с бликом + Мобильный масштаб 160x90 px */}
+        {/* Правая зона (7/12): 4K Холст активного слота A/B/C или Сравнение A / B / C в ленте YouTube */}
         <div className="lg:col-span-7 aether-surface rounded-2xl p-4 sm:p-6 space-y-5 flex flex-col justify-between min-w-0">
-          <div className={`grid gap-5 ${abModeEnabled ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'}`}>
-            {/* ХОЛСТ ОБЛОЖКИ A */}
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2 flex-wrap">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981]" />
-                  <span>
-                    Обложка A — Мастер #{selectedMasterVariantIdx + 1}{' '}
-                    {bwContrastFilter ? '(B&W Контраст)' : ''}
-                  </span>
-                  {attachedToYoutubeIdx === selectedMasterVariantIdx && (
-                    <span className="text-[10px] bg-emerald-500/15 border border-emerald-400/50 text-emerald-300 px-2.5 py-0.5 rounded-full font-mono">
-                      ✓ YouTube Release
-                    </span>
-                  )}
-                </span>
-                <div className="flex items-center gap-2">
-                  {onSendToArtEditor && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSlotInArtEditor('A')}
-                      className="text-[10.5px] font-bold text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/35 px-2.5 py-0.5 rounded-full flex items-center gap-1 cursor-pointer transition"
-                    >
-                      <span>Открыть в Арт-Редакторе</span>
-                      <ArrowRight className="w-3 h-3 shrink-0" />
-                    </button>
-                  )}
-                  <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
-                    3840×2160 • 16:9
-                  </span>
-                </div>
-              </div>
-
-              {/* Рамка с тонким бликом по краю и плавным появлением элементов управления */}
-              <div className="aether-preview-frame group/previewA">
-                <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
-                  <canvas
-                    ref={canvasARef}
-                    width={1280}
-                    height={720}
-                    className={`w-full h-full object-contain transition-all duration-200 ${
-                      bwContrastFilter ? 'grayscale contrast-125' : ''
-                    }`}
-                  />
-
-                  {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука A) */}
-                  {hookBoxA && (
-                    <div
-                      role="button"
-                      aria-label="Перетащить заголовок обложки A"
-                      title="Зажмите и перетащите текст-хук в любую точку кадра"
-                      onPointerDown={e => startHookDrag(e, 'A')}
-                      onPointerEnter={() => setHoveredSlot('A')}
-                      onPointerLeave={() => setHoveredSlot(prev => (prev === 'A' ? null : prev))}
-                      style={{
-                        left: `${hookBoxA.leftPct}%`,
-                        top: `${hookBoxA.topPct}%`,
-                        width: `${hookBoxA.widthPct}%`,
-                        height: `${hookBoxA.heightPct}%`
-                      }}
-                      className={`absolute z-20 touch-none select-none rounded-lg transition-all duration-150 ${
-                        draggingSlot === 'A'
-                          ? 'cursor-grabbing border-[1.5px] border-dashed border-amber-300 bg-amber-300/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]'
-                          : hoveredSlot === 'A'
-                          ? 'cursor-grab border-[1.5px] border-dashed border-amber-300/85 bg-amber-300/5'
-                          : 'cursor-grab border border-dashed border-transparent group-hover/previewA:border-white/20'
+          {!compareFeedEnabled ? (
+            <div className="space-y-4">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        activeSlot === 'A'
+                          ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]'
+                          : activeSlot === 'B'
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10b981]'
+                            : 'bg-cyan-400 shadow-[0_0_8px_#06b6d4]'
                       }`}
                     />
-                  )}
-
-                  {showYoutubeOverlay && (
-                    <>
-                      <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewA:opacity-100 transition-opacity duration-300">
-                        <div className="border-r border-b border-white/10" />
-                        <div className="border-r border-b border-white/10" />
-                        <div className="border-b border-white/10" />
-                        <div className="border-r border-b border-white/10" />
-                        <div className="border-r border-b border-white/10" />
-                        <div className="border-b border-white/10" />
-                        <div className="border-r border-white/10" />
-                        <div className="border-r border-white/10" />
-                        <div />
-                      </div>
-
-                      <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
-                        {youtubeDurationBadge || '3:00:00'}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {hookBoxA && (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
-                  <span className="flex items-center gap-1.5">
-                    <Move className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Перетащите заголовок мышью или пальцем по кадру</span>
+                    <span>
+                      Вариант {activeSlot} — Мастер #{selectedMasterVariantIdx + 1}{' '}
+                      {bwContrastFilter ? '(B&W Контраст)' : ''}
+                    </span>
+                    {attachedToYoutubeIdx === selectedMasterVariantIdx && (
+                      <span className="text-[10px] bg-emerald-500/15 border border-emerald-400/50 text-emerald-300 px-2.5 py-0.5 rounded-full font-mono">
+                        ✓ YouTube Release
+                      </span>
+                    )}
                   </span>
-                  <span className="font-mono text-amber-300/90 tabular-nums">
-                    X:{Math.round(hookLayoutA.xPct)}% • Y:{Math.round(hookLayoutA.yPct)}% • {hookLayoutA.fontScalePct}%
-                  </span>
-                </div>
-              )}
-
-              {showYoutubeOverlay && (
-                <div className="flex items-start gap-3 pt-1 px-1">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
-                    4K
-                  </div>
-                  <div className="space-y-0.5 min-w-0 flex-1">
-                    <input
-                      type="text"
-                      value={youtubeVideoHeading}
-                      onChange={e => setYoutubeVideoHeading(e.target.value)}
-                      className="w-full bg-transparent text-sm font-bold text-[#f8fafc] outline-none focus:border-b focus:border-emerald-400 truncate"
-                    />
-                    <div className="text-xs text-white/55 flex items-center gap-1.5 flex-wrap">
-                      <span>{youtubeChannelName}</span>
-                      <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">✓</span>
-                      <span className="font-mono text-[11px]">• 428K views • 2h ago</span>
-                    </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {onSendToArtEditor && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSlotInArtEditor(activeSlot)}
+                        className="text-[10.5px] font-bold text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/35 px-2.5 py-0.5 rounded-full flex items-center gap-1 cursor-pointer transition"
+                      >
+                        <span>Открыть в Арт-Редакторе</span>
+                        <ArrowRight className="w-3 h-3 shrink-0" />
+                      </button>
+                    )}
+                    <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
+                      3840×2160 • 16:9
+                    </span>
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* ХОЛСТ ОБЛОЖКИ B */}
-            {abModeEnabled && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-emerald-300 uppercase tracking-wider">
-                    Обложка B {bwContrastFilter ? '(B&W Контраст)' : ''}
-                  </span>
-                  <span className="text-[11px] font-mono text-white/55">A/B Comparison</span>
-                </div>
-
-                <div className="aether-preview-frame group/previewB">
+                {/* Интерактивный 4K холст активного слота с Drag & Drop */}
+                <div className="aether-preview-frame group/previewActive">
                   <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
                     <canvas
-                      ref={canvasBRef}
+                      ref={mainCanvasRef}
                       width={1280}
                       height={720}
                       className={`w-full h-full object-contain transition-all duration-200 ${
@@ -4266,71 +4586,279 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       }`}
                     />
 
-                    {/* Интерактивное перетаскивание ТОЛЬКО основного заголовка (текста-хука B) */}
-                    {hookBoxB && (
+                    {activeHookBox && (
                       <div
                         role="button"
-                        aria-label="Перетащить заголовок обложки B"
-                        title="Зажмите и перетащите текст-хук B в любую точку кадра"
-                        onPointerDown={e => startHookDrag(e, 'B')}
-                        onPointerEnter={() => setHoveredSlot('B')}
-                        onPointerLeave={() => setHoveredSlot(prev => (prev === 'B' ? null : prev))}
+                        aria-label={`Перетащить заголовок варианта ${activeSlot}`}
+                        title="Зажмите и перетащите текст-хук в любую точку кадра"
+                        onPointerDown={e => startHookDrag(e, activeSlot)}
+                        onPointerEnter={() => setHoveredSlot(activeSlot)}
+                        onPointerLeave={() =>
+                          setHoveredSlot(prev => (prev === activeSlot ? null : prev))
+                        }
                         style={{
-                          left: `${hookBoxB.leftPct}%`,
-                          top: `${hookBoxB.topPct}%`,
-                          width: `${hookBoxB.widthPct}%`,
-                          height: `${hookBoxB.heightPct}%`
+                          left: `${activeHookBox.leftPct}%`,
+                          top: `${activeHookBox.topPct}%`,
+                          width: `${activeHookBox.widthPct}%`,
+                          height: `${activeHookBox.heightPct}%`
                         }}
                         className={`absolute z-20 touch-none select-none rounded-lg transition-all duration-150 ${
-                          draggingSlot === 'B'
-                            ? 'cursor-grabbing border-[1.5px] border-dashed border-emerald-300 bg-emerald-300/10'
-                            : hoveredSlot === 'B'
-                            ? 'cursor-grab border-[1.5px] border-dashed border-emerald-300/85 bg-emerald-300/5'
-                            : 'cursor-grab border border-dashed border-transparent group-hover/previewB:border-white/20'
+                          draggingSlot === activeSlot
+                            ? 'cursor-grabbing border-[1.5px] border-dashed border-amber-300 bg-amber-300/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]'
+                            : hoveredSlot === activeSlot
+                              ? 'cursor-grab border-[1.5px] border-dashed border-amber-300/85 bg-amber-300/5'
+                              : 'cursor-grab border border-dashed border-transparent group-hover/previewActive:border-white/20'
                         }`}
                       />
                     )}
 
                     {showYoutubeOverlay && (
-                      <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
-                        {youtubeDurationBadge || '3:00:00'}
-                      </div>
+                      <>
+                        <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewActive:opacity-100 transition-opacity duration-300">
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-b border-white/10" />
+                          <div className="border-r border-white/10" />
+                          <div className="border-r border-white/10" />
+                          <div />
+                        </div>
+
+                        <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
+                          {youtubeDurationBadge || '3:00:00'}
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
 
-                {hookBoxB && (
+                {activeHookBox && (
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
                     <span className="flex items-center gap-1.5">
-                      <Move className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Перетащите заголовок B мышью или пальцем</span>
+                      <Move className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Перетащите заголовок Варианта {activeSlot} мышью или пальцем по кадру</span>
                     </span>
-                    <span className="font-mono text-emerald-300/90 tabular-nums">
-                      X:{Math.round(hookLayoutB.xPct)}% • Y:{Math.round(hookLayoutB.yPct)}% • {hookLayoutB.fontScalePct}%
+                    <span className="font-mono text-amber-300/90 tabular-nums">
+                      X:{Math.round(activeConfig.hookLayout.xPct)}% • Y:
+                      {Math.round(activeConfig.hookLayout.yPct)}% •{' '}
+                      {activeConfig.hookLayout.fontScalePct}%
                     </span>
                   </div>
                 )}
 
                 {showYoutubeOverlay && (
                   <div className="flex items-start gap-3 pt-1 px-1">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
                       4K
                     </div>
                     <div className="space-y-0.5 min-w-0 flex-1">
-                      <p className="text-sm font-bold text-[#f8fafc] truncate">
-                        {youtubeVideoHeading}
-                      </p>
-                      <div className="text-xs text-white/55">
-                        {youtubeChannelName} ✓ • Variant B (A/B Readability Test)
+                      <input
+                        type="text"
+                        value={youtubeVideoHeading}
+                        onChange={e => setYoutubeVideoHeading(e.target.value)}
+                        className="w-full bg-transparent text-sm font-bold text-[#f8fafc] outline-none focus:border-b focus:border-emerald-400 truncate"
+                      />
+                      <div className="text-xs text-white/55 flex items-center gap-1.5 flex-wrap">
+                        <span>{youtubeChannelName}</span>
+                        <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">✓</span>
+                        <span className="font-mono text-[11px]">• 428K views • 2h ago • Слот {activeSlot}</span>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* РЕЖИМ СРАВНЕНИЯ «👁️ Сравнить A / B / C в ленте» (Desktop 16:9 + Mobile Scale) */
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2">
+                    <Columns className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Сравнение A / B / C в ленте YouTube</span>
+                  </h3>
+                  <p className="text-[11px] text-white/55 mt-0.5">
+                    Нажмите на любую карточку, чтобы перейти к редактированию слота
+                  </p>
+                </div>
 
-          {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ (160x90 PX) */}
+                <div className="flex items-center gap-1 bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-1">
+                  {(
+                    [
+                      { id: 'both', label: 'Все форматы' },
+                      { id: 'desktop', label: 'Десктоп 16:9' },
+                      { id: 'mobile', label: 'Мобильный' }
+                    ] as const
+                  ).map(mode => (
+                    <button
+                      key={`feed-mode-${mode.id}`}
+                      type="button"
+                      onClick={() => setFeedViewportMode(mode.id)}
+                      className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[10.5px] font-bold cursor-pointer transition ${
+                        feedViewportMode === mode.id
+                          ? 'bg-amber-400/20 text-amber-200 border border-amber-400/45'
+                          : 'text-white/60 hover:text-white'
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 1. Десктопная лента YouTube (сетка 16:9) */}
+              {(feedViewportMode === 'both' || feedViewportMode === 'desktop') && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-white/60">
+                    <span className="font-bold uppercase tracking-wider text-white/80">
+                      🖥️ Десктопная лента YouTube (16:9)
+                    </span>
+                    <span className="font-mono text-[10px]">Desktop Home Feed Grid</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                    {(
+                      [
+                        {
+                          slot: 'A' as const,
+                          ref: feedCanvasARef,
+                          badge: '🅰️ Вариант A',
+                          borderActive: 'border-amber-400/70 ring-1 ring-amber-400/35'
+                        },
+                        {
+                          slot: 'B' as const,
+                          ref: feedCanvasBRef,
+                          badge: '🅱️ Вариант B',
+                          borderActive: 'border-emerald-400/70 ring-1 ring-emerald-400/35'
+                        },
+                        {
+                          slot: 'C' as const,
+                          ref: feedCanvasCRef,
+                          badge: '🅲 Вариант C',
+                          borderActive: 'border-cyan-400/70 ring-1 ring-cyan-400/35'
+                        }
+                      ]
+                    ).map(item => {
+                      const isCurrent = activeSlot === item.slot;
+                      return (
+                        <div
+                          key={`desktop-feed-card-${item.slot}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setActiveSlot(item.slot)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setActiveSlot(item.slot);
+                            }
+                          }}
+                          className={`rounded-2xl p-2.5 bg-[#080c14]/85 border transition cursor-pointer space-y-2.5 ${
+                            isCurrent
+                              ? item.borderActive
+                              : 'border-white/[0.08] hover:border-white/25'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[10.5px] font-bold">
+                            <span className="text-[#f8fafc]">{item.badge}</span>
+                            <span className="font-mono text-white/50">
+                              {isCurrent ? 'ACTIVE' : 'Клик → Ред.'}
+                            </span>
+                          </div>
+                          <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black border border-white/[0.08]">
+                            <canvas
+                              ref={item.ref}
+                              width={640}
+                              height={360}
+                              className={`w-full h-full object-cover ${
+                                bwContrastFilter ? 'grayscale contrast-125' : ''
+                              }`}
+                            />
+                            <div className="pointer-events-none absolute bottom-1.5 right-1.5 bg-black/90 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded">
+                              {youtubeDurationBadge || '3:00:00'}
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2 pt-0.5">
+                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-[9px] shrink-0">
+                              4K
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-[#f8fafc] line-clamp-2 leading-snug">
+                                {youtubeVideoHeading}
+                              </p>
+                              <p className="text-[10.5px] text-white/50 truncate mt-0.5">
+                                {youtubeChannelName} • 428K views
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Мобильная лента YouTube (масштаб смартфона ~160x90) */}
+              {(feedViewportMode === 'both' || feedViewportMode === 'mobile') && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-white/60">
+                    <span className="font-bold uppercase tracking-wider text-white/80 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Мобильная лента YouTube (реальный масштаб)</span>
+                    </span>
+                    <span className="font-mono text-[10px]">160×90 px Readability</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(
+                      [
+                        { slot: 'A' as const, ref: mobileFeedCanvasARef, tag: '🅰️ A' },
+                        { slot: 'B' as const, ref: mobileFeedCanvasBRef, tag: '🅱️ B' },
+                        { slot: 'C' as const, ref: mobileFeedCanvasCRef, tag: '🅲 C' }
+                      ]
+                    ).map(item => (
+                      <button
+                        key={`mobile-feed-card-${item.slot}`}
+                        type="button"
+                        onClick={() => setActiveSlot(item.slot)}
+                        className={`text-left rounded-2xl p-2.5 bg-[#090d16]/95 border flex items-center gap-3 cursor-pointer transition ${
+                          activeSlot === item.slot
+                            ? 'border-amber-400/60 bg-amber-500/[0.06]'
+                            : 'border-white/[0.08] hover:border-white/25'
+                        }`}
+                      >
+                        <div className="relative w-[144px] h-[81px] sm:w-[160px] sm:h-[90px] rounded-lg overflow-hidden bg-black border border-white/15 shrink-0">
+                          <canvas
+                            ref={item.ref}
+                            width={320}
+                            height={180}
+                            className={`w-full h-full block ${
+                              bwContrastFilter ? 'grayscale contrast-125' : ''
+                            }`}
+                          />
+                          <div className="pointer-events-none absolute bottom-1 right-1 bg-black/90 text-white font-mono text-[9px] font-bold px-1 rounded">
+                            {youtubeDurationBadge || '3:00:00'}
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <span className="text-[10.5px] font-mono font-bold text-amber-300 block">
+                            {item.tag} • {slotConfigs[item.slot].badges.length} бейдж(а)
+                          </span>
+                          <p className="text-[11px] font-semibold text-[#f8fafc] line-clamp-2 leading-tight">
+                            {youtubeVideoHeading}
+                          </p>
+                          <p className="text-[10px] text-white/45 truncate">
+                            {slotConfigs[item.slot].title || '(Без текста)'}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ АКТИВНОГО СЛОТА (160x90 PX) И ТАЙМКОД */}
           <div className="aether-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-4">
               <div className="relative w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/15 bg-black shrink-0 shadow-lg">
@@ -4350,7 +4878,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="space-y-1">
                 <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
                   <Smartphone className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Мобильный масштаб YouTube (160×90 px)</span>
+                  <span>Мобильный масштаб • Слот {activeSlot} (160×90 px)</span>
                 </span>
                 <p className="text-xs text-white/55 max-w-md leading-relaxed">
                   Контроль читаемости заголовка, верхнего ряда бейджей и таймкода{' '}
@@ -4412,7 +4940,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={() => handleGenerateProceduralBatchFallback('A')}
+              onClick={() => handleGenerateProceduralBatchFallback(activeSlot)}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
               className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-[#f8fafc] font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
             >
@@ -4421,7 +4949,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
             <button
               type="button"
-              onClick={() => handleGenerateFluxCover('A')}
+              onClick={() => handleGenerateFluxCover(activeSlot)}
               disabled={isGeneratingCovers || isSlicingLocalMedia}
               className="min-h-[44px] btn-primary-action px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
             >
@@ -4512,7 +5040,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   onClick={e => {
                     const target = e.target as HTMLElement | null;
                     if (target && target.tagName.toLowerCase() === 'a') return;
-                    handleSelectBatchVariant(index, 'A');
+                    handleSelectBatchVariant(index, activeSlot);
                   }}
                   className={`scene-card-interactive relative group rounded-2xl overflow-hidden border bg-[#080c14]/90 cursor-pointer flex flex-col justify-between ${
                     isMaster
@@ -4724,30 +5252,34 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       className="w-full accent-amber-400 cursor-pointer"
                     />
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => capture4KKeyframe('A')}
-                        className="min-h-[44px] btn-artistic-premium py-2 px-3 rounded-xl text-xs cursor-pointer"
+                        className="min-h-[44px] btn-artistic-premium py-2 px-2.5 rounded-xl text-xs cursor-pointer"
                       >
-                        📸 В Обложку A (4K)
+                        📸 В Слот A (4K)
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setAbModeEnabled(true);
-                          capture4KKeyframe('B');
-                        }}
-                        className="min-h-[44px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 font-bold py-2 px-3 rounded-xl text-xs cursor-pointer"
+                        onClick={() => capture4KKeyframe('B')}
+                        className="min-h-[44px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 font-bold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
                       >
-                        📸 В Обложку B (4K)
+                        📸 В Слот B (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('C')}
+                        className="min-h-[44px] bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 font-bold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Слот C (4K)
                       </button>
                       <button
                         type="button"
                         onClick={() => capture4KKeyframe('download')}
-                        className="min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[#f8fafc] font-semibold py-2 px-3 rounded-xl text-xs cursor-pointer"
+                        className="min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[#f8fafc] font-semibold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
                       >
-                        💾 Скачать 4K кадр
+                        💾 Скачать 4K
                       </button>
                     </div>
                   </div>
@@ -4855,7 +5387,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => handleGenerateFluxCover('A')}
+                  onClick={() => handleGenerateFluxCover(activeSlot)}
                   disabled={isGeneratingCovers}
                   className="min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
                 >
