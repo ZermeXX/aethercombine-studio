@@ -34,15 +34,35 @@ import {
   Move,
   ChevronDown,
   Image as ImageIcon,
-  ArrowRight
+  ArrowRight,
+  Sun,
+  LayoutTemplate
 } from 'lucide-react';
 import { CompactFontSelector } from './CompactFontSelector';
 import {
+  FILM_GAME_FONT_PRESETS,
   GOOGLE_FONT_PRESETS,
   StudioFontEntry,
   ensureFontEntryLoaded,
   preloadCatalogFonts
 } from '../utils/fontCatalog';
+import {
+  BOTTOM_PLAQUE_STYLE_OPTIONS,
+  BottomPlaquePaletteOverride,
+  BottomPlaqueStyleId,
+  DEFAULT_BG_ADJUST,
+  PRESET_CATEGORIES,
+  PresetCategoryId,
+  SlotBgAdjustConfig,
+  TOP_LINE_GRADIENT_OPTIONS,
+  TopLineGradientId,
+  YOUTUBE_CINEMA_BG_ADJUST,
+  YOUTUBE_THUMBNAIL_PRESETS,
+  YoutubeThumbnailPreset,
+  buildTopLine3DGradient,
+  drawBottomAccentPlaque,
+  renderAdjustedBackgroundToCanvas
+} from '../utils/thumbnailPresetsAndEffects';
 
 declare global {
   interface Window {
@@ -62,6 +82,9 @@ interface ThumbnailStudioViewProps {
   onSendToArtEditor?: (imageDataUrl: string, slotLabel: string) => void;
   youtubeMockTitle?: string;
   scriptContext?: string;
+  manifestThumbnailSlots?: { A?: string; B?: string; C?: string } | null;
+  endScreenSafeZone?: string;
+  manifestDurationBadge?: string;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -1314,10 +1337,15 @@ export type ThumbnailSlotId = 'A' | 'B' | 'C';
 
 export interface ThumbnailSlotConfig {
   title: string;
+  bottomLine: string;
+  topGradient: TopLineGradientId;
+  bottomBadgeStyle: BottomPlaqueStyleId;
+  bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
   badges: CinematicBadgeId[];
   badgeScalePct: number;
   fontStyle: ThumbnailFontStyleId;
   fontEntry: StudioFontEntry;
+  bottomFontEntry?: StudioFontEntry | null;
   applyFontToBadges: boolean;
   royalDecorEnabled: boolean;
   magicDecorEnabled: boolean;
@@ -1327,14 +1355,20 @@ export interface ThumbnailSlotConfig {
   shadowColor: string;
   shadowBlurPct: number;
   hookLayout: HookTextLayout;
+  bgAdjust: SlotBgAdjustConfig;
 }
 
 interface PersistedSlotState {
   title?: string;
+  bottomLine?: string;
+  topGradient?: TopLineGradientId;
+  bottomBadgeStyle?: BottomPlaqueStyleId;
+  bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
   badges?: CinematicBadgeId[];
   badgeScalePct?: number;
   fontStyle?: ThumbnailFontStyleId;
   fontId?: string;
+  bottomFontId?: string;
   applyFontToBadges?: boolean;
   royalDecorEnabled?: boolean;
   magicDecorEnabled?: boolean;
@@ -1344,9 +1378,15 @@ interface PersistedSlotState {
   shadowColor?: string;
   shadowBlurPct?: number;
   hookLayout?: HookTextLayout;
+  bgAdjust?: Partial<SlotBgAdjustConfig>;
 }
 
 const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v1';
+
+const ALL_CATALOG_FONTS: StudioFontEntry[] = [...FILM_GAME_FONT_PRESETS, ...GOOGLE_FONT_PRESETS];
+
+const findCatalogFontById = (id?: string): StudioFontEntry | undefined =>
+  id ? ALL_CATALOG_FONTS.find(f => f.id === id) : undefined;
 
 const DEFAULT_SLOT_FONT_ENTRY: StudioFontEntry =
   GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0];
@@ -1354,11 +1394,21 @@ const DEFAULT_SLOT_FONT_ENTRY: StudioFontEntry =
 const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => {
   if (slot === 'B') {
     return {
-      title: 'SEALED 50 YEARS',
+      title: '3 HOURS',
+      bottomLine: 'DEEP SLEEP',
+      topGradient: 'amber',
+      bottomBadgeStyle: 'ambient_glass',
+      bottomPlaqueOverride: {
+        bgStart: 'rgba(11, 15, 25, 0.80)',
+        bgEnd: 'rgba(17, 24, 39, 0.88)',
+        border: 'rgba(251, 191, 36, 0.45)',
+        text: '#FEF3C7'
+      },
       badges: ['3_hours', 'no_ads_seamless', 'deep_sleep'],
       badgeScalePct: 100,
       fontStyle: 'cinematic_sans',
-      fontEntry: DEFAULT_SLOT_FONT_ENTRY,
+      fontEntry: findCatalogFontById('gg_cormorant') || DEFAULT_SLOT_FONT_ENTRY,
+      bottomFontEntry: findCatalogFontById('gg_inter') || DEFAULT_SLOT_FONT_ENTRY,
       applyFontToBadges: false,
       royalDecorEnabled: true,
       magicDecorEnabled: true,
@@ -1367,16 +1417,27 @@ const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => 
       strokeWidthPct: 100,
       shadowColor: '#000000',
       shadowBlurPct: 100,
-      hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+      hookLayout: { ...DEFAULT_HOOK_LAYOUT },
+      bgAdjust: { ...DEFAULT_BG_ADJUST }
     };
   }
   if (slot === 'C') {
     return {
-      title: 'CLASSIFIED TAPE',
+      title: 'THE DARK',
+      bottomLine: 'TRUTH',
+      topGradient: 'silver',
+      bottomBadgeStyle: 'crimson_brush',
+      bottomPlaqueOverride: {
+        bgStart: '#0B0B10',
+        bgEnd: '#3B080E',
+        border: '#EF4444',
+        text: '#F8FAFC'
+      },
       badges: ['4k_ultra_hd', 'true_story'],
       badgeScalePct: 100,
       fontStyle: 'gold_ice_magic',
-      fontEntry: GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_cinzel') || DEFAULT_SLOT_FONT_ENTRY,
+      fontEntry: findCatalogFontById('gg_montserrat') || DEFAULT_SLOT_FONT_ENTRY,
+      bottomFontEntry: findCatalogFontById('gg_oswald') || DEFAULT_SLOT_FONT_ENTRY,
       applyFontToBadges: false,
       royalDecorEnabled: true,
       magicDecorEnabled: true,
@@ -1385,15 +1446,21 @@ const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => 
       strokeWidthPct: 100,
       shadowColor: '#000000',
       shadowBlurPct: 100,
-      hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+      hookLayout: { ...DEFAULT_HOOK_LAYOUT },
+      bgAdjust: { ...DEFAULT_BG_ADJUST }
     };
   }
   return {
     title: 'SEALED ARCHIVE',
+    bottomLine: 'FILE #09',
+    topGradient: 'gold',
+    bottomBadgeStyle: 'royal_navy_gold',
+    bottomPlaqueOverride: null,
     badges: ['4k_ultra_hd', 'documentary', 'lost_archives'],
     badgeScalePct: 100,
     fontStyle: 'cinematic_sans',
     fontEntry: DEFAULT_SLOT_FONT_ENTRY,
+    bottomFontEntry: null,
     applyFontToBadges: false,
     royalDecorEnabled: true,
     magicDecorEnabled: true,
@@ -1402,9 +1469,28 @@ const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => 
     strokeWidthPct: 100,
     shadowColor: '#000000',
     shadowBlurPct: 100,
-    hookLayout: { ...DEFAULT_HOOK_LAYOUT }
+    hookLayout: { ...DEFAULT_HOOK_LAYOUT },
+    bgAdjust: { ...DEFAULT_BG_ADJUST }
   };
 };
+
+const VALID_TOP_GRADIENTS = new Set<string>(TOP_LINE_GRADIENT_OPTIONS.map(g => g.id));
+const VALID_PLAQUE_STYLES = new Set<string>(BOTTOM_PLAQUE_STYLE_OPTIONS.map(p => p.id));
+
+const clampBgAdjust = (raw?: Partial<SlotBgAdjustConfig> | null): SlotBgAdjustConfig => ({
+  contrastPct:
+    typeof raw?.contrastPct === 'number'
+      ? Math.max(80, Math.min(165, Math.round(raw.contrastPct)))
+      : 100,
+  brightnessPct:
+    typeof raw?.brightnessPct === 'number'
+      ? Math.max(85, Math.min(135, Math.round(raw.brightnessPct)))
+      : 100,
+  vibrancePct:
+    typeof raw?.vibrancePct === 'number'
+      ? Math.max(90, Math.min(125, Math.round(raw.vibrancePct)))
+      : 100
+});
 
 const hydrateSlotConfig = (
   slot: ThumbnailSlotId,
@@ -1412,15 +1498,25 @@ const hydrateSlotConfig = (
 ): ThumbnailSlotConfig => {
   const base = createDefaultSlotConfig(slot);
   if (!raw || typeof raw !== 'object') return base;
-  const matchedFont = raw.fontId
-    ? GOOGLE_FONT_PRESETS.find(f => f.id === raw.fontId)
-    : undefined;
+  const matchedFont = findCatalogFontById(raw.fontId);
+  const matchedBottomFont = findCatalogFontById(raw.bottomFontId);
   const validBadges = Array.isArray(raw.badges)
     ? raw.badges.filter((id): id is CinematicBadgeId => VALID_BADGE_IDS.has(id)).slice(0, 3)
     : base.badges;
   return {
     ...base,
     title: typeof raw.title === 'string' ? raw.title : base.title,
+    bottomLine: typeof raw.bottomLine === 'string' ? raw.bottomLine : base.bottomLine,
+    topGradient:
+      raw.topGradient && VALID_TOP_GRADIENTS.has(raw.topGradient)
+        ? raw.topGradient
+        : base.topGradient,
+    bottomBadgeStyle:
+      raw.bottomBadgeStyle && VALID_PLAQUE_STYLES.has(raw.bottomBadgeStyle)
+        ? raw.bottomBadgeStyle
+        : base.bottomBadgeStyle,
+    bottomPlaqueOverride:
+      raw.bottomPlaqueOverride !== undefined ? raw.bottomPlaqueOverride : base.bottomPlaqueOverride,
     badges: validBadges,
     badgeScalePct:
       typeof raw.badgeScalePct === 'number'
@@ -1428,6 +1524,8 @@ const hydrateSlotConfig = (
         : base.badgeScalePct,
     fontStyle: raw.fontStyle || base.fontStyle,
     fontEntry: matchedFont || base.fontEntry,
+    bottomFontEntry:
+      raw.bottomFontId !== undefined ? matchedBottomFont || null : base.bottomFontEntry,
     applyFontToBadges:
       typeof raw.applyFontToBadges === 'boolean' ? raw.applyFontToBadges : base.applyFontToBadges,
     royalDecorEnabled:
@@ -1452,7 +1550,8 @@ const hydrateSlotConfig = (
             yPct: Math.max(6, Math.min(94, raw.hookLayout.yPct)),
             fontScalePct: Math.max(60, Math.min(150, raw.hookLayout.fontScalePct || 100))
           }
-        : base.hookLayout
+        : base.hookLayout,
+    bgAdjust: clampBgAdjust(raw.bgAdjust)
   };
 };
 
@@ -1477,8 +1576,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   onSendToArtEditor,
   youtubeMockTitle,
   scriptContext,
+  manifestThumbnailSlots,
+  endScreenSafeZone = '05:14-05:24',
+  manifestDurationBadge,
   onNotify
 }) => {
+  const [showEndScreenSafeZone, setShowEndScreenSafeZone] = useState<boolean>(true);
+  const slotFilenames: Record<ThumbnailSlotId, string> = {
+    A: manifestThumbnailSlots?.A || 'thumbnail_4k_3840x2160_A.jpg',
+    B: manifestThumbnailSlots?.B || 'thumbnail_4k_3840x2160_B.jpg',
+    C: manifestThumbnailSlots?.C || 'thumbnail_4k_3840x2160_C.jpg'
+  };
   const mainCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mobileCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const feedCanvasARef = useRef<HTMLCanvasElement | null>(null);
@@ -1537,16 +1645,34 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   useEffect(() => {
     try {
       const serializable: Record<ThumbnailSlotId, PersistedSlotState> = {
-        A: { ...slotConfigs.A, fontId: slotConfigs.A.fontEntry.id },
-        B: { ...slotConfigs.B, fontId: slotConfigs.B.fontEntry.id },
-        C: { ...slotConfigs.C, fontId: slotConfigs.C.fontEntry.id }
+        A: {
+          ...slotConfigs.A,
+          fontId: slotConfigs.A.fontEntry.id,
+          bottomFontId: slotConfigs.A.bottomFontEntry?.id
+        },
+        B: {
+          ...slotConfigs.B,
+          fontId: slotConfigs.B.fontEntry.id,
+          bottomFontId: slotConfigs.B.bottomFontEntry?.id
+        },
+        C: {
+          ...slotConfigs.C,
+          fontId: slotConfigs.C.fontEntry.id,
+          bottomFontId: slotConfigs.C.bottomFontEntry?.id
+        }
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (serializable.A as any).fontEntry;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.A as any).bottomFontEntry;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (serializable.B as any).fontEntry;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.B as any).bottomFontEntry;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (serializable.C as any).fontEntry;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (serializable.C as any).bottomFontEntry;
       localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(serializable));
     } catch {
       // ignore quota errors
@@ -1603,6 +1729,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [isOptimizingYtThumb, setIsOptimizingYtThumb] = useState<boolean>(false);
   const [batchExportStatus, setBatchExportStatus] = useState<string>('');
   const [showCopyMenu, setShowCopyMenu] = useState<boolean>(false);
+  const [showPresetLibrary, setShowPresetLibrary] = useState<boolean>(true);
+  const [presetCategory, setPresetCategory] = useState<PresetCategoryId>('all');
+  const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
 
   // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
@@ -1742,13 +1871,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    const uniqueFonts = Array.from(
-      new Map<string, StudioFontEntry>([
-        [slotConfigs.A.fontEntry.id, slotConfigs.A.fontEntry],
-        [slotConfigs.B.fontEntry.id, slotConfigs.B.fontEntry],
-        [slotConfigs.C.fontEntry.id, slotConfigs.C.fontEntry]
-      ]).values()
-    );
+    const fontPairs: Array<[string, StudioFontEntry]> = [
+      [slotConfigs.A.fontEntry.id, slotConfigs.A.fontEntry],
+      [slotConfigs.B.fontEntry.id, slotConfigs.B.fontEntry],
+      [slotConfigs.C.fontEntry.id, slotConfigs.C.fontEntry]
+    ];
+    (['A', 'B', 'C'] as const).forEach(s => {
+      const bf = slotConfigs[s].bottomFontEntry;
+      if (bf) fontPairs.push([bf.id, bf]);
+    });
+    const uniqueFonts = Array.from(new Map<string, StudioFontEntry>(fontPairs).values());
     Promise.all(uniqueFonts.map(entry => ensureFontEntryLoaded(entry))).then(() => {
       if (!cancelled) {
         setFontsReadyTick(t => t + 1);
@@ -1757,7 +1889,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [slotConfigs.A.fontEntry, slotConfigs.B.fontEntry, slotConfigs.C.fontEntry]);
+  }, [
+    slotConfigs.A.fontEntry,
+    slotConfigs.A.bottomFontEntry,
+    slotConfigs.B.fontEntry,
+    slotConfigs.B.bottomFontEntry,
+    slotConfigs.C.fontEntry,
+    slotConfigs.C.bottomFontEntry
+  ]);
 
   const toggleBadgeForSlot = (slot: ThumbnailSlotId, badgeId: CinematicBadgeId) => {
     const current = slotConfigs[slot].badges;
@@ -1785,7 +1924,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const clonedCfg: ThumbnailSlotConfig = {
       ...sourceCfg,
       badges: [...sourceCfg.badges],
-      hookLayout: { ...sourceCfg.hookLayout }
+      hookLayout: { ...sourceCfg.hookLayout },
+      bgAdjust: { ...sourceCfg.bgAdjust },
+      bottomPlaqueOverride: sourceCfg.bottomPlaqueOverride
+        ? { ...sourceCfg.bottomPlaqueOverride }
+        : null
     };
     if (targetSlot === 'A') {
       onThumbTitleChange(clonedCfg.title);
@@ -1805,6 +1948,40 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setShowCopyMenu(false);
     setActiveSlot(targetSlot);
     onNotify(`📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`, 'success');
+  };
+
+  const applyYoutubeThumbnailPreset = (preset: YoutubeThumbnailPreset) => {
+    const topFont = findCatalogFontById(preset.topFontId) || DEFAULT_SLOT_FONT_ENTRY;
+    const bottomFont = findCatalogFontById(preset.bottomFontId) || topFont;
+
+    if (activeSlot === 'A') {
+      onThumbTitleChange(preset.topLine);
+    }
+
+    updateSlotConfig(activeSlot, prev => ({
+      ...prev,
+      title: preset.topLine,
+      bottomLine: preset.bottomLine,
+      topGradient: preset.topGradient,
+      bottomBadgeStyle: preset.bottomBadgeStyle,
+      bottomPlaqueOverride: preset.bottomPlaqueOverride
+        ? { ...preset.bottomPlaqueOverride }
+        : null,
+      fontEntry: topFont,
+      bottomFontEntry: bottomFont,
+      textColor: ''
+    }));
+
+    setAppliedPresetId(preset.id);
+    Promise.allSettled([
+      ensureFontEntryLoaded(topFont),
+      ensureFontEntryLoaded(bottomFont)
+    ]).then(() => setFontsReadyTick(t => t + 1));
+
+    onNotify(
+      `🔥 Шаблон #${preset.index} «${preset.topLine} + ${preset.bottomLine}» применён к Слоту ${activeSlot}!`,
+      'success'
+    );
   };
 
   // Автогенератор визуального промпта на английском языке
@@ -1912,6 +2089,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       variantLabel?: string,
       fontOptions?: {
         fontEntry?: StudioFontEntry;
+        bottomFontEntry?: StudioFontEntry | null;
+        bottomLine?: string;
+        topGradient?: TopLineGradientId;
+        bottomBadgeStyle?: BottomPlaqueStyleId;
+        bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
+        bgAdjust?: SlotBgAdjustConfig;
         applyToBadges?: boolean;
         badgeScalePct?: number;
         textColor?: string;
@@ -1933,74 +2116,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ctx.clearRect(0, 0, w, h);
 
       if (image) {
-        if (baseSharpenPercent > 0 && w > 2 && h > 2) {
-          // Применяем Unsharp / Sharpen 3x3 строго к базовому кадру до наложения титров и бейджей
-          const bgCanvas = document.createElement('canvas');
-          bgCanvas.width = w;
-          bgCanvas.height = h;
-          const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
-          if (bgCtx) {
-            bgCtx.imageSmoothingEnabled = true;
-            bgCtx.imageSmoothingQuality = 'high';
-            drawCoverImageToCanvas(
-              bgCtx,
-              image,
-              image.naturalWidth || w,
-              image.naturalHeight || h,
-              w,
-              h,
-              1
-            );
-            const imgData = bgCtx.getImageData(0, 0, w, h);
-            const dst = imgData.data;
-            const copy = new Uint8ClampedArray(dst);
-            const amount = (baseSharpenPercent / 100) * 1.35;
-            const stride = w * 4;
-            for (let y = 1; y < h - 1; y++) {
-              const rowOff = y * stride;
-              for (let x = 1; x < w - 1; x++) {
-                const i = rowOff + x * 4;
-                for (let ch = 0; ch < 3; ch++) {
-                  const center = copy[i + ch];
-                  const avgNeighbors =
-                    (copy[i - 4 + ch] +
-                      copy[i + 4 + ch] +
-                      copy[i - stride + ch] +
-                      copy[i + stride + ch]) *
-                    0.25;
-                  const sharpened = center + (center - avgNeighbors) * amount;
-                  dst[i + ch] = sharpened < 0 ? 0 : sharpened > 255 ? 255 : sharpened;
-                }
-              }
-            }
-            bgCtx.putImageData(imgData, 0, 0);
-            ctx.drawImage(bgCanvas, 0, 0);
-          } else {
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            drawCoverImageToCanvas(
-              ctx,
-              image,
-              image.naturalWidth || w,
-              image.naturalHeight || h,
-              w,
-              h,
-              1
-            );
-          }
-        } else {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          drawCoverImageToCanvas(
-            ctx,
-            image,
-            image.naturalWidth || w,
-            image.naturalHeight || h,
-            w,
-            h,
-            1
-          );
-        }
+        renderAdjustedBackgroundToCanvas(
+          ctx,
+          image,
+          w,
+          h,
+          fontOptions?.bgAdjust || DEFAULT_BG_ADJUST,
+          baseSharpenPercent,
+          drawCoverImageToCanvas
+        );
       } else {
         const bgGrad = ctx.createLinearGradient(0, 0, w, h);
         bgGrad.addColorStop(0, '#090d16');
@@ -2035,8 +2159,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         );
       }
 
-      const hookLines = splitHookLines(titleText, activeFontStyle === 'gold_ice_magic');
-      const hasHook = hookLines.length > 0;
+      const bottomLineTrimmed = (fontOptions?.bottomLine || '').trim();
+      const topGradientId: TopLineGradientId = fontOptions?.topGradient || 'auto';
+      const bottomBadgeStyle: BottomPlaqueStyleId = fontOptions?.bottomBadgeStyle || 'none';
+      const isTwoTierActive = bottomLineTrimmed.length > 0;
+      const hookLines = splitHookLines(
+        titleText,
+        !isTwoTierActive && activeFontStyle === 'gold_ice_magic'
+      );
+      const hasHook = hookLines.length > 0 || isTwoTierActive;
       const centerX = (Math.max(4, Math.min(96, hookLayout.xPct)) / 100) * w;
       const centerY = (Math.max(6, Math.min(94, hookLayout.yPct)) / 100) * h;
       const fontScale = Math.max(0.6, Math.min(1.5, hookLayout.fontScalePct / 100));
@@ -2044,11 +2175,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       // Затемнение/контрастная подложка под текст рисуется ТОЛЬКО если текст-хук не пустой
       if (hasHook) {
         if (hookLayout.yPct >= 55) {
-          const grad = ctx.createLinearGradient(0, h * 0.48, 0, h);
+          const grad = ctx.createLinearGradient(0, h * 0.44, 0, h);
           grad.addColorStop(0, 'rgba(0,0,0,0)');
           grad.addColorStop(1, 'rgba(0,0,0,0.84)');
           ctx.fillStyle = grad;
-          ctx.fillRect(0, h * 0.48, w, h * 0.52);
+          ctx.fillRect(0, h * 0.44, w, h * 0.56);
         } else {
           const softSpot = ctx.createRadialGradient(
             centerX,
@@ -2056,7 +2187,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             40 * scale,
             centerX,
             centerY,
-            480 * scale * fontScale
+            520 * scale * fontScale
           );
           softSpot.addColorStop(0, 'rgba(2, 6, 14, 0.58)');
           softSpot.addColorStop(0.65, 'rgba(2, 6, 14, 0.22)');
@@ -2169,6 +2300,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       let returnBox: HookBoundingBoxPct | null = null;
       const customFamily = fontOptions?.fontEntry?.cssFamily;
       const customWeight = fontOptions?.fontEntry?.weight || '800';
+      const bottomFamily = fontOptions?.bottomFontEntry?.cssFamily || customFamily;
+      const bottomWeight = fontOptions?.bottomFontEntry?.weight || customWeight;
       const customTextColor = (fontOptions?.textColor || '').trim();
       const customStrokeColor = fontOptions?.strokeColor || '#000000';
       const strokeMult = Math.max(0, Math.min(2, (fontOptions?.strokeWidthPct ?? 100) / 100));
@@ -2182,7 +2315,200 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ctx.textAlign = 'center';
       ctx.lineJoin = 'round';
 
-      if (activeFontStyle === 'gold_ice_magic') {
+      if (isTwoTierActive || topGradientId !== 'auto') {
+        const effScale = scale * fontScale;
+        const resolvedTopGrad: Exclude<TopLineGradientId, 'auto'> =
+          topGradientId !== 'auto'
+            ? topGradientId
+            : activeFontStyle === 'gold_ice_magic' || activeFontStyle === 'royal_gold_laurels'
+              ? 'gold'
+              : activeFontStyle === 'medieval_serif'
+                ? 'amber'
+                : 'white';
+
+        let topFontSize = 72 * effScale;
+        const maxTopW = w * 0.88;
+        const buildTopFont = (fs: number) =>
+          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
+            customFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
+          }`;
+
+        let maxTopLineW = 0;
+        if (hookLines.length > 0) {
+          ctx.font = buildTopFont(topFontSize);
+          maxTopLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+          if (maxTopLineW > maxTopW) {
+            topFontSize = topFontSize * (maxTopW / maxTopLineW);
+            ctx.font = buildTopFont(topFontSize);
+            maxTopLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
+          }
+        }
+        const topFontStr = buildTopFont(topFontSize);
+
+        let bottomFontSize = 60 * effScale;
+        const maxBottomTextW = w * 0.78;
+        const buildBottomFont = (fs: number) =>
+          `${bottomWeight} ${Math.max(1, Math.round(fs))}px ${
+            bottomFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
+          }`;
+
+        let bottomTextW = 0;
+        if (isTwoTierActive) {
+          ctx.font = buildBottomFont(bottomFontSize);
+          bottomTextW = ctx.measureText(bottomLineTrimmed).width;
+          if (bottomTextW > maxBottomTextW) {
+            bottomFontSize = bottomFontSize * (maxBottomTextW / bottomTextW);
+            ctx.font = buildBottomFont(bottomFontSize);
+            bottomTextW = ctx.measureText(bottomLineTrimmed).width;
+          }
+        }
+        const bottomFontStr = buildBottomFont(bottomFontSize);
+
+        const topLineHeight = topFontSize * 1.1;
+        const topCapHeight = topFontSize * 0.72;
+        const topSpan =
+          hookLines.length > 0 ? (hookLines.length - 1) * topLineHeight + topCapHeight : 0;
+        const tierGap = hookLines.length > 0 && isTwoTierActive ? 18 * effScale : 0;
+        const bottomPlaquePadY =
+          bottomBadgeStyle === 'none'
+            ? 0
+            : Math.max(10 * effScale, bottomFontSize * 0.18) * 2;
+        const bottomSpan = isTwoTierActive ? bottomFontSize * 1.06 + bottomPlaquePadY : 0;
+        const totalSpan = topSpan + tierGap + bottomSpan;
+        const topEdgeY = centerY - totalSpan / 2;
+
+        const maxCombinedW = Math.max(
+          maxTopLineW,
+          isTwoTierActive ? bottomTextW + (bottomBadgeStyle === 'none' ? 0 : 72 * effScale) : 0
+        );
+
+        if (activeFontStyle === 'gold_ice_magic' && showMagicDecor) {
+          drawMagicGlowAndSnowflakes(
+            ctx,
+            centerX,
+            centerY,
+            maxCombinedW,
+            totalSpan,
+            topFontSize,
+            scale,
+            fontScale
+          );
+        } else if (activeFontStyle === 'royal_gold_laurels' && showRoyalDecor) {
+          drawGoldenLaurelBranch(
+            ctx,
+            centerX - maxCombinedW / 2 - 42 * effScale,
+            centerY,
+            Math.max(topFontSize * 1.16, totalSpan * 1.04),
+            -1,
+            effScale
+          );
+          drawGoldenLaurelBranch(
+            ctx,
+            centerX + maxCombinedW / 2 + 42 * effScale,
+            centerY,
+            Math.max(topFontSize * 1.16, totalSpan * 1.04),
+            1,
+            effScale
+          );
+          drawGoldenCandle(
+            ctx,
+            centerX,
+            topEdgeY - 12 * effScale,
+            topFontSize * 0.85,
+            effScale
+          );
+        }
+
+        if (hookLines.length > 0) {
+          const firstTopBaseline = topEdgeY + topCapHeight;
+          hookLines.forEach((line, idx) => {
+            const baselineY = firstTopBaseline + idx * topLineHeight;
+            const depthSteps = 4;
+            for (let d = depthSteps; d >= 1; d--) {
+              ctx.save();
+              ctx.font = topFontStr;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'alphabetic';
+              ctx.lineJoin = 'round';
+              if (d === depthSteps && shadowMult > 0) {
+                ctx.shadowColor = hasCustomShadowColor
+                  ? customShadowColor
+                  : 'rgba(0, 0, 0, 0.94)';
+                ctx.shadowBlur = 18 * effScale * shadowMult;
+                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
+              } else {
+                ctx.shadowBlur = 0;
+              }
+              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#06080F';
+              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9 * effScale * strokeMult) : 0;
+              const ox = d * 0.4 * effScale;
+              const oy = d * 1.1 * effScale;
+              if (strokeMult > 0) {
+                ctx.strokeText(line, centerX + ox, baselineY + oy);
+              }
+              ctx.fillStyle = resolvedTopGrad === 'gold' ? '#3B1903' : '#0B101B';
+              ctx.fillText(line, centerX + ox, baselineY + oy);
+              ctx.restore();
+            }
+
+            ctx.save();
+            ctx.font = topFontStr;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'alphabetic';
+            ctx.lineJoin = 'round';
+            if (strokeMult > 0) {
+              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#06080F';
+              ctx.lineWidth = Math.max(1, 8 * effScale * strokeMult);
+              ctx.strokeText(line, centerX, baselineY);
+            }
+            if (customTextColor) {
+              ctx.fillStyle = customTextColor;
+            } else {
+              ctx.fillStyle = buildTopLine3DGradient(
+                ctx,
+                resolvedTopGrad,
+                baselineY - topFontSize * 0.78,
+                baselineY + topFontSize * 0.08
+              );
+            }
+            ctx.fillText(line, centerX, baselineY);
+            ctx.restore();
+          });
+        }
+
+        if (isTwoTierActive) {
+          const bottomCenterY = topEdgeY + topSpan + tierGap + bottomSpan / 2;
+          drawBottomAccentPlaque(
+            ctx,
+            bottomBadgeStyle,
+            centerX,
+            bottomCenterY,
+            bottomTextW,
+            bottomFontSize,
+            effScale,
+            bottomLineTrimmed,
+            bottomFontStr,
+            fontOptions?.bottomPlaqueOverride,
+            customStrokeColor,
+            strokeMult,
+            customShadowColor,
+            shadowMult
+          );
+        }
+
+        const padX = 22 * effScale;
+        const padY = 14 * effScale;
+        const rawLeft = Math.max(0, centerX - maxCombinedW / 2 - padX);
+        const rawTop = Math.max(0, topEdgeY - padY);
+        const rawRight = Math.min(w, centerX + maxCombinedW / 2 + padX);
+        const rawBottom = Math.min(h, topEdgeY + totalSpan + padY);
+        returnBox = {
+          leftPct: (rawLeft / w) * 100,
+          topPct: (rawTop / h) * 100,
+          widthPct: ((rawRight - rawLeft) / w) * 100,
+          heightPct: ((rawBottom - rawTop) / h) * 100
+        };
+      } else if (activeFontStyle === 'gold_ice_magic') {
         let fontSize = 80 * scale * fontScale;
         const maxTextW = w * 0.88;
         const buildFontStr = (fs: number) =>
@@ -2750,6 +3076,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         fallbackLabel,
         {
           fontEntry: cfg.fontEntry,
+          bottomFontEntry: cfg.bottomFontEntry,
+          bottomLine: cfg.bottomLine,
+          topGradient: cfg.topGradient,
+          bottomBadgeStyle: cfg.bottomBadgeStyle,
+          bottomPlaqueOverride: cfg.bottomPlaqueOverride,
+          bgAdjust: cfg.bgAdjust,
           applyToBadges: cfg.applyFontToBadges,
           badgeScalePct: cfg.badgeScalePct,
           textColor: cfg.textColor,
@@ -2851,6 +3183,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         undefined,
         {
           fontEntry: cfg.fontEntry,
+          bottomFontEntry: cfg.bottomFontEntry,
+          bottomLine: cfg.bottomLine,
+          topGradient: cfg.topGradient,
+          bottomBadgeStyle: cfg.bottomBadgeStyle,
+          bottomPlaqueOverride: cfg.bottomPlaqueOverride,
+          bgAdjust: cfg.bgAdjust,
           applyToBadges: cfg.applyFontToBadges,
           badgeScalePct: cfg.badgeScalePct,
           textColor: cfg.textColor,
@@ -3395,11 +3733,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         onNotify('Не удалось сформировать оптимизированную обложку для YouTube.', 'error');
         return;
       }
-      triggerBlobDownload(result.blob, `thumb_${slot}_yt.jpg`);
+      triggerBlobDownload(result.blob, slotFilenames[slot]);
       const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
       const qPct = Math.round(result.quality * 100);
       onNotify(
-        `✅ Обложка ${slot} оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
+        `✅ Обложка ${slotFilenames[slot]} оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
         'success'
       );
     } finally {
@@ -3407,7 +3745,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // Пакетный экспорт всех 3 вариантов (thumb_A_yt.jpg, thumb_B_yt.jpg, thumb_C_yt.jpg) < 2 МБ
+  // Пакетный экспорт всех 3 вариантов (thumbnail_4k_3840x2160_A/B/C.jpg) < 2 МБ
   const downloadAll3CoversYouTube2Mb = async () => {
     if (isOptimizingYtThumb) return;
     setIsOptimizingYtThumb(true);
@@ -3423,7 +3761,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const offscreen = buildFullResThumbnailCanvas(slot);
         const result = await compressCanvasToYouTubeJpeg(offscreen);
         if (result) {
-          triggerBlobDownload(result.blob, `thumb_${slot}_yt.jpg`);
+          triggerBlobDownload(result.blob, slotFilenames[slot]);
           const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
           summaryParts.push(`${slot}: ${mbText} МБ`);
           if (i < slots.length - 1) {
@@ -3637,15 +3975,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           ? 'свой фон'
                           : 'общий с A'}
                     </span>
+                    <span
+                      className="relative z-10 text-[8.5px] font-mono text-amber-200/75 truncate max-w-full px-1"
+                      title={slotFilenames[tab.id]}
+                    >
+                      {slotFilenames[tab.id]}
+                    </span>
                   </button>
                 );
               })}
             </div>
 
             <div className="relative flex flex-wrap items-center justify-between gap-2 pt-0.5">
-              <span className="text-[10.5px] font-mono text-white/55">
-                Редактируется: <strong className="text-[#f8fafc]">Слот {activeSlot}</strong>
-                {activeSlot !== 'A' && !slotImages[activeSlot] && ' (фон от A)'}
+              <span className="text-[10.5px] font-mono text-white/55 truncate">
+                Слот <strong className="text-[#f8fafc]">{activeSlot}</strong> •{' '}
+                <code className="text-amber-300">{slotFilenames[activeSlot]}</code>
               </span>
 
               <div className="relative">
@@ -4187,7 +4531,103 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             )}
           </div>
 
-          {/* Настройки активного слота (фон, текст, масштаб, бейджи до 3 и размер бейджей) */}
+          {/* БИБЛИОТЕКА ИЗ 20 ГОТОВЫХ YOUTUBE-ШАБЛОНОВ (1-Click High-CTR Presets) */}
+          <div className="aether-card rounded-2xl border border-amber-400/20 bg-[#0b0f19]/90 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowPresetLibrary(prev => !prev)}
+              className="w-full min-h-[46px] px-4 py-2.5 flex items-center justify-between gap-2 text-left cursor-pointer hover:bg-white/[0.03]"
+            >
+              <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-2 min-w-0">
+                <LayoutTemplate className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="truncate">🔥 20 шаблонов обложек YouTube</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-mono text-amber-300/85">1-Click CTR</span>
+                <ChevronDown
+                  className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                    showPresetLibrary ? 'rotate-180 text-amber-400' : ''
+                  }`}
+                />
+              </span>
+            </button>
+
+            {showPresetLibrary && (
+              <div className="px-3.5 pb-3.5 pt-2 border-t border-white/[0.07] space-y-2.5">
+                <div className="flex flex-wrap gap-1">
+                  {PRESET_CATEGORIES.map(cat => {
+                    const isCatActive = presetCategory === cat.id;
+                    return (
+                      <button
+                        key={`preset-cat-${cat.id}`}
+                        type="button"
+                        onClick={() => setPresetCategory(cat.id)}
+                        className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[10.5px] font-bold border cursor-pointer whitespace-nowrap transition ${
+                          isCatActive
+                            ? 'bg-amber-500/20 border-amber-400/60 text-[#FDE047]'
+                            : 'bg-[#111827]/80 border-white/[0.08] text-white/65 hover:text-white'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
+                  {YOUTUBE_THUMBNAIL_PRESETS.filter(
+                    p => presetCategory === 'all' || p.category === presetCategory
+                  ).map(preset => {
+                    const isApplied = appliedPresetId === preset.id;
+                    return (
+                      <motion.button
+                        key={preset.id}
+                        type="button"
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                        onClick={() => applyYoutubeThumbnailPreset(preset)}
+                        className={`text-left rounded-xl p-2 border cursor-pointer transition space-y-1 ${
+                          isApplied
+                            ? 'bg-amber-500/15 border-amber-400/65 shadow-[0_0_16px_rgba(245,158,11,0.18)]'
+                            : 'bg-[#111827]/75 border-white/[0.08] hover:border-amber-400/40 hover:bg-[#111827]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[10px] font-mono text-white/45 tabular-nums">
+                            #{String(preset.index).padStart(2, '0')}
+                          </span>
+                          <div className="flex items-center gap-1 min-w-0 flex-1">
+                            <span
+                              className="text-[10.5px] font-extrabold truncate"
+                              style={{ color: preset.swatchTop }}
+                            >
+                              {preset.topLine}
+                            </span>
+                            <span className="text-white/35 text-[10px]">+</span>
+                            <span
+                              className="text-[9.5px] font-extrabold px-1.5 py-0.5 rounded truncate"
+                              style={{
+                                backgroundColor: preset.swatchBottomBg,
+                                color: preset.swatchBottomText
+                              }}
+                            >
+                              {preset.bottomLine}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-[9.5px] text-white/50 truncate">
+                          {preset.styleTag}
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Настройки активного слота (фон, 2-уровневый заголовок, плашка, масштаб, бейджи до 3) */}
           <div className="aether-card rounded-2xl p-4 space-y-3.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
@@ -4231,34 +4671,162 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] text-white/55">
-                  Текст-хук {activeSlot} (Enter — на 2 строки):
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-amber-300 tabular-nums">
-                    {activeLineCountHook} {activeLineCountHook === 1 ? 'строка' : 'строки'}
-                  </span>
-                  {activeConfig.title.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleSlotHookChange(activeSlot, '')}
-                      className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                      title="Очистить текст-хук (оставить чистый арт)"
-                    >
-                      Очистить
-                    </button>
-                  )}
+            {/* ДВУХУРОВНЕВЫЙ КИНО-ЗАГОЛОВОК (Top Line + 3D Gradient + Bottom Accent Line + Plaque) */}
+            <div className="bg-[#0b0f19]/80 border border-white/[0.08] rounded-xl p-3 space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] text-white/75 font-semibold">
+                    Верхняя строка (Top Line • {activeSlot}):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-amber-300 tabular-nums">
+                      {activeLineCountHook} {activeLineCountHook === 1 ? 'строка' : 'строки'}
+                    </span>
+                    {activeConfig.title.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleSlotHookChange(activeSlot, '')}
+                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
+                        title="Очистить верхнюю строку"
+                      >
+                        Очистить
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <textarea
+                  rows={2}
+                  value={activeConfig.title}
+                  onChange={e => handleSlotHookChange(activeSlot, e.target.value)}
+                  placeholder={`Верхняя строка ${activeSlot} (например: BIGGER THAN)`}
+                  className="w-full bg-[#111827]/90 border border-white/[0.1] rounded-xl px-3.5 py-2 text-xs text-[#f8fafc] font-bold outline-none focus:border-amber-400 resize-none leading-snug"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider block">
+                  3D-градиент верхней строки:
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {TOP_LINE_GRADIENT_OPTIONS.map(grad => {
+                    const isGradActive = activeConfig.topGradient === grad.id;
+                    return (
+                      <button
+                        key={`top-grad-${grad.id}`}
+                        type="button"
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            topGradient: grad.id,
+                            textColor: ''
+                          }))
+                        }
+                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer flex items-center gap-1.5 transition ${
+                          isGradActive
+                            ? 'border-amber-400 bg-amber-500/20 text-[#FDE047]'
+                            : 'border-white/[0.09] bg-[#111827]/80 text-white/65 hover:text-white'
+                        }`}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm border border-white/25 shrink-0"
+                          style={{ background: grad.swatch }}
+                        />
+                        <span>{grad.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-              <textarea
-                rows={2}
-                value={activeConfig.title}
-                onChange={e => handleSlotHookChange(activeSlot, e.target.value)}
-                placeholder={`Введите заголовок ${activeSlot} (Enter для 2-й строки, пусто = чистый арт)`}
-                className="w-full bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3.5 py-2.5 text-xs text-[#f8fafc] font-bold outline-none focus:border-amber-400 resize-none leading-snug"
-              />
+
+              <div className="pt-2 border-t border-white/[0.07] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] text-white/75 font-semibold">
+                    Нижняя строка (Bottom Accent Line):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {activeConfig.bottomFontEntry &&
+                      activeConfig.bottomFontEntry.id !== activeConfig.fontEntry.id && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSlotConfig(activeSlot, prev => ({
+                              ...prev,
+                              bottomFontEntry: null
+                            }))
+                          }
+                          className="text-[10px] font-mono text-cyan-300/85 hover:text-cyan-200 underline cursor-pointer"
+                          title="Сбросить парный шрифт нижней строки к основному"
+                        >
+                          {activeConfig.bottomFontEntry.title} ×
+                        </button>
+                      )}
+                    {activeConfig.bottomLine.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({ ...prev, bottomLine: '' }))
+                        }
+                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
+                        title="Убрать нижнюю строку (1-уровневый режим)"
+                      >
+                        Очистить
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  value={activeConfig.bottomLine}
+                  onChange={e =>
+                    updateSlotConfig(activeSlot, prev => ({ ...prev, bottomLine: e.target.value }))
+                  }
+                  placeholder="Ударное слово / цифра (например: LONDON, VANISHED, FILE #09)"
+                  className="w-full min-h-[38px] bg-[#111827]/90 border border-white/[0.1] rounded-xl px-3.5 py-1.5 text-xs text-[#FDE047] font-extrabold outline-none focus:border-amber-400"
+                />
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider block">
+                    Стиль плашки нижней строки:
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {BOTTOM_PLAQUE_STYLE_OPTIONS.map(plaque => {
+                      const isPlaqueActive = activeConfig.bottomBadgeStyle === plaque.id;
+                      return (
+                        <button
+                          key={`plaque-${plaque.id}`}
+                          type="button"
+                          onClick={() =>
+                            updateSlotConfig(activeSlot, prev => ({
+                              ...prev,
+                              bottomBadgeStyle: plaque.id,
+                              bottomPlaqueOverride: null
+                            }))
+                          }
+                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-left cursor-pointer flex items-center gap-2 transition ${
+                            isPlaqueActive
+                              ? 'bg-amber-500/15 border-amber-400/70 text-[#FDE047] shadow-[0_0_12px_rgba(245,158,11,0.18)]'
+                              : 'bg-[#111827]/80 border-white/[0.08] text-white/70 hover:text-white hover:border-white/20'
+                          }`}
+                        >
+                          <span
+                            className="w-5 h-3.5 rounded shrink-0 border flex items-center justify-center text-[7px] font-black"
+                            style={{
+                              background: plaque.previewBg,
+                              borderColor: plaque.previewBorder,
+                              color: plaque.previewText
+                            }}
+                          >
+                            A
+                          </span>
+                          <span className="text-[10.5px] font-bold leading-tight truncate">
+                            {plaque.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Размер шрифта и позиция текста-хука активного слота */}
@@ -4414,8 +4982,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
 
-          {/* ЛОКАЛЬНЫЙ РЕСАЙЗ И ПОВЫШЕНИЕ ЧЁТКОСТИ БАЗОВОГО КАДРА (100% HTML5 Canvas) */}
-          <div className="aether-card rounded-2xl p-4 space-y-3 border border-cyan-400/25 bg-[#080c14]/70">
+          {/* ЛОКАЛЬНЫЙ КОНТРОЛЬ КОНТРАСТА И «СОЧНОСТИ» КАДРА + РЕСАЙЗ И ЧЁТКОСТЬ (100% HTML5 Canvas) */}
+          <div className="aether-card rounded-2xl p-4 space-y-3.5 border border-cyan-400/25 bg-[#0b0f19]/85">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-cyan-200 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -4441,7 +5009,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-[10.5px] font-mono font-bold flex flex-col items-center justify-center cursor-pointer transition ${
                       isSelected
                         ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_14px_rgba(34,211,238,0.2)]'
-                        : 'bg-[#090D16] border-white/[0.08] text-white/75 hover:text-white hover:border-cyan-400/40'
+                        : 'bg-[#111827] border-white/[0.08] text-white/75 hover:text-white hover:border-cyan-400/40'
                     }`}
                   >
                     <span className="tabular-nums">{res.w}×{res.h}</span>
@@ -4469,9 +5037,145 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 onChange={e => setBaseSharpenPct(Number(e.target.value))}
                 className="w-full accent-cyan-400 cursor-pointer"
               />
-              <p className="text-[10px] text-white/50 leading-tight">
-                Применяется 3×3 свёртка строго к базовой картинке — титры и бейджи всегда остаются идеально чёткими.
-              </p>
+            </div>
+
+            {/* Блок «☀️ Контраст и яркость кадра» (YouTube Contrast & Punch Engine) */}
+            <div className="pt-3 border-t border-white/[0.08] space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
+                  <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>☀️ Контраст и яркость кадра</span>
+                </span>
+                <span className="text-[10px] font-mono text-amber-300/90">
+                  Слот {activeSlot}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      bgAdjust: { ...YOUTUBE_CINEMA_BG_ADJUST }
+                    }));
+                    onNotify(
+                      `⚡ Кино-контраст YouTube применён к Слоту ${activeSlot} (128% / 106% / 110%)`,
+                      'success'
+                    );
+                  }}
+                  className="flex-1 min-h-[36px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>⚡ Кино-контраст YouTube</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      bgAdjust: { ...DEFAULT_BG_ADJUST }
+                    }));
+                  }}
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#111827]/85 hover:bg-white/[0.08] border border-white/[0.1] text-white/75 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer transition"
+                >
+                  <RotateCcw className="w-3 h-3 shrink-0" />
+                  <span>↺ Сброс</span>
+                </button>
+              </div>
+
+              <div className="space-y-2 bg-[#111827]/75 border border-white/[0.06] rounded-xl p-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/80 font-semibold">
+                      Контраст (Глубина теней и света)
+                    </span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.bgAdjust.contrastPct}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={80}
+                    max={165}
+                    step="any"
+                    value={activeConfig.bgAdjust.contrastPct}
+                    onChange={e => {
+                      const snapped = Math.max(
+                        80,
+                        Math.min(165, Math.round(Number(e.target.value) / 5) * 5)
+                      );
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        bgAdjust: { ...prev.bgAdjust, contrastPct: snapped }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/80 font-semibold">
+                      Яркость и подсветка бликов
+                    </span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.bgAdjust.brightnessPct}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={85}
+                    max={135}
+                    step="any"
+                    value={activeConfig.bgAdjust.brightnessPct}
+                    onChange={e => {
+                      const snapped = Math.max(
+                        85,
+                        Math.min(135, Math.round(Number(e.target.value) / 5) * 5)
+                      );
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        bgAdjust: { ...prev.bgAdjust, brightnessPct: snapped }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/80 font-semibold">
+                      Мягкая сочность (Vibrance)
+                    </span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.bgAdjust.vibrancePct}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={90}
+                    max={125}
+                    step="any"
+                    value={activeConfig.bgAdjust.vibrancePct}
+                    onChange={e => {
+                      const snapped = Math.max(
+                        90,
+                        Math.min(125, Math.round(Number(e.target.value) / 5) * 5)
+                      );
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        bgAdjust: { ...prev.bgAdjust, vibrancePct: snapped }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <p className="text-[10px] text-white/50 leading-tight pt-0.5">
+                  Применяется 100% локально на Canvas только к фону слота {activeSlot} — заголовки и бейджи сохраняют исходную чёткость.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -4568,6 +5272,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         <ArrowRight className="w-3 h-3 shrink-0" />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setShowEndScreenSafeZone(prev => !prev)}
+                      className={`text-[10.5px] font-mono font-bold px-2.5 py-0.5 rounded-full border cursor-pointer transition ${
+                        showEndScreenSafeZone
+                          ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
+                          : 'bg-white/[0.04] border-white/[0.08] text-white/55 hover:text-white'
+                      }`}
+                      title="Переключить направляющую безопасной зоны YouTube End Screen"
+                    >
+                      End Screen: {endScreenSafeZone || '05:14-05:24'} {showEndScreenSafeZone ? 'ON' : 'OFF'}
+                    </button>
                     <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
                       3840×2160 • 16:9
                     </span>
@@ -4612,6 +5328,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       />
                     )}
 
+                    {/* End Screen Safe-Zone Guide Overlay (05:14-05:24) */}
+                    {showEndScreenSafeZone && (
+                      <div className="pointer-events-none absolute inset-0 z-10">
+                        {/* Безопасная рамка отступов 5% */}
+                        <div className="absolute inset-[5%] border border-dashed border-emerald-400/35 rounded-lg" />
+                        {/* Зона карточек YouTube End Screen (правая/нижняя часть для финала 05:14-05:24) */}
+                        <div className="absolute right-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/65 bg-cyan-500/10 flex flex-col items-center justify-center text-center p-1">
+                          <span className="text-[9px] font-mono font-bold text-cyan-200 uppercase">
+                            End Screen Card
+                          </span>
+                          <span className="text-[8px] font-mono text-cyan-300/80">
+                            {endScreenSafeZone || '05:14-05:24'}
+                          </span>
+                        </div>
+                        <div className="absolute left-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/45 bg-cyan-500/5 flex flex-col items-center justify-center text-center p-1">
+                          <span className="text-[9px] font-mono font-bold text-cyan-200/85 uppercase">
+                            Next Video Slot
+                          </span>
+                        </div>
+                        <div className="absolute top-2.5 left-2.5 bg-[#0b0f19]/85 backdrop-blur-md border border-emerald-400/40 text-emerald-300 font-mono text-[9.5px] px-2 py-0.5 rounded-md">
+                          Safe-Zone • End Screen {endScreenSafeZone || '05:14-05:24'}
+                        </div>
+                      </div>
+                    )}
+
                     {showYoutubeOverlay && (
                       <>
                         <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewActive:opacity-100 transition-opacity duration-300">
@@ -4627,7 +5368,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         </div>
 
                         <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
-                          {youtubeDurationBadge || '3:00:00'}
+                          {manifestDurationBadge || youtubeDurationBadge || '3:00:00'}
                         </div>
                       </>
                     )}
@@ -4848,6 +5589,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           </p>
                           <p className="text-[10px] text-white/45 truncate">
                             {slotConfigs[item.slot].title || '(Без текста)'}
+                            {slotConfigs[item.slot].bottomLine
+                              ? ` + ${slotConfigs[item.slot].bottomLine}`
+                              : ''}
                           </p>
                         </div>
                       </button>

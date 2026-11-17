@@ -45,6 +45,13 @@ import {
   YoutubeSeoManifestBlock,
   toEnglishSceneTitle
 } from '../utils/englishExport';
+import {
+  V21PipelineLocks,
+  V21_XFADE_OPTIONS,
+  normalizeV21TransitionType,
+  normalizeSceneSubtitlesMap,
+  parseV21ManifestObject
+} from '../utils/manifestV21';
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
 
@@ -94,13 +101,27 @@ export interface NarrativeSceneItem {
   needs_revision?: boolean;
   revision_note?: string;
   transition: {
-    type: 'crossfade' | 'dissolve' | 'fade' | 'cut' | 'none';
+    type:
+      | 'crossfade'
+      | 'dissolve'
+      | 'fade'
+      | 'fadeblack'
+      | 'fadewhite'
+      | 'wipeleft'
+      | 'wiperight'
+      | 'smoothleft'
+      | 'smoothup'
+      | 'cut'
+      | 'none';
     duration_sec: number;
   };
   text_overlay: string;
   ai_video_prompt?: string;
   prompt_ru?: string;
   sfx?: string;
+  video_ambient_mute?: boolean;
+  sfx_gain_db?: number;
+  subtitles?: Record<string, string>;
 }
 
 export interface MasterAudioConfig {
@@ -163,6 +184,9 @@ export interface NarrativeExportSettings {
   resolution: '4k' | '1080p' | '720p';
   aspect_ratio: '16:9' | '9:16';
   video_codec: 'libx265' | 'libx264';
+  profile?: 'high' | 'main';
+  pix_fmt?: 'yuv420p';
+  cfr?: boolean;
   preset?: 'veryfast' | 'ultrafast' | 'medium';
   draft_mode?: boolean;
   bitrate_mbps: number;
@@ -174,6 +198,7 @@ export interface NarrativeExportSettings {
 
 export interface NarrativeMontageManifest {
   schema_version: '3.0';
+  manifest_version?: '2.1' | '3.0';
   project_type: 'narrative_scenes_montage';
   project_name: string;
   manifest_name?: string;
@@ -188,6 +213,19 @@ export interface NarrativeMontageManifest {
   ambient_audio: AmbientAudioConfig;
   master_audio: MasterAudioConfig;
   export_settings: NarrativeExportSettings;
+  anti_desync_locks?: {
+    hard_frame_lock: boolean;
+    apad_atrim_padding: boolean;
+    never_stretch_voiceover: boolean;
+    dynamic_xfade_transitions: boolean;
+    acrossfade_offset_compensation: boolean;
+    auto_mute_flagged_video_clips: boolean;
+    loudnorm: {
+      enabled: boolean;
+      integrated_lufs: number;
+      true_peak_dbtp: number;
+    };
+  };
   subtitles: SubtitlesFlexibleConfig;
   subtitles_burn_in?: BurnInSrtConfig;
   shorts_config?: ShortsAutoSliceConfig;
@@ -228,6 +266,12 @@ interface MontageCombineViewProps {
   externalMasterAudioFile?: { fileName: string; file?: File; durationSec?: number } | null;
   onConsumeExternalMasterAudio?: () => void;
   onScenesChange?: (scenes: NarrativeSceneItem[]) => void;
+  externalV21Manifest?: { raw: Record<string, unknown>; fileName: string; nonce: number } | null;
+  onConsumeExternalV21Manifest?: () => void;
+  onImportFullManifest?: (raw: Record<string, unknown>, fileName: string) => void;
+  onV21LocksChange?: (locks: V21PipelineLocks, renderSpecsSummary: string) => void;
+  externalSceneSubtitleEdit?: { sceneIndex: number; lang: string; text: string; nonce: number } | null;
+  onConsumeExternalSceneSubtitleEdit?: () => void;
   youtubeSeo?: YoutubeSeoManifestBlock;
   telegramBotToken?: string;
   telegramChatId?: string;
@@ -332,6 +376,7 @@ interface DraggableSceneRowProps {
   rowKey: string;
   sc: NarrativeSceneItem;
   idx: number;
+  fps: number;
   canDrag: boolean;
   updateScene: (idx: number, patch: Partial<NarrativeSceneItem>) => void;
   removeScene: (idx: number) => void;
@@ -343,6 +388,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   rowKey,
   sc,
   idx,
+  fps,
   canDrag,
   updateScene,
   removeScene,
@@ -352,6 +398,10 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   const dragControls = useDragControls();
   const hasFile = Boolean(sc.file_name.trim());
   const isFlagged = Boolean(sc.needs_revision);
+  const frameCount = Math.max(1, Math.round((Number(sc.duration) || 6) * fps));
+  const isMuted = Boolean(sc.video_ambient_mute);
+  const hasSfx = Boolean(sc.sfx || sc.sfx_gain_db !== undefined);
+  const sfxDbLabel = typeof sc.sfx_gain_db === 'number' ? sc.sfx_gain_db.toFixed(1) : '-6.0';
 
   const rowClassName = `grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition-colors ${
     isFlagged
@@ -449,13 +499,13 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         )}
       </div>
 
-      {/* 3. Старт (start_time) и длительность (duration) */}
+      {/* 3. Старт (start_time), длительность (duration) и точный кадр-бэйдж (frames) */}
       <div className="col-span-2 flex items-center gap-1 tabular-nums">
         <input
           type="text"
           value={String(sc.start_time)}
           onChange={e => updateScene(idx, { start_time: e.target.value })}
-          className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-sky-300 text-center outline-none"
+          className="w-[40%] bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10.5px] font-mono text-sky-300 text-center outline-none"
           title="start_time"
         />
         <input
@@ -469,12 +519,18 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
               duration: Math.max(0.5, Number(e.target.value) || 6)
             })
           }
-          className="w-1/2 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[11px] font-mono text-emerald-400 font-bold text-center outline-none"
+          className="w-[34%] bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10.5px] font-mono text-emerald-400 font-bold text-center outline-none"
           title="duration (сек)"
         />
+        <span
+          title={`Точный кадр-лок @ ${fps} fps (${sc.duration}s × ${fps} = ${frameCount}f)`}
+          className="w-[26%] text-center bg-indigo-500/15 border border-indigo-400/35 text-indigo-200 rounded px-1 py-1 text-[9.5px] font-mono font-bold truncate"
+        >
+          {frameCount}f
+        </span>
       </div>
 
-      {/* 4. Переход (transition) + Титр (text_overlay) */}
+      {/* 4. Динамический переход FFmpeg (xfade) + Статус Mute / SFX + Титр */}
       <div className="col-span-2 flex items-center gap-1 min-w-0">
         <select
           value={sc.transition.type}
@@ -486,23 +542,45 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
                 duration_sec:
                   t === 'cut' || t === 'none'
                     ? 0
-                    : sc.transition.duration_sec || 0.8
+                    : sc.transition.duration_sec || 0.6
               }
             });
           }}
-          className="w-20 bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10px] text-slate-200 outline-none shrink-0"
+          title={`FFmpeg xfade: ${sc.transition.type} (${sc.transition.duration_sec}s)`}
+          className="w-[74px] bg-slate-900 border border-cyan-500/40 rounded px-1 py-1 text-[9.5px] font-mono text-cyan-200 outline-none shrink-0"
         >
-          <option value="crossfade">xfade</option>
-          <option value="dissolve">dissolve</option>
-          <option value="fade">fade</option>
-          <option value="cut">cut</option>
+          {V21_XFADE_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value} className="bg-slate-900">
+              {opt.value}
+            </option>
+          ))}
         </select>
+        <button
+          type="button"
+          onClick={() => updateScene(idx, { video_ambient_mute: !isMuted })}
+          title={
+            isMuted
+              ? 'Клип заглушен (video_ambient_mute: true). Нажмите для включения нативного звука.'
+              : hasSfx
+              ? `SFX активен (${sfxDbLabel} dB). Нажмите чтобы заглушить нативный звук клипа.`
+              : 'Нажмите чтобы принудительно заглушить звук видеоклипа (video_ambient_mute)'
+          }
+          className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border cursor-pointer transition ${
+            isMuted
+              ? 'bg-rose-500/20 border-rose-400/50 text-rose-200'
+              : hasSfx
+              ? 'bg-emerald-500/15 border-emerald-400/45 text-emerald-300'
+              : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          {isMuted ? 'MUTE' : hasSfx ? `SFX ${sfxDbLabel}` : 'AUD'}
+        </button>
         <input
           type="text"
           value={sc.text_overlay}
           placeholder="Титр..."
           onChange={e => updateScene(idx, { text_overlay: e.target.value })}
-          className="w-full bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
+          className="w-full min-w-0 bg-slate-900 border border-slate-700/80 rounded px-1.5 py-1 text-[11px] text-slate-200 outline-none focus:border-indigo-400"
         />
       </div>
 
@@ -599,6 +677,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   externalMasterAudioFile,
   onConsumeExternalMasterAudio,
   onScenesChange,
+  externalV21Manifest,
+  onConsumeExternalV21Manifest,
+  onImportFullManifest,
+  onV21LocksChange,
+  externalSceneSubtitleEdit,
+  onConsumeExternalSceneSubtitleEdit,
   youtubeSeo,
   telegramBotToken,
   telegramChatId,
@@ -921,17 +1005,32 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [shortsSliceCount, setShortsSliceCount] = useState<2 | 3>(3);
   const [shortsHookTextEn, setShortsHookTextEn] = useState<string>('WAIT FOR THE 14TH SECOND...');
 
-  // Параметры кодирования для N-сцен (по умолчанию H.264 libx264, preset veryfast, CRF 20 — скоростной монтаж)
+  // Параметры кодирования для N-сцен (по умолчанию H.264 libx264 High profile CRF 18 yuv420p 24fps CFR)
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
     resolution: '4k',
     aspect_ratio: '16:9',
     video_codec: 'libx264',
+    profile: 'high',
+    pix_fmt: 'yuv420p',
+    cfr: true,
     preset: 'veryfast',
     draft_mode: false,
     bitrate_mbps: 35,
-    crf: 20,
+    crf: 18,
     fps: 24,
     audio_bitrate_kbps: 320
+  });
+
+  // Авто-блокировки анти-рассинхрона и аудио-нормализации v2.1
+  const [v21Locks, setV21Locks] = useState<V21PipelineLocks>({
+    hardFrameLock: true,
+    apadAtrimLock: true,
+    dynamicXfadeTransitions: true,
+    acrossfadeOffsetSync: true,
+    autoMuteFlaggedClips: true,
+    youtubeLoudnorm: true,
+    integratedLufs: -14.0,
+    truePeakDbtp: -1.0
   });
 
   const [importedScenarioName, setImportedScenarioName] = useState<string>('');
@@ -1068,14 +1167,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     );
   };
 
-  // Универсальный динамический парсер JSON-сценария любого размера (80, 120, 160, 200+ сцен без ограничений)
-  const applyNarrativeScenarioJson = (raw: Record<string, unknown>, fileNameLabel: string) => {
+  // Универсальный динамический парсер JSON-сценария любого размера (поддержка v2.1 timeline[] и N-сцен)
+  const applyNarrativeScenarioJson = (
+    raw: Record<string, unknown>,
+    fileNameLabel: string,
+    emitToApp = true
+  ) => {
     const timelineSub =
-      raw.timeline && typeof raw.timeline === 'object'
+      raw.timeline && typeof raw.timeline === 'object' && !Array.isArray(raw.timeline)
         ? (raw.timeline as Record<string, unknown>)
         : undefined;
 
-    const rawScenesArray = Array.isArray(raw.scenes)
+    const rawScenesArray = Array.isArray(raw.timeline)
+      ? raw.timeline
+      : Array.isArray(raw.scenes)
       ? raw.scenes
       : Array.isArray(raw.timeline_slots)
       ? raw.timeline_slots
@@ -1090,6 +1195,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       : Array.isArray(timelineSub?.slots)
       ? (timelineSub?.slots as unknown[])
       : null;
+
+    if (typeof raw.project_name === 'string' && raw.project_name.trim()) {
+      handleProjectNameUpdate(raw.project_name.trim());
+    }
 
     if (rawScenesArray && rawScenesArray.length > 0) {
       let runningSec = 0;
@@ -1117,40 +1226,26 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
           const rawEndSec = typeof sc.end_sec === 'number' ? sc.end_sec : undefined;
           const rawDuration = Number(
-            sc.duration ??
-              sc.duration_sec ??
+            sc.duration_sec ??
+              sc.duration ??
               sc.slot_duration_sec ??
               (rawEndSec !== undefined ? rawEndSec - startSec : 6)
           );
           const duration = !isNaN(rawDuration) && rawDuration > 0 ? rawDuration : 6;
           runningSec = startSec + duration;
 
-          // Переход сцены
+          // Переход сцены (поддержка всех FFmpeg xfade переходов)
           const rawTrans = sc.transition ?? sc.slot_transition_out;
-          let transType: NarrativeSceneItem['transition']['type'] = 'crossfade';
-          let transDur = 0.8;
+          let transType: NarrativeSceneItem['transition']['type'] = 'fade';
+          let transDur = 0.6;
           if (typeof rawTrans === 'string') {
-            const norm = rawTrans.toLowerCase();
-            if (norm === 'cut' || norm === 'none') {
-              transType = norm as 'cut' | 'none';
+            transType = normalizeV21TransitionType(rawTrans);
+            if (transType === 'cut' || transType === 'none') {
               transDur = 0;
-            } else if (norm === 'dissolve' || norm === 'fade') {
-              transType = norm;
             }
           } else if (rawTrans && typeof rawTrans === 'object') {
             const tObj = rawTrans as Record<string, unknown>;
-            const tStr = String(tObj.type || 'crossfade').toLowerCase();
-            if (
-              tStr === 'crossfade' ||
-              tStr === 'dissolve' ||
-              tStr === 'fade' ||
-              tStr === 'cut' ||
-              tStr === 'none'
-            ) {
-              transType = tStr;
-            } else if (tStr === 'xfade') {
-              transType = 'crossfade';
-            }
+            transType = normalizeV21TransitionType(tObj.type || 'fade');
             if (typeof tObj.duration_sec === 'number') {
               transDur = Math.max(0, tObj.duration_sec);
             } else if (typeof tObj.duration === 'number') {
@@ -1158,17 +1253,50 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             }
           }
 
+          const subtitlesMap = normalizeSceneSubtitlesMap(sc.subtitles);
           const overlayText = String(
-            sc.text_overlay ?? sc.subtitle ?? sc.caption ?? sc.act_title ?? sc.title ?? ''
+            sc.text_overlay ??
+              subtitlesMap?.EN ??
+              subtitlesMap?.RU ??
+              sc.subtitle ??
+              sc.caption ??
+              sc.act_title ??
+              sc.title ??
+              ''
           );
 
           const rawSceneTitle = String(sc.title ?? sc.act_title ?? '').trim();
+          const rawMute =
+            typeof sc.video_ambient_mute === 'boolean'
+              ? sc.video_ambient_mute
+              : typeof sc.audio_mute === 'boolean'
+              ? sc.audio_mute
+              : typeof sc.mute === 'boolean'
+              ? sc.mute
+              : undefined;
+
+          const rawSfxStr =
+            typeof sc.sfx === 'string' && sc.sfx.trim()
+              ? sc.sfx.trim()
+              : typeof sc.sfx_file === 'string' && sc.sfx_file.trim()
+              ? sc.sfx_file.trim()
+              : '';
+          const rawSfxGain =
+            typeof sc.sfx_gain_db === 'number'
+              ? sc.sfx_gain_db
+              : typeof sc.sfx_volume_db === 'number'
+              ? sc.sfx_volume_db
+              : rawSfxStr
+              ? -6.0
+              : undefined;
+
+          const sceneIdNorm = String(
+            sc.scene_id || sc.slot_id || sc.id || `scene_${String(idx + 1).padStart(2, '0')}`
+          );
 
           return {
             scene_index: idx + 1,
-            scene_id: String(
-              sc.scene_id || sc.slot_id || sc.id || `SCENE_${String(idx + 1).padStart(3, '0')}`
-            ),
+            scene_id: sceneIdNorm,
             ...(rawSceneTitle ? { title: rawSceneTitle } : {}),
             file_name: rawFileName,
             start_time:
@@ -1187,9 +1315,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             ...(typeof sc.prompt_ru === 'string' && sc.prompt_ru.trim()
               ? { prompt_ru: sc.prompt_ru.trim() }
               : {}),
-            ...(typeof sc.sfx === 'string' && sc.sfx.trim()
-              ? { sfx: sc.sfx.trim() }
-              : {})
+            ...(rawSfxStr ? { sfx: rawSfxStr } : {}),
+            ...(rawMute !== undefined ? { video_ambient_mute: rawMute } : {}),
+            ...(rawSfxGain !== undefined ? { sfx_gain_db: rawSfxGain } : {}),
+            ...(subtitlesMap ? { subtitles: subtitlesMap } : {})
           };
         });
 
@@ -1200,6 +1329,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           scrollContainerRef.current.scrollTop = 0;
           setScrollTop(0);
         }
+      }
+    }
+
+    // Парсинг v2.1 пресетов для Таб 1 (H.264 High CRF 18 yuv420p 4K 24fps CFR + блокировки анти-рассинхрона)
+    const parsedV21 = parseV21ManifestObject(raw);
+    if (parsedV21.isV21Manifest) {
+      setExportSettings(prev => ({
+        ...prev,
+        resolution: parsedV21.tab1Export.resolution,
+        video_codec: parsedV21.tab1Export.videoCodec,
+        profile: parsedV21.tab1Export.profile,
+        pix_fmt: parsedV21.tab1Export.pixFmt,
+        crf: parsedV21.tab1Export.crf,
+        fps: parsedV21.tab1Export.fps,
+        cfr: parsedV21.tab1Export.cfr,
+        draft_mode: parsedV21.tab1Export.resolution === '720p',
+        preset: parsedV21.tab1Export.videoCodec === 'libx264' ? 'veryfast' : 'medium'
+      }));
+      setV21Locks(parsedV21.tab1Locks);
+      if (parsedV21.tab3Verbaflow.burnInVideo === false) {
+        setBurnInSrtEnabled(false);
+        setUploadSrtToDriveEnabled(true);
       }
     }
 
@@ -1241,7 +1392,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       onGdriveFolderIdChange(folderId);
     }
 
-    // Маппинг export_settings
+    // Маппинг export_settings (если заданы напрямую в JSON)
     const exp =
       raw.export_settings && typeof raw.export_settings === 'object'
         ? (raw.export_settings as Record<string, unknown>)
@@ -1256,9 +1407,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         const aspect_ratio: '16:9' | '9:16' = rawAspect === '9:16' ? '9:16' : '16:9';
 
         const rawCodec = String(exp?.video_codec ?? raw.video_codec ?? prev.video_codec);
-        const video_codec: 'libx265' | 'libx264' = rawCodec.includes('264')
-          ? 'libx264'
-          : 'libx265';
+        const video_codec: 'libx265' | 'libx264' = rawCodec.includes('265')
+          ? 'libx265'
+          : 'libx264';
 
         const rawFps = Number(exp?.fps ?? raw.fps ?? prev.fps);
         const fps: 24 | 30 | 60 = rawFps === 30 || rawFps === 60 ? rawFps : 24;
@@ -1322,13 +1473,64 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
 
     setImportedScenarioName(fileNameLabel);
+    if (emitToApp) {
+      onImportFullManifest?.(raw, fileNameLabel);
+    }
     onNotify(
-      `JSON-сценарий «${fileNameLabel}» успешно загружен (${
+      `JSON-манифест «${fileNameLabel}» загружен (${
         rawScenesArray ? `${rawScenesArray.length} сцен` : 'конфиг'
-      })!`,
+      }) — настроены Монтаж, Луп, VerbaFlow, SEO и Превью!`,
       'success'
     );
   };
+
+  // Синхронизация импорта манифеста v2.1 из Tab 2 / App.tsx без повторной эмиссии вверх
+  useEffect(() => {
+    if (!externalV21Manifest) return;
+    applyNarrativeScenarioJson(externalV21Manifest.raw, externalV21Manifest.fileName, false);
+    onConsumeExternalV21Manifest?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalV21Manifest?.nonce]);
+
+  // Синхронизация редактирования мультиязычных субтитров сцены из VerbaFlow (Tab 3)
+  useEffect(() => {
+    if (!externalSceneSubtitleEdit) return;
+    const { sceneIndex, lang, text } = externalSceneSubtitleEdit;
+    setNarrativeScenes(prev =>
+      prev.map((sc, idx) =>
+        idx === sceneIndex
+          ? {
+              ...sc,
+              subtitles: {
+                ...(sc.subtitles || {}),
+                [lang]: text
+              }
+            }
+          : sc
+      )
+    );
+    onConsumeExternalSceneSubtitleEdit?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSceneSubtitleEdit?.nonce]);
+
+  // Уведомление App.tsx об актуальных спецификациях рендера для RELEASE_CARD.md (Tab 4)
+  useEffect(() => {
+    if (!onV21LocksChange) return;
+    const resLabel =
+      exportSettings.resolution === '4k'
+        ? '3840x2160'
+        : exportSettings.resolution === '1080p'
+        ? '1920x1080'
+        : '1280x720';
+    const profileLabel = exportSettings.profile === 'main' ? 'Main' : 'High';
+    const pixFmtLabel = exportSettings.pix_fmt || 'yuv420p';
+    const cfrLabel = exportSettings.cfr !== false ? 'CFR' : 'VFR';
+    const loudnormLabel = v21Locks.youtubeLoudnorm
+      ? `${v21Locks.integratedLufs.toFixed(1)} LUFS / ${v21Locks.truePeakDbtp.toFixed(1)} dBTP`
+      : 'Bypassed';
+    const summary = `${exportSettings.video_codec} / ${profileLabel} / CRF ${exportSettings.crf} / ${pixFmtLabel} / ${resLabel} / ${exportSettings.fps}fps ${cfrLabel} / ${loudnormLabel}`;
+    onV21LocksChange(v21Locks, summary);
+  }, [v21Locks, exportSettings, onV21LocksChange]);
 
   const handleImportScenarioFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1836,6 +2038,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const narrativeManifest: NarrativeMontageManifest = useMemo(
     () => ({
       schema_version: '3.0',
+      manifest_version: '2.1',
       project_type: 'narrative_scenes_montage',
       project_name: projectName.trim() || 'Narrative Movie 4K',
       manifest_name: importedScenarioName || projectName.trim() || 'Narrative Movie 4K',
@@ -1862,12 +2065,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       },
       export_settings: {
         ...exportSettings,
+        profile: exportSettings.profile || 'high',
+        pix_fmt: exportSettings.pix_fmt || 'yuv420p',
+        cfr: exportSettings.cfr ?? true,
         preset: exportSettings.draft_mode
           ? 'ultrafast'
           : exportSettings.video_codec === 'libx264'
           ? 'veryfast'
           : 'medium',
         subtitles: subtitlesConfigObject
+      },
+      anti_desync_locks: {
+        hard_frame_lock: v21Locks.hardFrameLock,
+        apad_atrim_padding: v21Locks.apadAtrimLock,
+        never_stretch_voiceover: v21Locks.hardFrameLock,
+        dynamic_xfade_transitions: v21Locks.dynamicXfadeTransitions,
+        acrossfade_offset_compensation: v21Locks.acrossfadeOffsetSync,
+        auto_mute_flagged_video_clips: v21Locks.autoMuteFlaggedClips,
+        loudnorm: {
+          enabled: v21Locks.youtubeLoudnorm,
+          integrated_lufs: v21Locks.integratedLufs,
+          true_peak_dbtp: v21Locks.truePeakDbtp
+        }
       },
       subtitles: subtitlesConfigObject,
       subtitles_burn_in: {
@@ -1922,6 +2141,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
         transition: sc.transition,
         text_overlay: sc.text_overlay,
+        ...(sc.video_ambient_mute ? { video_ambient_mute: true } : {}),
+        ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {}),
+        ...(sc.subtitles ? { subtitles: sc.subtitles } : {}),
         ...(sc.needs_revision ? { needs_revision: true } : {}),
         ...(sc.revision_note && sc.revision_note.trim()
           ? { revision_note: sc.revision_note.trim() }
@@ -1943,6 +2165,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       masterAudio,
       masterAudioDurationSec,
       exportSettings,
+      v21Locks,
       subtitlesConfigObject,
       burnInSrtEnabled,
       uploadSrtToDriveEnabled,
@@ -3027,10 +3250,94 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 }
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none"
               >
-                <option value={24}>24 fps (Cinema)</option>
+                <option value={24}>24 fps (Cinema CFR)</option>
                 <option value={30}>30 fps</option>
                 <option value={60}>60 fps</option>
               </select>
+            </div>
+
+            {/* Авто-блокировки анти-рассинхрона и FFmpeg xfade v2.1 */}
+            <div className="bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-cyan-300">
+                  v2.1 Pipeline Locks • Anti-Desync &amp; FFmpeg
+                </span>
+                <span className="text-[10px] font-mono text-white/55">
+                  {exportSettings.video_codec} • {(exportSettings.profile || 'high').toUpperCase()} • CRF {exportSettings.crf} • {exportSettings.pix_fmt || 'yuv420p'} • {exportSettings.fps}fps CFR
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px]">
+                <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={v21Locks.hardFrameLock && v21Locks.apadAtrimLock}
+                    onChange={e =>
+                      setV21Locks(prev => ({
+                        ...prev,
+                        hardFrameLock: e.target.checked,
+                        apadAtrimLock: e.target.checked
+                      }))
+                    }
+                    className="accent-cyan-400 w-3.5 h-3.5 shrink-0"
+                  />
+                  <span className="text-slate-200 leading-tight">
+                    Strict Anti-Desync Frame &amp; Audio Lock (<code className="text-cyan-300">hard_frame_lock + apad/atrim</code>)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={v21Locks.dynamicXfadeTransitions && v21Locks.acrossfadeOffsetSync}
+                    onChange={e =>
+                      setV21Locks(prev => ({
+                        ...prev,
+                        dynamicXfadeTransitions: e.target.checked,
+                        acrossfadeOffsetSync: e.target.checked
+                      }))
+                    }
+                    className="accent-indigo-400 w-3.5 h-3.5 shrink-0"
+                  />
+                  <span className="text-slate-200 leading-tight">
+                    Dynamic Per-Scene <code className="text-indigo-300">xfade</code> + Audio <code className="text-indigo-300">acrossfade</code>
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={v21Locks.autoMuteFlaggedClips}
+                    onChange={e =>
+                      setV21Locks(prev => ({
+                        ...prev,
+                        autoMuteFlaggedClips: e.target.checked
+                      }))
+                    }
+                    className="accent-rose-400 w-3.5 h-3.5 shrink-0"
+                  />
+                  <span className="text-slate-200 leading-tight">
+                    Auto-Mute Flagged Clips (<code className="text-rose-300">video_ambient_mute</code> / SFX -6.0 dB)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={v21Locks.youtubeLoudnorm}
+                    onChange={e =>
+                      setV21Locks(prev => ({
+                        ...prev,
+                        youtubeLoudnorm: e.target.checked
+                      }))
+                    }
+                    className="accent-emerald-400 w-3.5 h-3.5 shrink-0"
+                  />
+                  <span className="text-slate-200 leading-tight">
+                    YouTube Loudnorm (<code className="text-emerald-300">{v21Locks.integratedLufs.toFixed(1)} LUFS • {v21Locks.truePeakDbtp.toFixed(1)} dBTP</code>)
+                  </span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -3739,6 +4046,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                         rowKey={rowKey}
                         sc={sc}
                         idx={idx}
+                        fps={exportSettings.fps}
                         canDrag={true}
                         updateScene={updateScene}
                         removeScene={removeScene}
@@ -3761,6 +4069,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                         rowKey={rowKey}
                         sc={sc}
                         idx={idx}
+                        fps={exportSettings.fps}
                         canDrag={false}
                         updateScene={updateScene}
                         removeScene={removeScene}

@@ -83,6 +83,10 @@ import {
   toEnglishChapterTitle,
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
+import {
+  V21SubtitleLang,
+  parseV21ManifestObject
+} from './utils/manifestV21';
 
 type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb' | 'editor';
 type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
@@ -178,6 +182,7 @@ export interface AudioMasteringConfig {
 
 interface LoopBuildManifest {
   version: string;
+  enabled?: boolean;
   project_name: string;
   spec_profile: string;
   hours: number;
@@ -932,6 +937,41 @@ export default function App() {
 
   // Loop studio state (Universal dynamic manifest state)
   const [loopProjectName, setLoopProjectName] = useState<string>('HistoViva Documentary 4K');
+  const [ambientLoopEnabled, setAmbientLoopEnabled] = useState<boolean>(true);
+  const [externalV21Manifest, setExternalV21Manifest] = useState<{
+    raw: Record<string, unknown>;
+    fileName: string;
+    nonce: number;
+  } | null>(null);
+  const [externalSceneSubtitleEdit, setExternalSceneSubtitleEdit] = useState<{
+    sceneIndex: number;
+    lang: string;
+    text: string;
+    nonce: number;
+  } | null>(null);
+  const [strictSceneDurationLock, setStrictSceneDurationLock] = useState<boolean>(true);
+  const [sidecarBurnInVideo, setSidecarBurnInVideo] = useState<boolean>(false);
+  const [exportSeparateSrtFiles, setExportSeparateSrtFiles] = useState<boolean>(true);
+  const [selectedSubtitleLanguages, setSelectedSubtitleLanguages] = useState<V21SubtitleLang[]>([
+    'EN',
+    'RU'
+  ]);
+  const [renderSpecsSummary, setRenderSpecsSummary] = useState<string>(
+    'libx264 / High / CRF 18 / yuv420p / 3840x2160 / 24fps CFR / -14.0 LUFS / -1.0 dBTP'
+  );
+  const [exportOutputChaptersEnabled, setExportOutputChaptersEnabled] = useState<boolean>(true);
+  const [exportReleaseCardMdEnabled, setExportReleaseCardMdEnabled] = useState<boolean>(true);
+  const [manifestThumbnailSlots, setManifestThumbnailSlots] = useState<{
+    A: string;
+    B: string;
+    C: string;
+  }>({
+    A: 'thumbnail_4k_3840x2160_A.jpg',
+    B: 'thumbnail_4k_3840x2160_B.jpg',
+    C: 'thumbnail_4k_3840x2160_C.jpg'
+  });
+  const [endScreenSafeZone, setEndScreenSafeZone] = useState<string>('05:14-05:24');
+  const [manifestDurationBadge, setManifestDurationBadge] = useState<string>('');
   const [youtubeSeoState, setYoutubeSeoState] = useState<YoutubeSeoState>(() =>
     loadStoredYoutubeSeoState()
   );
@@ -2883,6 +2923,7 @@ export default function App() {
   // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (без хардкода)
   const currentManifest: LoopBuildManifest = {
     version: '4.0-universal',
+    enabled: ambientLoopEnabled,
     project_name: loopProjectName.trim() || 'Ambient Loop 4K',
     spec_profile:
       importedManifestName ||
@@ -3197,8 +3238,62 @@ export default function App() {
     };
   };
 
+  // Единый синхронизатор v2.1 JSON-манифеста на все 5 вкладок студии (Монтаж, Луп, VerbaFlow, SEO, Превью)
+  const applyV21CrossTabSettings = (
+    raw: Record<string, unknown>,
+    sourceLabel: string,
+    options?: { syncCombine?: boolean }
+  ) => {
+    const parsed = parseV21ManifestObject(raw);
+    if (!parsed.isV21Manifest) return;
+
+    if (parsed.projectName) {
+      setLoopProjectName(parsed.projectName);
+    }
+    // Таб 2: отключаем Ambient Loop при загрузке однопроходного повествовательного манифеста или tab_2_ambient_loop.enabled === false
+    setAmbientLoopEnabled(parsed.ambientLoopEnabled);
+
+    // Таб 3: VerbaFlow — строгий лок длительности, отключение hardsub, мульти-язычный SRT
+    setStrictSceneDurationLock(parsed.tab3Verbaflow.strictSceneDurationLock);
+    setSidecarBurnInVideo(parsed.tab3Verbaflow.burnInVideo);
+    setExportSeparateSrtFiles(parsed.tab3Verbaflow.exportSeparateSrtFiles);
+    setSelectedSubtitleLanguages(parsed.tab3Verbaflow.subtitleLanguages);
+
+    // Таб 4: YouTube SEO — редактируемый video_title из манифеста, chapters_youtube, чекбоксы RELEASE_CARD.md / output_chapters.txt
+    if (parsed.videoTitle) {
+      setYoutubeSeoState(prev => ({
+        ...prev,
+        selectedTitleId: 'A',
+        titles: prev.titles.map((item, idx) =>
+          idx === 0 ? { ...item, title: parsed.videoTitle.slice(0, 100) } : item
+        )
+      }));
+    }
+    if (parsed.tab4Seo.chaptersYoutubeText) {
+      setVerbaFlowChaptersTxt(parsed.tab4Seo.chaptersYoutubeText);
+    }
+    setExportOutputChaptersEnabled(parsed.tab4Seo.exportOutputChaptersTxt);
+    setExportReleaseCardMdEnabled(parsed.tab4Seo.exportReleaseCardMd);
+
+    // Таб 5: 4K Превью & Арт-цех — слоты A/B/C и направляющая End Screen safe-zone
+    setManifestThumbnailSlots(parsed.tab5Art.thumbnailSlots);
+    setEndScreenSafeZone(parsed.tab5Art.endScreenSafeZone);
+    if (parsed.totalDurationFormatted) {
+      setManifestDurationBadge(parsed.totalDurationFormatted);
+    }
+
+    if (options?.syncCombine) {
+      setExternalV21Manifest({
+        raw,
+        fileName: sourceLabel,
+        nonce: Date.now()
+      });
+    }
+  };
+
   // Прямой маппинг всех полей любого валидного JSON-манифеста 1 в 1 в состояние приложения
   const applyManifestObject = (raw: Record<string, unknown>, sourceLabel: string) => {
+    applyV21CrossTabSettings(raw, sourceLabel, { syncCombine: true });
     const timelineObj =
       raw.timeline && typeof raw.timeline === 'object'
         ? (raw.timeline as Record<string, unknown>)
@@ -3357,7 +3452,7 @@ export default function App() {
             : prev.integrated_lufs,
         true_peak_dbtp:
           typeof am.true_peak_dbtp === 'number'
-            ? Math.min(-3, am.true_peak_dbtp)
+            ? Math.min(-1, am.true_peak_dbtp)
             : prev.true_peak_dbtp,
         lra: typeof am.lra === 'number' ? am.lra : prev.lra,
         e3_soft_attack_compressor:
@@ -4212,6 +4307,14 @@ export default function App() {
             externalMasterAudioFile={externalMasterAudioFile}
             onConsumeExternalMasterAudio={() => setExternalMasterAudioFile(null)}
             onScenesChange={setActiveNarrativeScenes}
+            externalV21Manifest={externalV21Manifest}
+            onConsumeExternalV21Manifest={() => setExternalV21Manifest(null)}
+            onImportFullManifest={(raw, fileName) =>
+              applyV21CrossTabSettings(raw, fileName, { syncCombine: false })
+            }
+            onV21LocksChange={(_locks, summary) => setRenderSpecsSummary(summary)}
+            externalSceneSubtitleEdit={externalSceneSubtitleEdit}
+            onConsumeExternalSceneSubtitleEdit={() => setExternalSceneSubtitleEdit(null)}
             youtubeSeo={exportYoutubeSeoBlock}
             telegramBotToken={telegramBotToken}
             telegramChatId={telegramChatId}
@@ -4236,6 +4339,40 @@ export default function App() {
           className={`studio-view space-y-6 ${activeTab === 'loop' ? '' : 'hidden'}`}
         >
           <div className="aether-surface rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
+            {/* Баннер состояния Ambient Loop (enabled: false при однопроходном документальном рендере v2.1) */}
+            <div
+              className={`rounded-xl px-4 py-3 border flex flex-wrap items-center justify-between gap-3 transition ${
+                ambientLoopEnabled
+                  ? 'bg-emerald-950/20 border-emerald-500/35 text-emerald-200'
+                  : 'bg-amber-950/25 border-amber-400/50 text-amber-200'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 text-xs">
+                <Repeat className={`w-4 h-4 shrink-0 ${ambientLoopEnabled ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <div>
+                  <span className="font-bold">
+                    {ambientLoopEnabled
+                      ? 'Ambient Loop Active (enabled: true)'
+                      : 'Ambient Loop Disabled (enabled: false — Single-Pass Documentary Render)'}
+                  </span>
+                  <p className="text-[11px] text-white/60">
+                    {ambientLoopEnabled
+                      ? 'Многочасовое зацикливание активно для сборки длинных 3–10 ч эмбиент-выпусков.'
+                      : 'Автоматически отключено при импорте документального v2.1 манифеста с timeline[], чтобы не зацикливать однопроходный монтаж.'}
+                  </p>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-mono font-bold cursor-pointer select-none bg-[#0b0f19]/80 border border-white/[0.1] rounded-lg px-3 py-1.5">
+                <input
+                  type="checkbox"
+                  checked={ambientLoopEnabled}
+                  onChange={e => setAmbientLoopEnabled(e.target.checked)}
+                  className="accent-amber-400 w-4 h-4"
+                />
+                <span>enabled: {ambientLoopEnabled ? 'true' : 'false'}</span>
+              </label>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
               <div className="space-y-2 flex-1 min-w-0 sm:min-w-[260px]">
                 <h2 className="text-base sm:text-lg font-bold text-[#f8fafc] flex items-center gap-2">
@@ -6466,6 +6603,9 @@ export default function App() {
             onConsumeExternalFontStyle={() => setExternalThumbFontStyle(null)}
             externalCoverAImageUrl={editorEditedCoverAUrl}
             onConsumeExternalCoverAImage={() => setEditorEditedCoverAUrl(null)}
+            manifestThumbnailSlots={manifestThumbnailSlots}
+            endScreenSafeZone={endScreenSafeZone}
+            manifestDurationBadge={manifestDurationBadge}
             onSendToArtEditor={(imageDataUrl, slotLabel) => {
               setArtEditorIncomingAsset({
                 dataUrl: imageDataUrl,
@@ -6506,6 +6646,24 @@ export default function App() {
           <VerbaFlowTextWorkbench
             sourceText={sourceText}
             onSourceTextChange={setSourceText}
+            projectName={loopProjectName}
+            narrativeScenes={activeNarrativeScenes}
+            onUpdateSceneSubtitle={(sceneIndex, lang, text) =>
+              setExternalSceneSubtitleEdit({
+                sceneIndex,
+                lang,
+                text,
+                nonce: Date.now()
+              })
+            }
+            strictSceneDurationLock={strictSceneDurationLock}
+            onStrictSceneDurationLockChange={setStrictSceneDurationLock}
+            sidecarBurnInVideo={sidecarBurnInVideo}
+            onSidecarBurnInVideoChange={setSidecarBurnInVideo}
+            exportSeparateSrtFiles={exportSeparateSrtFiles}
+            onExportSeparateSrtFilesChange={setExportSeparateSrtFiles}
+            selectedSubtitleLanguages={selectedSubtitleLanguages}
+            onSelectedSubtitleLanguagesChange={setSelectedSubtitleLanguages}
             onSendToVoiceStudio={ttsReadyText => {
               setTransferredScript(ttsReadyText);
               showToast(
@@ -6567,6 +6725,13 @@ export default function App() {
             onSeoStateChange={setYoutubeSeoState}
             shortsExportConfig={shortsExportConfig}
             onShortsExportChange={setShortsExportConfig}
+            renderSpecsSummary={renderSpecsSummary}
+            activeSubtitleLanguages={selectedSubtitleLanguages}
+            endScreenSafeZone={endScreenSafeZone}
+            exportOutputChaptersEnabled={exportOutputChaptersEnabled}
+            onExportOutputChaptersEnabledChange={setExportOutputChaptersEnabled}
+            exportReleaseCardMdEnabled={exportReleaseCardMdEnabled}
+            onExportReleaseCardMdEnabledChange={setExportReleaseCardMdEnabled}
             onApplyTitleToThumbnail={selectedTitle => {
               const words = selectedTitle
                 .replace(/[^a-zA-Z0-9\s'-]/g, ' ')

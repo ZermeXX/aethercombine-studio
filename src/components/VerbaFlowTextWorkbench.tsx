@@ -57,6 +57,13 @@ import {
   AI_CLICHE_RULES,
   WATER_BALLAST_RULES
 } from '../utils/verbaFlowLinguistics';
+import {
+  V21_SUBTITLE_LANGUAGES,
+  V21_SUBTITLE_LANG_LABELS,
+  V21SubtitleLang,
+  buildSidecarSrtForLanguage,
+  sanitizeSlugForFilename
+} from '../utils/manifestV21';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -65,6 +72,17 @@ type SubmoduleId = 'rewrite' | 'hooks' | 'voiceprep' | 'scenes' | 'xray';
 interface VerbaFlowTextWorkbenchProps {
   sourceText: string;
   onSourceTextChange: (text: string) => void;
+  projectName?: string;
+  narrativeScenes?: NarrativeSceneItem[];
+  onUpdateSceneSubtitle?: (sceneIdx: number, lang: V21SubtitleLang, text: string) => void;
+  strictSceneDurationLock?: boolean;
+  onStrictSceneDurationLockChange?: (locked: boolean) => void;
+  sidecarBurnInVideo?: boolean;
+  onSidecarBurnInVideoChange?: (burnIn: boolean) => void;
+  exportSeparateSrtFiles?: boolean;
+  onExportSeparateSrtFilesChange?: (separate: boolean) => void;
+  selectedSubtitleLanguages?: V21SubtitleLang[];
+  onSelectedSubtitleLanguagesChange?: (langs: V21SubtitleLang[]) => void;
   onSendToVoiceStudio?: (voiceReadyText: string) => void;
   onSendScenesToTimeline: (scenes: NarrativeSceneItem[], fullScriptText: string) => void;
   onSendToYoutubeSeo: (fullScriptText: string, scenes: NarrativeSceneItem[]) => void;
@@ -139,6 +157,17 @@ const DEFAULT_DEMO_SAMPLE_EN =
 export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   sourceText,
   onSourceTextChange,
+  projectName = 'Aether_Production',
+  narrativeScenes = [],
+  onUpdateSceneSubtitle,
+  strictSceneDurationLock = true,
+  onStrictSceneDurationLockChange,
+  sidecarBurnInVideo = false,
+  onSidecarBurnInVideoChange,
+  exportSeparateSrtFiles = true,
+  onExportSeparateSrtFilesChange,
+  selectedSubtitleLanguages,
+  onSelectedSubtitleLanguagesChange,
   onSendToVoiceStudio,
   onSendScenesToTimeline,
   onSendToYoutubeSeo,
@@ -147,6 +176,66 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
 }) => {
   const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>('rewrite');
   const [outputLanguage, setOutputLanguage] = useState<VerbaLanguage>('ru');
+  const [localSubtitleLangs, setLocalSubtitleLangs] = useState<V21SubtitleLang[]>(['EN', 'RU']);
+  const [previewSrtLang, setPreviewSrtLang] = useState<V21SubtitleLang>('EN');
+  const [localStrictLock, setLocalStrictLock] = useState<boolean>(strictSceneDurationLock);
+  const [localBurnInVideo, setLocalBurnInVideo] = useState<boolean>(sidecarBurnInVideo);
+  const [localExportSeparate, setLocalExportSeparate] = useState<boolean>(exportSeparateSrtFiles);
+
+  const activeSubLangs = selectedSubtitleLanguages ?? localSubtitleLangs;
+  const activeStrictLock = onStrictSceneDurationLockChange ? strictSceneDurationLock : localStrictLock;
+  const activeBurnIn = onSidecarBurnInVideoChange ? sidecarBurnInVideo : localBurnInVideo;
+  const activeExportSeparate = onExportSeparateSrtFilesChange ? exportSeparateSrtFiles : localExportSeparate;
+
+  const toggleSubLang = (lang: V21SubtitleLang) => {
+    const exists = activeSubLangs.includes(lang);
+    const next = exists
+      ? activeSubLangs.length > 1
+        ? activeSubLangs.filter(l => l !== lang)
+        : activeSubLangs
+      : [...activeSubLangs, lang];
+    if (onSelectedSubtitleLanguagesChange) {
+      onSelectedSubtitleLanguagesChange(next);
+    } else {
+      setLocalSubtitleLangs(next);
+    }
+    if (!exists) {
+      setPreviewSrtLang(lang);
+    }
+  };
+
+  const handleDownloadSingleSidecarSrt = (lang: V21SubtitleLang) => {
+    const slug = sanitizeSlugForFilename(projectName);
+    const content = buildSidecarSrtForLanguage(narrativeScenes, lang);
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}_${lang}.srt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify(`📥 Субтитры ${slug}_${lang}.srt скачаны (${narrativeScenes.length} сцен)!`, 'success');
+  };
+
+  const handleDownloadAllSidecarSrt = () => {
+    const slug = sanitizeSlugForFilename(projectName);
+    activeSubLangs.forEach((lang, idx) => {
+      window.setTimeout(() => {
+        const content = buildSidecarSrtForLanguage(narrativeScenes, lang);
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${slug}_${lang}.srt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 140);
+    });
+    onNotify(
+      `📦 Экспортировано ${activeSubLangs.length} отдельных .SRT файлов (${activeSubLangs.join(', ')})!`,
+      'success'
+    );
+  };
 
   const [workingText, setWorkingText] = useState<string>(() => sourceText);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -2106,6 +2195,168 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             )}
           </AnimatePresence>
         </div>
+      </div>
+
+      {/* v2.1 MULTI-LANGUAGE SIDECAR SRT GENERATOR & STRICT SCENE DURATION LOCK */}
+      <div className="rounded-2xl bg-[#0b0f19]/95 border border-white/[0.08] backdrop-blur-md p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
+          <div>
+            <h3 className="text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>Multi-Language Sidecar SRT Generator &amp; Strict Scene Duration Lock (v2.1)</span>
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Раздельный экспорт субтитров <code className="text-cyan-300">&lt;project_name&gt;_&lt;LANG&gt;.srt</code> из <code className="text-amber-300">timeline[].subtitles</code> (без вшивания в кадр)
+            </p>
+          </div>
+          <span className="text-[10.5px] font-mono bg-cyan-500/15 border border-cyan-400/35 text-cyan-200 px-2.5 py-1 rounded-lg">
+            {activeSubLangs.length} языков • {narrativeScenes.length} сцен
+          </span>
+        </div>
+
+        {/* 2 чекбокса v2.1 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <label className="flex items-center gap-2.5 bg-[#111827]/90 border border-white/[0.08] hover:border-cyan-400/40 rounded-xl px-3.5 py-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={activeStrictLock}
+              onChange={e => {
+                if (onStrictSceneDurationLockChange) onStrictSceneDurationLockChange(e.target.checked);
+                else setLocalStrictLock(e.target.checked);
+              }}
+              className="accent-cyan-400 w-4 h-4 shrink-0"
+            />
+            <div>
+              <span className="font-bold text-cyan-200 block">
+                Strict Scene Duration Lock (prevent voice speed stretching)
+              </span>
+              <span className="text-[10.5px] text-slate-400">
+                Фиксирует длину дикторских фраз под хронометраж сцен (без atempo / растягивания голоса)
+              </span>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2.5 bg-[#111827]/90 border border-white/[0.08] hover:border-emerald-400/40 rounded-xl px-3.5 py-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={activeExportSeparate && !activeBurnIn}
+              onChange={e => {
+                const checked = e.target.checked;
+                if (onExportSeparateSrtFilesChange) onExportSeparateSrtFilesChange(checked);
+                else setLocalExportSeparate(checked);
+                if (onSidecarBurnInVideoChange) onSidecarBurnInVideoChange(!checked ? true : false);
+                else setLocalBurnInVideo(!checked);
+              }}
+              className="accent-emerald-400 w-4 h-4 shrink-0"
+            />
+            <div>
+              <span className="font-bold text-emerald-300 block">
+                Multi-Language Sidecar SRT Generator (burn_in_video: false, export_separate_srt_files: true)
+              </span>
+              <span className="text-[10.5px] text-slate-400">
+                Отдельные дорожки для YouTube CC без хардсаба поверх 4K-кадра
+              </span>
+            </div>
+          </label>
+        </div>
+
+        {/* Мульти-селектор языков (EN, RU, FR, DE, ES, PT, IT, JA) */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              Активные языки субтитров (кликните для включения/исключения):
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleDownloadSingleSidecarSrt(previewSrtLang)}
+                className="min-h-[34px] px-3 py-1 rounded-lg bg-[#111827] hover:bg-slate-800 border border-white/[0.12] text-cyan-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Скачать {sanitizeSlugForFilename(projectName)}_{previewSrtLang}.srt</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadAllSidecarSrt}
+                className="min-h-[34px] px-3.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 hover:brightness-110 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Экспортировать все ({activeSubLangs.length} .SRT)</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {V21_SUBTITLE_LANGUAGES.map(lang => {
+              const isSelected = activeSubLangs.includes(lang);
+              const isInspecting = previewSrtLang === lang;
+              return (
+                <div key={lang} className="inline-flex items-center rounded-xl overflow-hidden border border-white/[0.08] bg-[#111827]">
+                  <button
+                    type="button"
+                    onClick={() => toggleSubLang(lang)}
+                    className={`px-3 py-1.5 text-xs font-mono font-bold transition cursor-pointer ${
+                      isSelected
+                        ? 'bg-emerald-500/20 text-emerald-300 border-r border-emerald-400/30'
+                        : 'text-slate-400 hover:text-slate-200 border-r border-white/[0.06]'
+                    }`}
+                    title={`Включить/отключить ${V21_SUBTITLE_LANG_LABELS[lang]}`}
+                  >
+                    {isSelected ? '✓ ' : ''}{lang}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSrtLang(lang)}
+                    className={`px-2 py-1.5 text-[10px] font-mono cursor-pointer transition ${
+                      isInspecting
+                        ? 'bg-cyan-500/25 text-cyan-200 font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title={`Просмотреть и редактировать реплики ${lang}`}
+                  >
+                    {V21_SUBTITLE_LANG_LABELS[lang]}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Предпросмотр и редактирование реплик из timeline[].subtitles */}
+        {narrativeScenes.length > 0 && (
+          <div className="rounded-xl bg-[#080c14]/90 border border-white/[0.08] p-3 space-y-2 max-h-60 overflow-y-auto custom-scroll">
+            <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pb-1 border-b border-white/[0.06]">
+              <span>
+                Редактор реплик • Язык: <strong className="text-cyan-300">{previewSrtLang}</strong> (из <code className="text-amber-300">timeline[].subtitles.{previewSrtLang}</code>)
+              </span>
+              <span>Первые {Math.min(narrativeScenes.length, 40)} сцен</span>
+            </div>
+            {narrativeScenes.slice(0, 40).map((sc, sIdx) => {
+              const currentLine =
+                sc.subtitles?.[previewSrtLang] ||
+                sc.subtitles?.[previewSrtLang.toLowerCase()] ||
+                (previewSrtLang === 'EN' ? sc.text_overlay : '') ||
+                '';
+              return (
+                <div
+                  key={`${sc.scene_id}-${sIdx}`}
+                  className="grid grid-cols-12 gap-2 items-center text-xs"
+                >
+                  <span className="col-span-3 sm:col-span-2 font-mono text-[10.5px] text-amber-300 truncate">
+                    #{sIdx + 1} {sc.scene_id} ({sc.duration}s)
+                  </span>
+                  <input
+                    type="text"
+                    value={currentLine}
+                    onChange={e => onUpdateSceneSubtitle?.(sIdx, previewSrtLang, e.target.value)}
+                    placeholder={`Текст субтитров [${previewSrtLang}] для ${sc.scene_id}...`}
+                    className="col-span-9 sm:col-span-10 bg-[#111827] border border-white/[0.08] focus:border-cyan-400 rounded-lg px-2.5 py-1 text-xs text-slate-100 outline-none"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

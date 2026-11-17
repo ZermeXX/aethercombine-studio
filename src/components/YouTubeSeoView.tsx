@@ -37,6 +37,10 @@ import {
   toEnglishChapterTitle,
   toEnglishSceneTitle
 } from '../utils/englishExport';
+import {
+  V21SubtitleLang,
+  buildEnglishReleaseCardMarkdown
+} from '../utils/manifestV21';
 
 export type { SeoToneStyle, SeoTitleVariant };
 
@@ -51,6 +55,13 @@ interface YouTubeSeoViewProps {
   onSeoStateChange?: React.Dispatch<React.SetStateAction<YoutubeSeoState>>;
   shortsExportConfig?: ShortsExportManifestBlock;
   onShortsExportChange?: (cfg: ShortsExportManifestBlock) => void;
+  renderSpecsSummary?: string;
+  activeSubtitleLanguages?: V21SubtitleLang[];
+  endScreenSafeZone?: string;
+  exportOutputChaptersEnabled?: boolean;
+  onExportOutputChaptersEnabledChange?: (val: boolean) => void;
+  exportReleaseCardMdEnabled?: boolean;
+  onExportReleaseCardMdEnabledChange?: (val: boolean) => void;
   onApplyTitleToThumbnail?: (title: string) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
@@ -85,12 +96,28 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   onSeoStateChange,
   shortsExportConfig,
   onShortsExportChange,
+  renderSpecsSummary = 'libx264 / High / CRF 18 / yuv420p / 3840x2160 / 24fps CFR / -14.0 LUFS / -1.0 dBTP',
+  activeSubtitleLanguages = ['EN', 'RU'],
+  endScreenSafeZone = '05:14-05:24',
+  exportOutputChaptersEnabled = true,
+  onExportOutputChaptersEnabledChange,
+  exportReleaseCardMdEnabled = true,
+  onExportReleaseCardMdEnabledChange,
   onApplyTitleToThumbnail,
   onNotify
 }) => {
   const [internalSeoState, setInternalSeoState] = useState<YoutubeSeoState>(() =>
     createDefaultYoutubeSeoState('Dark Mystery')
   );
+  const [localExportChapters, setLocalExportChapters] = useState<boolean>(exportOutputChaptersEnabled);
+  const [localExportReleaseMd, setLocalExportReleaseMd] = useState<boolean>(exportReleaseCardMdEnabled);
+  const isChaptersExportChecked = onExportOutputChaptersEnabledChange
+    ? exportOutputChaptersEnabled
+    : localExportChapters;
+  const isReleaseCardMdChecked = onExportReleaseCardMdEnabledChange
+    ? exportReleaseCardMdEnabled
+    : localExportReleaseMd;
+
   const activeSeoState = seoState ?? internalSeoState;
   const updateSeoState: React.Dispatch<React.SetStateAction<YoutubeSeoState>> =
     onSeoStateChange ?? setInternalSeoState;
@@ -574,7 +601,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     }, 0);
   }, [narrativeScenes]);
 
-  // 4. Генерация и скачивание RELEASE_CARD.md (English Release Package)
+  // 4. Генерация и скачивание RELEASE_CARD.md (Strictly English-only Release Package)
   const handleDownloadReleaseCardMd = () => {
     const dominantCameraVectors = Array.from(
       new Set(narrativeScenes.map(s => s.camera_movement || 'zoom_in'))
@@ -585,57 +612,30 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         ? 'Ambient Sanctuary (4K Atmospheric Matte)'
         : 'Historical Storytelling (Oil Painting / Graphic Novel)');
 
-    const mdContent = [
-      `# 📦 YOUTUBE RELEASE CARD — ${(projectName || 'AETHER COMBINE 4K RELEASE').toUpperCase()}`,
-      ``,
-      `> **Target Market:** US / Global English Audience  `,
-      `> **Tone Profile:** \`${tone}\`  `,
-      `> **Total Scenes:** \`${narrativeScenes.length}\` (` +
-        `\`${formatSecToShortChapter(totalRhythmMapDurationSec)}\` exact Rhythm-Map duration)`,
-      ``,
-      `---`,
-      ``,
-      `## 1. PRIMARY RELEASE TITLE`,
-      `\`\`\`text`,
-      `${activeReleaseTitle.trim()}`,
-      `\`\`\``,
-      ``,
-      `## 2. A/B TEST TITLE VARIANTS (CTR OPTIMIZED • <= 60 CHARS)`,
-      ...titles.map(
-        t => `- **Variant ${t.id} (${t.category} — ${t.title.length}/60 chars):** \`${t.title}\``
-      ),
-      ``,
-      `## 3. FULL YOUTUBE SEO DESCRIPTION (US ENGLISH)`,
-      `\`\`\`text`,
-      `${description.trim()}`,
-      ``,
-      `CHAPTERS:`,
-      `${exactRhythmMapChaptersTxt}`,
-      `\`\`\``,
-      ``,
-      `## 4. YOUTUBE TAGS (${tagsListCount} TAGS • ${tagsCharCount}/500 CHARS)`,
-      `\`\`\`text`,
-      `${tagsString.trim()}`,
-      `\`\`\``,
-      ``,
-      `## 5. VISUAL STYLE & PACING SUMMARY (RHYTHM-MAP DNA)`,
-      `- **Visual Aesthetic:** ${dominantStyle}`,
-      `- **Camera Movement Vectors:** \`${dominantCameraVectors}\` (Anti-Repeat Enabled)`,
-      `- **Average Scene Pacing:** \`${
+    const mdContent = buildEnglishReleaseCardMarkdown({
+      projectName: projectName || 'AETHER COMBINE 4K RELEASE',
+      releaseTitle: activeReleaseTitle.trim(),
+      tone,
+      abTitles: titles.map(t => ({ id: t.id, category: t.category, title: t.title })),
+      description,
+      chaptersText: exactRhythmMapChaptersTxt,
+      tagsString,
+      tagsListCount,
+      tagsCharCount,
+      scenesCount: narrativeScenes.length,
+      durationFormatted: formatSecToShortChapter(totalRhythmMapDurationSec),
+      averageSceneSec:
         narrativeScenes.length > 0
           ? (totalRhythmMapDurationSec / narrativeScenes.length).toFixed(1)
-          : '5.0'
-      } sec/scene\``,
-      `- **9:16 Auto-Shorts Config:** \`${shortsEnabled ? 'ENABLED' : 'DISABLED'}\` (${extractedShortsSegments.length} viral segments extracted)`,
-      ``,
-      `## 6. PRE-UPLOAD PRODUCTION CHECKLIST`,
-      `- [x] Primary title verified under 60 characters for mobile & desktop feeds`,
-      `- [x] Chapter timestamps synchronized second-for-second with Rhythm-Map (\`00:00\` start verified)`,
-      `- [x] Voiceover numbers converted to natural English words & breathing pauses \`[pause 1.2s]\` applied`,
-      `- [x] 4K Thumbnail exported with high-contrast typography and zero badge clutter`,
-      `- [x] Softsub / Hardsub \`.SRT\` captions aligned with master audio track`,
-      ``
-    ].join('\n');
+          : '5.0',
+      dominantStyle,
+      cameraVectors: dominantCameraVectors,
+      shortsEnabled,
+      shortsSegmentsCount: extractedShortsSegments.length,
+      renderSpecsSummary,
+      activeSubtitleLanguages,
+      endScreenSafeZone
+    });
 
     const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -810,19 +810,19 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                       className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
                         isValidLen
                           ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                          : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                          : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                       }`}
                     >
-                      {len}/60 симв.
+                      {len}/100 симв. {len > 60 ? '(CTR >60)' : ''}
                     </span>
                   </div>
 
                   <input
                     type="text"
-                    maxLength={60}
+                    maxLength={100}
                     value={item.title}
                     onChange={e => {
-                      const val = e.target.value.slice(0, 60);
+                      const val = e.target.value.slice(0, 100);
                       setTitles(prev =>
                         prev.map((t, i) => (i === idx ? { ...t, title: val } : t))
                       );
@@ -1143,6 +1143,52 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <pre className="text-xs font-mono text-indigo-200 whitespace-pre-wrap max-h-32 overflow-y-auto custom-scroll leading-relaxed tabular-nums">
               {exactRhythmMapChaptersTxt}
             </pre>
+          </div>
+
+          {/* v2.1 Чекбоксы экспорта пакета релиза (output_chapters.txt + English-only RELEASE_CARD.md) */}
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <label className="flex items-center gap-2 bg-[#111827] border border-white/[0.08] rounded-xl px-3 py-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isChaptersExportChecked}
+                  onChange={e => {
+                    if (onExportOutputChaptersEnabledChange) {
+                      onExportOutputChaptersEnabledChange(e.target.checked);
+                    } else {
+                      setLocalExportChapters(e.target.checked);
+                    }
+                  }}
+                  className="accent-indigo-400 w-3.5 h-3.5 shrink-0"
+                />
+                <span className="text-indigo-200 font-semibold">
+                  Export <code className="text-amber-300">output_chapters.txt</code> from <code className="text-indigo-300">chapters_youtube</code>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 bg-[#111827] border border-white/[0.08] rounded-xl px-3 py-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isReleaseCardMdChecked}
+                  onChange={e => {
+                    if (onExportReleaseCardMdEnabledChange) {
+                      onExportReleaseCardMdEnabledChange(e.target.checked);
+                    } else {
+                      setLocalExportReleaseMd(e.target.checked);
+                    }
+                  }}
+                  className="accent-emerald-400 w-3.5 h-3.5 shrink-0"
+                />
+                <span className="text-emerald-200 font-semibold">
+                  Export English-only <code className="text-emerald-300">RELEASE_CARD.md</code> (specs + SRT + chapters)
+                </span>
+              </label>
+            </div>
+
+            <div className="bg-[#111827]/70 border border-white/[0.06] rounded-lg px-3 py-1.5 text-[10.5px] font-mono text-slate-400 flex flex-wrap items-center justify-between gap-2">
+              <span className="truncate">Specs: <strong className="text-slate-200">{renderSpecsSummary}</strong></span>
+              <span>SRT: <strong className="text-cyan-300">{activeSubtitleLanguages.join(', ')}</strong></span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
