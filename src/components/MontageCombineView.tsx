@@ -52,6 +52,7 @@ import {
   normalizeSceneSubtitlesMap,
   parseV21ManifestObject
 } from '../utils/manifestV21';
+import { buildCompactDispatchPayload } from '../utils/manifestDispatch';
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
 
@@ -382,7 +383,11 @@ interface MontageCombineViewProps {
   onOpenConfigModal: () => void;
   onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
   onCancelRenderRun: () => void;
-  onNotify: (message: string, type?: 'info' | 'error' | 'success') => void;
+  onNotify: (
+    message: string,
+    type?: 'info' | 'error' | 'success',
+    action?: { label: string; onClick: () => void }
+  ) => void;
   encodeManifestBase64: (manifestObj: unknown) => string;
   terminalStatus: TerminalRunnerState;
   terminalSeconds: number;
@@ -2703,8 +2708,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     );
   };
 
-  const handleExportScenarioJson = () => {
-    const manifestToExport = prepareValidatedManifestForOutput();
+  const downloadFullManifestJson = (manifestToExport: NarrativeMontageManifest) => {
     const jsonString = JSON.stringify(manifestToExport, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2715,6 +2719,140 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       : `scenes_manifest_${manifestToExport.total_scenes}scenes_${exportSettings.resolution}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportScenarioJson = () => {
+    const manifestToExport = prepareValidatedManifestForOutput();
+    downloadFullManifestJson(manifestToExport);
+  };
+
+  // Компактная облегчённая структура для GitHub workflow_dispatch (только timeline[], без дублей и справочных полей)
+  const buildCompactDispatchManifest = (fullManifest: NarrativeMontageManifest) => {
+    const resMap: Record<string, string> = {
+      '4k': '3840x2160',
+      '1080p': '1920x1080',
+      '720p': '1280x720'
+    };
+    const presetVal = exportSettings.draft_mode
+      ? 'ultrafast'
+      : exportSettings.video_codec === 'libx264'
+      ? 'veryfast'
+      : 'medium';
+
+    const compactTimeline = fullManifest.timeline.map((sc, idx) => {
+      const cleanedSubtitles: Record<string, string> = {};
+      if (sc.subtitles && typeof sc.subtitles === 'object') {
+        Object.entries(sc.subtitles).forEach(([lang, line]) => {
+          if (typeof line === 'string' && line.trim()) {
+            cleanedSubtitles[lang] = line.trim();
+          }
+        });
+      }
+
+      const compactAssets: Record<string, string> = {
+        video_file: sc.assets.video_file
+      };
+      if (sc.assets.voiceover_file) {
+        compactAssets.voiceover_file = sc.assets.voiceover_file;
+      }
+      if (sc.assets.image_reference) {
+        compactAssets.image_reference = sc.assets.image_reference;
+      }
+
+      const compactVideoProc: Record<string, unknown> = {
+        transition_in: sc.video_processing.transition_in,
+        camera_movement: sc.video_processing.camera_movement
+      };
+      if (sc.video_processing.transition_out) {
+        compactVideoProc.transition_out = sc.video_processing.transition_out;
+      }
+
+      const compactAudioProc: Record<string, unknown> = {
+        video_ambient_mute: sc.audio_processing.video_ambient_mute,
+        video_ambient_gain_db: sc.audio_processing.video_ambient_gain_db
+      };
+      if (sc.audio_processing.voiceover_gain_db !== undefined) {
+        compactAudioProc.voiceover_gain_db = sc.audio_processing.voiceover_gain_db;
+      }
+      if (sc.audio_processing.sfx) {
+        compactAudioProc.sfx = sc.audio_processing.sfx;
+      }
+      if (sc.audio_processing.sfx_gain_db !== undefined) {
+        compactAudioProc.sfx_gain_db = sc.audio_processing.sfx_gain_db;
+      }
+
+      return {
+        order: idx + 1,
+        scene_id: sc.scene_id,
+        chapter: sc.title,
+        duration_sec: sc.duration,
+        assets: compactAssets,
+        video_processing: compactVideoProc,
+        audio_processing: compactAudioProc,
+        subtitles: cleanedSubtitles
+      };
+    });
+
+    const compactExpSettings: Record<string, unknown> = {
+      resolution: exportSettings.resolution,
+      aspect_ratio: exportSettings.aspect_ratio,
+      video_codec: exportSettings.video_codec,
+      profile: exportSettings.profile || 'high',
+      pix_fmt: exportSettings.pix_fmt || 'yuv420p',
+      cfr: exportSettings.cfr ?? true,
+      preset: presetVal,
+      draft_mode: Boolean(exportSettings.draft_mode),
+      crf: exportSettings.crf,
+      fps: exportSettings.fps,
+      audio_bitrate_kbps: exportSettings.audio_bitrate_kbps
+    };
+
+    const compactSubtitles: Record<string, unknown> = {
+      enabled: subtitlesConfigObject.enabled,
+      burn_in: burnInSrtEnabled,
+      upload_srt: uploadSrtToDriveEnabled,
+      language: subtitlesConfigObject.language,
+      target_language: subtitleLanguage,
+      srt_filename: subtitlesConfigObject.srt_filename || 'subtitles.srt',
+      ...(subtitlesConfigObject.enabled && srtTextContent.trim()
+        ? { srt_content: srtTextContent.trim() }
+        : {})
+    };
+
+    return {
+      manifest_version: '2.2-FINAL',
+      project_type: 'narrative_scenes_montage',
+      project_name: fullManifest.project_name,
+      gdrive_folder_id: fullManifest.gdrive_folder_id,
+      rhythm_profile: fullManifest.rhythm_profile,
+      overlays: fullManifest.overlays,
+      total_scenes: compactTimeline.length,
+      total_duration_sec: fullManifest.total_duration_sec,
+      render_settings: {
+        resolution: resMap[exportSettings.resolution] || '3840x2160',
+        video_codec: exportSettings.video_codec,
+        fps: exportSettings.fps,
+        crf: exportSettings.crf,
+        preset: presetVal,
+        audio_bitrate: `${exportSettings.audio_bitrate_kbps}k`,
+        loudness_normalization: {
+          enabled: v21Locks.youtubeLoudnorm,
+          target_lufs: v21Locks.integratedLufs,
+          true_peak_db: v21Locks.truePeakDbtp
+        }
+      },
+      export_settings: compactExpSettings,
+      anti_desync_locks: fullManifest.anti_desync_locks,
+      ...(ambientAudio.file_name.trim() ? { ambient_audio: fullManifest.ambient_audio } : {}),
+      ...(masterAudio.file_name.trim() ? { master_audio: fullManifest.master_audio } : {}),
+      subtitles: compactSubtitles,
+      ...(fullManifest.subtitles_export ? { subtitles_export: fullManifest.subtitles_export } : {}),
+      ...(shortsAutoSliceEnabled ? { shorts_config: fullManifest.shorts_config } : {}),
+      ...(fullManifest.telegram_notifications
+        ? { telegram_notifications: fullManifest.telegram_notifications }
+        : {}),
+      timeline: compactTimeline
+    };
   };
 
   // Экспорт автономной интерактивной раскадровки (storyboard.html) без внешних зависимостей
@@ -3179,9 +3317,23 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       return;
     }
 
-    const manifestToDispatch = prepareValidatedManifestForOutput();
+    const fullManifestToDispatch = prepareValidatedManifestForOutput();
+    const compactManifest = buildCompactDispatchManifest(fullManifestToDispatch);
+    const encodedResult = await buildCompactDispatchPayload(compactManifest);
+
+    if (encodedResult.exceedsLimit) {
+      onNotify(
+        `Сжатый payload (${encodedResult.finalLength.toLocaleString('ru-RU')} симв.) превышает лимит GitHub API 60 000 симв. Скачайте manifest.json и загрузите его в папку Google Drive.`,
+        'error',
+        {
+          label: 'Скачать manifest.json',
+          onClick: () => downloadFullManifestJson(fullManifestToDispatch)
+        }
+      );
+      return;
+    }
+
     const dispatchTime = new Date().getTime();
-    const encodedPayload = encodeManifestBase64(manifestToDispatch);
 
     setIsDispatching(true);
     try {
@@ -3198,7 +3350,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              manifest_payload: encodedPayload
+              manifest_payload: encodedResult.payload
             }
           })
         }
@@ -3207,7 +3359,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       if (response.status === 204) {
         onStartRenderStatus(
           'Сборка успешно запущена в GitHub Actions!',
-          `Workflow: render_scenes.yml (${manifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
+          `Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)}${encodedResult.compressed ? ' • gzip' : ''}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
           'ZermeXX/aetherflow-render',
           dispatchTime
         );

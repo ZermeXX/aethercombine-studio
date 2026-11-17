@@ -87,6 +87,7 @@ import {
   V21SubtitleLang,
   parseV21ManifestObject
 } from './utils/manifestV21';
+import { buildCompactDispatchPayload } from './utils/manifestDispatch';
 
 type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb' | 'editor';
 type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
@@ -252,10 +253,16 @@ interface LoopBuildManifest {
   timeline_slots: TimelineSlot[];
 }
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastMessage {
   id: string;
   text: string;
   type: 'info' | 'error' | 'success';
+  action?: ToastAction;
 }
 
 interface SavedManifestPreset {
@@ -1309,13 +1316,23 @@ export default function App() {
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const manifestInputRef = useRef<HTMLInputElement | null>(null);
 
-  const showToast = useCallback((text: string, type: 'info' | 'error' | 'success' = 'info') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev.slice(-2), { id, text, type }]);
-    window.setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 2500);
-  }, []);
+  const showToast = useCallback(
+    (
+      text: string,
+      type: 'info' | 'error' | 'success' = 'info',
+      action?: ToastAction
+    ) => {
+      const id = Math.random().toString(36).substring(2, 9);
+      setToasts(prev => [...prev.slice(-2), { id, text, type, action }]);
+      window.setTimeout(
+        () => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        },
+        action ? 9000 : 2500
+      );
+    },
+    []
+  );
 
   // Двухтональный аккорд завершения через Web Audio API (без внешних mp3)
   const playRenderSuccessChime = useCallback(() => {
@@ -3938,7 +3955,90 @@ export default function App() {
     const startTime = Date.now();
     const scaleFlag = getScaleFilter(manifestToSend.resolution);
     const crfVal = manifestToSend.crf;
-    const manifestBase64 = encodeManifestBase64(manifestToSend);
+
+    // Облегчённый рабочий манифест для workflow_dispatch (без дублей и SEO-текстов)
+    const compactLoopPayloadObj = {
+      manifest_version: manifestToSend.manifest_version || '2.2-FINAL',
+      enabled: manifestToSend.enabled,
+      project_name: manifestToSend.project_name,
+      hours: manifestToSend.hours,
+      calculated_project_duration_sec: manifestToSend.calculated_project_duration_sec,
+      resolution: manifestToSend.resolution,
+      video_codec: manifestToSend.video_codec,
+      fps: manifestToSend.fps,
+      audio_codec: manifestToSend.audio_codec,
+      audio_bitrate_kbps: manifestToSend.audio_bitrate_kbps,
+      bitrate_preset: manifestToSend.bitrate_preset,
+      crf: manifestToSend.crf,
+      export_settings: {
+        video_codec: manifestToSend.export_settings.video_codec,
+        preset: manifestToSend.export_settings.preset,
+        draft_mode: manifestToSend.export_settings.draft_mode,
+        crf: manifestToSend.export_settings.crf,
+        resolution: manifestToSend.export_settings.resolution,
+        fps: manifestToSend.export_settings.fps,
+        audio_bitrate_kbps: manifestToSend.export_settings.audio_bitrate_kbps
+      },
+      subtitles: manifestToSend.subtitles,
+      ...(manifestToSend.subtitles_export ? { subtitles_export: manifestToSend.subtitles_export } : {}),
+      crossfade_loop: manifestToSend.crossfade_loop,
+      seamless_mode: manifestToSend.seamless_mode,
+      act_crossfade_sec: manifestToSend.act_crossfade_sec,
+      internal_clip_duration_sec: manifestToSend.internal_clip_duration_sec,
+      internal_loop_crossfade_sec: manifestToSend.internal_loop_crossfade_sec,
+      video_crossfade_sec: manifestToSend.video_crossfade_sec,
+      audio_crossfade_sec: manifestToSend.audio_crossfade_sec,
+      use_embedded_audio: manifestToSend.use_embedded_audio,
+      final_black_screen_enabled: manifestToSend.final_black_screen_enabled,
+      final_black_screen_sec: manifestToSend.final_black_screen_sec,
+      audio_mastering: manifestToSend.audio_mastering,
+      seamless_asymmetry: manifestToSend.seamless_asymmetry,
+      random_interval: manifestToSend.random_interval,
+      video_filename: manifestToSend.video_filename,
+      ...(manifestToSend.audio_filename ? { audio_filename: manifestToSend.audio_filename } : {}),
+      gdrive_folder_id: manifestToSend.gdrive_folder_id,
+      continuous_bed: manifestToSend.continuous_bed,
+      master_audio: manifestToSend.master_audio,
+      ...(manifestToSend.shorts_factory ? { shorts_factory: manifestToSend.shorts_factory } : {}),
+      timeline_slots: manifestToSend.timeline_slots.map((slot, idx) => ({
+        slot_index: idx + 1,
+        act_title: slot.act_title,
+        act_timecode: slot.act_timecode,
+        file_name: slot.file_name,
+        ...(slot.voiceover_file ? { voiceover_file: slot.voiceover_file } : {}),
+        base_content: slot.base_content,
+        source_clip_duration_sec: slot.source_clip_duration_sec,
+        internal_loop_crossfade_sec: slot.internal_loop_crossfade_sec,
+        slot_duration_sec: slot.slot_duration_sec,
+        slot_transition_out: slot.slot_transition_out,
+        inserts: slot.inserts.map(ins => ({
+          file_name: ins.file_name,
+          trigger_at_sec: ins.trigger_at_sec,
+          duration_sec: ins.duration_sec,
+          transition_in: ins.transition_in,
+          transition_out: ins.transition_out,
+          ...(ins.hold_until_end ? { hold_until_end: true } : {}),
+          ...(ins.audio_soft_compressor ? { audio_soft_compressor: true } : {}),
+          ...(ins.max_peak_over_bed_db !== undefined
+            ? { max_peak_over_bed_db: ins.max_peak_over_bed_db }
+            : {})
+        }))
+      }))
+    };
+
+    const encodedLoop = await buildCompactDispatchPayload(compactLoopPayloadObj);
+    if (encodedLoop.exceedsLimit) {
+      showToast(
+        `Размер payload (${encodedLoop.finalLength.toLocaleString('ru-RU')} симв.) превышает лимит GitHub API 60 000 симв. Скачайте manifest.json и загрузите его на Google Drive.`,
+        'error',
+        {
+          label: 'Скачать manifest.json',
+          onClick: handleExportManifestFile
+        }
+      );
+      return;
+    }
+    const manifestBase64 = encodedLoop.payload;
 
     lastDispatchWasPreflightRef.current = preflightOnly;
     setIsLoopDispatching(true);
@@ -3974,7 +4074,7 @@ export default function App() {
           : `Сборка «${manifestToSend.project_name}» запущена в GitHub Actions!`;
         const statusDesc = preflightOnly
           ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${manifestToSend.gdrive_folder_id || 'GDrive'}`
-          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (Base64, ${manifestBase64.length} байт) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
+          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (${encodedLoop.compressed ? 'gzip ' : 'Base64, '}${manifestBase64.length} байт) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
 
         showStatusBar(statusTitle, statusDesc, targetRepo, startTime);
         appendTerminalLog(
@@ -7208,9 +7308,8 @@ export default function App() {
       >
         <AnimatePresence mode="popLayout">
           {toasts.slice(-2).map(t => (
-            <motion.button
+            <motion.div
               key={t.id}
-              type="button"
               layout
               initial={{ opacity: 0, y: -18, scale: 0.84 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -7234,7 +7333,19 @@ export default function App() {
                 <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
               )}
               <span className="leading-snug text-left">{t.text}</span>
-            </motion.button>
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    t.action?.onClick();
+                  }}
+                  className="ml-1 shrink-0 px-2.5 py-1 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] transition cursor-pointer"
+                >
+                  {t.action.label}
+                </button>
+              )}
+            </motion.div>
           ))}
         </AnimatePresence>
       </div>
