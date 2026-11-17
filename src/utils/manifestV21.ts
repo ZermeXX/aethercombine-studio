@@ -148,10 +148,19 @@ export function normalizeSceneSubtitlesMap(
   }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(rawSubs as Record<string, unknown>)) {
-    if (typeof v !== 'string') continue;
+    let textVal = '';
+    if (typeof v === 'string') {
+      textVal = v.trim();
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const nestedText = (v as Record<string, unknown>).text;
+      if (typeof nestedText === 'string') {
+        textVal = nestedText.trim();
+      }
+    }
+    if (!textVal) continue;
     const norm = normalizeSubtitleLangCode(k) || k.trim().toUpperCase();
-    if (norm && v.trim()) {
-      out[norm] = v.trim();
+    if (norm) {
+      out[norm] = textVal;
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -166,7 +175,17 @@ export function formatChaptersYoutubeToText(rawChapters: unknown): string {
         if (typeof item === 'string') return item.trim();
         if (item && typeof item === 'object') {
           const obj = item as Record<string, unknown>;
-          const ts = String(obj.time || obj.timecode || obj.timestamp || obj.start || '00:00').trim();
+          const rawStart =
+            obj.time ??
+            obj.timecode ??
+            obj.timestamp ??
+            obj.start_time ??
+            obj.start ??
+            obj.start_sec;
+          const ts =
+            typeof rawStart === 'number'
+              ? formatSecToMmSs(rawStart)
+              : String(rawStart || '00:00').trim();
           const title = String(obj.title || obj.label || obj.chapter || obj.name || '').trim();
           return title ? `${ts} ${title}` : ts;
         }
@@ -311,20 +330,34 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
       ? (raw.tab_5_art_preview as Record<string, unknown>)
       : {});
 
-  const timelineArr = Array.isArray(raw.timeline)
-    ? raw.timeline
-    : Array.isArray(raw.scenes)
-    ? raw.scenes
-    : [];
+  const timelineArr =
+    Array.isArray(raw.timeline) && raw.timeline.length > 0
+      ? raw.timeline
+      : Array.isArray(raw.scenes) && raw.scenes.length > 0
+      ? raw.scenes
+      : Array.isArray(raw.timeline)
+      ? raw.timeline
+      : Array.isArray(raw.scenes)
+      ? raw.scenes
+      : [];
+
+  const manifestVersionStr = String(
+    raw.manifest_version || raw.version || raw.schema_version || ''
+  ).toLowerCase();
 
   const hasTimelineArray = timelineArr.length > 0;
   const hasV21Keys =
     Boolean(raw.studio_ui_presets) ||
     Boolean(raw.chapters_youtube) ||
     Boolean(raw.overlays_and_branding) ||
+    Boolean(raw.subtitles_export) ||
+    Boolean(raw.rhythm_map) ||
     Boolean(raw.video_title) ||
+    Boolean(raw.project_name) ||
     Array.isArray(raw.timeline) ||
-    String(raw.manifest_version || raw.version || '').includes('2.1');
+    Array.isArray(raw.scenes) ||
+    manifestVersionStr.includes('2.1') ||
+    manifestVersionStr.includes('2.2');
 
   const exportSettingsObj =
     raw.export_settings && typeof raw.export_settings === 'object'
@@ -332,32 +365,48 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
       : {};
 
   const projectName = String(raw.project_name || '').trim();
+  const youtubeSeoObj =
+    raw.youtube_seo && typeof raw.youtube_seo === 'object'
+      ? (raw.youtube_seo as Record<string, unknown>)
+      : {};
   const videoTitle = String(
     raw.video_title ||
       tab4Obj.video_title ||
-      (raw.youtube_seo && typeof raw.youtube_seo === 'object'
-        ? (raw.youtube_seo as Record<string, unknown>).title
-        : '') ||
+      youtubeSeoObj.title ||
+      youtubeSeoObj.video_title ||
       ''
   ).trim();
 
-  // Compute total duration from timeline[]
+  // Compute total duration from timeline[] or scenes[] (including 2.2-FINAL video_processing.transition_in)
   let totalSec = 0;
   timelineArr.forEach((scRaw, idx) => {
     if (!scRaw || typeof scRaw !== 'object') return;
     const sc = scRaw as Record<string, unknown>;
     const dur = Number(sc.duration_sec ?? sc.duration ?? 6);
     const safeDur = !isNaN(dur) && dur > 0 ? dur : 6;
+    const videoProc =
+      sc.video_processing && typeof sc.video_processing === 'object'
+        ? (sc.video_processing as Record<string, unknown>)
+        : undefined;
+    const rawTrans = videoProc?.transition_in ?? sc.transition ?? sc.slot_transition_out;
     const tObj =
-      sc.transition && typeof sc.transition === 'object'
-        ? (sc.transition as Record<string, unknown>)
+      rawTrans && typeof rawTrans === 'object'
+        ? (rawTrans as Record<string, unknown>)
         : undefined;
     const tType = normalizeV21TransitionType(
-      typeof sc.transition === 'string' ? sc.transition : tObj?.type
+      typeof rawTrans === 'string' ? rawTrans : tObj?.type ?? tObj?.effect
     );
     const overlap =
       idx < timelineArr.length - 1 && tType !== 'cut' && tType !== 'none'
-        ? Math.max(0, Number(tObj?.duration_sec ?? tObj?.duration ?? 0.6))
+        ? Math.max(
+            0,
+            Number(
+              tObj?.duration_sec ??
+                tObj?.duration ??
+                sc.transition_duration ??
+                0.6
+            )
+          )
         : 0;
     totalSec += Math.max(0.5, safeDur - overlap * 0.5);
   });
@@ -414,18 +463,32 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
       ? -1.0
       : -3.0;
 
-  // Tab 3 Subtitles languages detection
+  // Tab 3 Subtitles languages detection (supports studio_ui_presets.tab_3_verbaflow, 2.2-FINAL root subtitles_export, and scene.subtitles)
+  const subtitlesExportObj =
+    raw.subtitles_export && typeof raw.subtitles_export === 'object' && !Array.isArray(raw.subtitles_export)
+      ? (raw.subtitles_export as Record<string, unknown>)
+      : undefined;
+
   const langSet = new Set<V21SubtitleLang>();
-  if (Array.isArray(tab3Obj.subtitle_languages)) {
-    tab3Obj.subtitle_languages.forEach(item => {
-      const code = normalizeSubtitleLangCode(item);
-      if (code) langSet.add(code);
-    });
-  }
+  const rawLangArrays = [
+    tab3Obj.subtitle_languages,
+    subtitlesExportObj?.languages,
+    subtitlesExportObj?.subtitle_languages,
+    Array.isArray(raw.subtitles_export) ? raw.subtitles_export : null,
+    raw.subtitle_languages
+  ];
+  rawLangArrays.forEach(arr => {
+    if (Array.isArray(arr)) {
+      arr.forEach(item => {
+        const code = normalizeSubtitleLangCode(item);
+        if (code) langSet.add(code);
+      });
+    }
+  });
   timelineArr.forEach(scRaw => {
     if (!scRaw || typeof scRaw !== 'object') return;
     const subs = (scRaw as Record<string, unknown>).subtitles;
-    if (subs && typeof subs === 'object') {
+    if (subs && typeof subs === 'object' && !Array.isArray(subs)) {
       Object.keys(subs as Record<string, unknown>).forEach(k => {
         const code = normalizeSubtitleLangCode(k);
         if (code) langSet.add(code);
@@ -439,7 +502,7 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
 
   // Tab 4 Chapters & Exports
   const chaptersYoutubeText = formatChaptersYoutubeToText(
-    raw.chapters_youtube ?? tab4Obj.chapters_youtube
+    raw.chapters_youtube ?? tab4Obj.chapters_youtube ?? youtubeSeoObj.chapters
   );
 
   // Tab 5 Art & Preview
@@ -499,12 +562,26 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
       strictSceneDurationLock:
         typeof tab3Obj.strict_scene_duration_lock === 'boolean'
           ? tab3Obj.strict_scene_duration_lock
+          : typeof subtitlesExportObj?.strict_scene_duration_lock === 'boolean'
+          ? subtitlesExportObj.strict_scene_duration_lock
           : true,
       burnInVideo:
-        typeof tab3Obj.burn_in_video === 'boolean' ? tab3Obj.burn_in_video : false,
+        typeof tab3Obj.burn_in_video === 'boolean'
+          ? tab3Obj.burn_in_video
+          : typeof subtitlesExportObj?.burn_in_video === 'boolean'
+          ? subtitlesExportObj.burn_in_video
+          : typeof subtitlesExportObj?.burn_in === 'boolean'
+          ? subtitlesExportObj.burn_in
+          : false,
       exportSeparateSrtFiles:
         typeof tab3Obj.export_separate_srt_files === 'boolean'
           ? tab3Obj.export_separate_srt_files
+          : typeof subtitlesExportObj?.export_separate_srt_files === 'boolean'
+          ? subtitlesExportObj.export_separate_srt_files
+          : typeof subtitlesExportObj?.separate_srt_files === 'boolean'
+          ? subtitlesExportObj.separate_srt_files
+          : typeof subtitlesExportObj?.enabled === 'boolean'
+          ? subtitlesExportObj.enabled
           : true,
       subtitleLanguages: Array.from(langSet)
     },

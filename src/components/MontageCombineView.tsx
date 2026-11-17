@@ -94,6 +94,17 @@ export interface NarrativeSceneItem {
   scene_id: string;
   title?: string;
   file_name: string;
+  video_file?: string;
+  voiceover_file?: string;
+  audio_file?: string;
+  image_reference?: string;
+  assets?: {
+    video_file?: string;
+    voiceover_file?: string;
+    audio_file?: string;
+    image_reference?: string;
+    [key: string]: unknown;
+  };
   start_time: string | number;
   duration: number;
   camera_movement?: CameraVectorType;
@@ -115,13 +126,88 @@ export interface NarrativeSceneItem {
       | 'none';
     duration_sec: number;
   };
+  video_processing?: {
+    transition_in?:
+      | {
+          type?: string;
+          duration_sec?: number;
+        }
+      | string;
+    transition_out?:
+      | {
+          type?: string;
+          duration_sec?: number;
+        }
+      | string;
+    camera_movement?: CameraVectorType;
+    [key: string]: unknown;
+  };
+  audio_processing?: {
+    video_ambient_mute?: boolean;
+    video_ambient_gain_db?: number;
+    sfx?: string;
+    sfx_gain_db?: number;
+    [key: string]: unknown;
+  };
   text_overlay: string;
   ai_video_prompt?: string;
   prompt_ru?: string;
   sfx?: string;
   video_ambient_mute?: boolean;
+  video_ambient_gain_db?: number;
   sfx_gain_db?: number;
   subtitles?: Record<string, string>;
+}
+
+export interface ExportedNarrativeSceneItem {
+  scene_index: number;
+  scene_id: string;
+  title?: string;
+  file_name: string;
+  video_file: string;
+  voiceover_file: string;
+  audio_file: string;
+  image_reference?: string;
+  start_time: string | number;
+  duration: number;
+  camera_movement?: CameraVectorType;
+  visual_style?: string;
+  transition: string;
+  transition_duration: number;
+  mute_audio: boolean;
+  ambient_gain_db: number;
+  assets: {
+    video_file: string;
+    voiceover_file: string;
+    audio_file: string;
+    image_reference?: string;
+    [key: string]: unknown;
+  };
+  video_processing: {
+    transition_in: {
+      type: string;
+      duration_sec: number;
+    };
+    camera_movement?: CameraVectorType;
+    [key: string]: unknown;
+  };
+  audio_processing: {
+    video_ambient_mute: boolean;
+    video_ambient_gain_db: number;
+    sfx?: string;
+    sfx_gain_db?: number;
+    [key: string]: unknown;
+  };
+  subtitles: Record<string, string>;
+  text_overlay: string;
+  video_ambient_mute: boolean;
+  video_ambient_gain_db: number;
+  sfx_gain_db?: number;
+  needs_revision?: boolean;
+  revision_note?: string;
+  ai_video_prompt?: string;
+  prompt_ru?: string;
+  sfx?: string;
 }
 
 export interface MasterAudioConfig {
@@ -198,11 +284,14 @@ export interface NarrativeExportSettings {
 
 export interface NarrativeMontageManifest {
   schema_version: '3.0';
-  manifest_version?: '2.1' | '3.0';
+  manifest_version?: '2.1' | '2.2-FINAL' | '3.0';
   project_type: 'narrative_scenes_montage';
   project_name: string;
+  video_title?: string;
+  chapters_youtube?: string;
   manifest_name?: string;
   rhythm_profile?: string;
+  rhythm_map?: Record<string, unknown> | string;
   overlays: CinematicOverlayId[];
   total_scenes: number;
   total_duration_sec: number;
@@ -227,6 +316,13 @@ export interface NarrativeMontageManifest {
     };
   };
   subtitles: SubtitlesFlexibleConfig;
+  subtitles_export?: {
+    enabled: boolean;
+    burn_in_video: boolean;
+    export_separate_srt_files: boolean;
+    strict_scene_duration_lock: boolean;
+    languages: string[];
+  };
   subtitles_burn_in?: BurnInSrtConfig;
   shorts_config?: ShortsAutoSliceConfig;
   shorts_export?: ShortsExportManifestBlock;
@@ -242,7 +338,8 @@ export interface NarrativeMontageManifest {
     within_tolerance: boolean;
   };
   youtube_seo?: YoutubeSeoManifestBlock;
-  scenes: NarrativeSceneItem[];
+  scenes: ExportedNarrativeSceneItem[];
+  timeline: ExportedNarrativeSceneItem[];
 }
 
 interface MontageCombineViewProps {
@@ -273,6 +370,13 @@ interface MontageCombineViewProps {
   externalSceneSubtitleEdit?: { sceneIndex: number; lang: string; text: string; nonce: number } | null;
   onConsumeExternalSceneSubtitleEdit?: () => void;
   youtubeSeo?: YoutubeSeoManifestBlock;
+  chaptersYoutubeText?: string;
+  subtitlesExportConfig?: {
+    strictSceneDurationLock: boolean;
+    burnInVideo: boolean;
+    exportSeparateSrtFiles: boolean;
+    languages: string[];
+  };
   telegramBotToken?: string;
   telegramChatId?: string;
   onOpenConfigModal: () => void;
@@ -684,6 +788,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   externalSceneSubtitleEdit,
   onConsumeExternalSceneSubtitleEdit,
   youtubeSeo,
+  chaptersYoutubeText,
+  subtitlesExportConfig,
   telegramBotToken,
   telegramChatId,
   onOpenConfigModal,
@@ -722,6 +828,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [lastAppliedDnaSummary, setLastAppliedDnaSummary] = useState<string>(
     'Historical Storytelling • 2.5–8 сек • Живопись / Графический роман'
   );
+  const [importedRhythmMap, setImportedRhythmMap] = useState<
+    Record<string, unknown> | string | null
+  >(null);
 
   // Мультивыбор кинематографичных оверлеев (записываются в массив overlays внутри manifest.json)
   const [selectedOverlays, setSelectedOverlays] = useState<CinematicOverlayId[]>([
@@ -1178,23 +1287,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         ? (raw.timeline as Record<string, unknown>)
         : undefined;
 
-    const rawScenesArray = Array.isArray(raw.timeline)
-      ? raw.timeline
-      : Array.isArray(raw.scenes)
-      ? raw.scenes
-      : Array.isArray(raw.timeline_slots)
-      ? raw.timeline_slots
-      : Array.isArray(raw.slots)
-      ? raw.slots
-      : Array.isArray(raw.items)
-      ? raw.items
-      : Array.isArray(timelineSub?.scenes)
-      ? (timelineSub?.scenes as unknown[])
-      : Array.isArray(timelineSub?.timeline_slots)
-      ? (timelineSub?.timeline_slots as unknown[])
-      : Array.isArray(timelineSub?.slots)
-      ? (timelineSub?.slots as unknown[])
-      : null;
+    const rawScenesArray =
+      Array.isArray(raw.timeline) && raw.timeline.length > 0
+        ? raw.timeline
+        : Array.isArray(raw.scenes) && raw.scenes.length > 0
+        ? raw.scenes
+        : Array.isArray(raw.timeline)
+        ? raw.timeline
+        : Array.isArray(raw.scenes)
+        ? raw.scenes
+        : Array.isArray(raw.timeline_slots)
+        ? raw.timeline_slots
+        : Array.isArray(raw.slots)
+        ? raw.slots
+        : Array.isArray(raw.items)
+        ? raw.items
+        : Array.isArray(timelineSub?.scenes)
+        ? (timelineSub?.scenes as unknown[])
+        : Array.isArray(timelineSub?.timeline_slots)
+        ? (timelineSub?.timeline_slots as unknown[])
+        : Array.isArray(timelineSub?.slots)
+        ? (timelineSub?.slots as unknown[])
+        : null;
 
     if (typeof raw.project_name === 'string' && raw.project_name.trim()) {
       handleProjectNameUpdate(raw.project_name.trim());
@@ -1209,16 +1323,43 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             sc.base_content && typeof sc.base_content === 'object'
               ? (sc.base_content as Record<string, unknown>)
               : undefined;
+          const scAssets =
+            sc.assets && typeof sc.assets === 'object'
+              ? (sc.assets as Record<string, unknown>)
+              : undefined;
+          const scVideoProc =
+            sc.video_processing && typeof sc.video_processing === 'object'
+              ? (sc.video_processing as Record<string, unknown>)
+              : undefined;
+          const scAudioProc =
+            sc.audio_processing && typeof sc.audio_processing === 'object'
+              ? (sc.audio_processing as Record<string, unknown>)
+              : undefined;
 
-          // Универсальное динамическое извлечение имени файла строго из JSON без заглушек
+          // Умный парсинг схемы 2.2-FINAL (assets.video_file || video_file || file_name)
           const rawFileName = String(
-            baseContent?.file_name ||
+            scAssets?.video_file ||
+              sc.video_file ||
               sc.file_name ||
+              baseContent?.file_name ||
               sc.filename ||
               sc.asset_name ||
-              sc.video_file ||
               sc.clip_name ||
               ''
+          ).trim();
+
+          // Озвучка сцены (assets.voiceover_file || assets.audio_file || voiceover_file || audio_file)
+          const rawVoiceoverFile = String(
+            scAssets?.voiceover_file ||
+              scAssets?.audio_file ||
+              sc.voiceover_file ||
+              sc.audio_file ||
+              ''
+          ).trim();
+
+          // Референс-кадр сцены (assets.image_reference || image_reference)
+          const rawImageReference = String(
+            scAssets?.image_reference || sc.image_reference || ''
           ).trim();
 
           const rawStart = sc.start_time ?? sc.start_sec ?? sc.timecode;
@@ -1234,10 +1375,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           const duration = !isNaN(rawDuration) && rawDuration > 0 ? rawDuration : 6;
           runningSec = startSec + duration;
 
-          // Переход сцены (поддержка всех FFmpeg xfade переходов)
-          const rawTrans = sc.transition ?? sc.slot_transition_out;
+          // Переход сцены (приоритет: video_processing.transition_in -> transition -> slot_transition_out)
+          const rawTrans =
+            scVideoProc?.transition_in ?? sc.transition ?? sc.slot_transition_out;
           let transType: NarrativeSceneItem['transition']['type'] = 'fade';
-          let transDur = 0.6;
+          let transDur =
+            typeof sc.transition_duration === 'number'
+              ? Math.max(0, sc.transition_duration)
+              : 0.6;
           if (typeof rawTrans === 'string') {
             transType = normalizeV21TransitionType(rawTrans);
             if (transType === 'cut' || transType === 'none') {
@@ -1245,19 +1390,39 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             }
           } else if (rawTrans && typeof rawTrans === 'object') {
             const tObj = rawTrans as Record<string, unknown>;
-            transType = normalizeV21TransitionType(tObj.type || 'fade');
+            transType = normalizeV21TransitionType(tObj.type || tObj.effect || 'fade');
             if (typeof tObj.duration_sec === 'number') {
               transDur = Math.max(0, tObj.duration_sec);
             } else if (typeof tObj.duration === 'number') {
               transDur = Math.max(0, tObj.duration);
             }
+            if (transType === 'cut' || transType === 'none') {
+              transDur = 0;
+            }
           }
 
+          const rawCam = String(scVideoProc?.camera_movement ?? sc.camera_movement ?? '').trim();
+          const cameraMovement: CameraVectorType | undefined =
+            rawCam === 'zoom_in' ||
+            rawCam === 'zoom_out' ||
+            rawCam === 'pan_left' ||
+            rawCam === 'pan_right'
+              ? rawCam
+              : undefined;
+
           const subtitlesMap = normalizeSceneSubtitlesMap(sc.subtitles);
+          const rawSubTextField =
+            sc.subtitles &&
+            typeof sc.subtitles === 'object' &&
+            !Array.isArray(sc.subtitles) &&
+            typeof (sc.subtitles as Record<string, unknown>).text === 'string'
+              ? String((sc.subtitles as Record<string, unknown>).text)
+              : undefined;
           const overlayText = String(
             sc.text_overlay ??
               subtitlesMap?.EN ??
               subtitlesMap?.RU ??
+              rawSubTextField ??
               sc.subtitle ??
               sc.caption ??
               sc.act_title ??
@@ -1267,22 +1432,39 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
           const rawSceneTitle = String(sc.title ?? sc.act_title ?? '').trim();
           const rawMute =
-            typeof sc.video_ambient_mute === 'boolean'
+            typeof scAudioProc?.video_ambient_mute === 'boolean'
+              ? scAudioProc.video_ambient_mute
+              : typeof sc.video_ambient_mute === 'boolean'
               ? sc.video_ambient_mute
+              : typeof sc.mute_audio === 'boolean'
+              ? sc.mute_audio
               : typeof sc.audio_mute === 'boolean'
               ? sc.audio_mute
               : typeof sc.mute === 'boolean'
               ? sc.mute
               : undefined;
 
+          const rawAmbientGainDb =
+            typeof scAudioProc?.video_ambient_gain_db === 'number'
+              ? scAudioProc.video_ambient_gain_db
+              : typeof sc.video_ambient_gain_db === 'number'
+              ? sc.video_ambient_gain_db
+              : typeof sc.ambient_gain_db === 'number'
+              ? sc.ambient_gain_db
+              : undefined;
+
           const rawSfxStr =
-            typeof sc.sfx === 'string' && sc.sfx.trim()
+            typeof scAudioProc?.sfx === 'string' && scAudioProc.sfx.trim()
+              ? scAudioProc.sfx.trim()
+              : typeof sc.sfx === 'string' && sc.sfx.trim()
               ? sc.sfx.trim()
               : typeof sc.sfx_file === 'string' && sc.sfx_file.trim()
               ? sc.sfx_file.trim()
               : '';
           const rawSfxGain =
-            typeof sc.sfx_gain_db === 'number'
+            typeof scAudioProc?.sfx_gain_db === 'number'
+              ? scAudioProc.sfx_gain_db
+              : typeof sc.sfx_gain_db === 'number'
               ? sc.sfx_gain_db
               : typeof sc.sfx_volume_db === 'number'
               ? sc.sfx_volume_db
@@ -1299,15 +1481,38 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             scene_id: sceneIdNorm,
             ...(rawSceneTitle ? { title: rawSceneTitle } : {}),
             file_name: rawFileName,
+            video_file: rawFileName,
+            ...(rawVoiceoverFile
+              ? { voiceover_file: rawVoiceoverFile, audio_file: rawVoiceoverFile }
+              : {}),
+            ...(rawImageReference ? { image_reference: rawImageReference } : {}),
+            assets: {
+              ...(scAssets || {}),
+              video_file: rawFileName,
+              ...(rawVoiceoverFile
+                ? { voiceover_file: rawVoiceoverFile, audio_file: rawVoiceoverFile }
+                : {}),
+              ...(rawImageReference ? { image_reference: rawImageReference } : {})
+            },
             start_time:
               typeof sc.start_time === 'string' && sc.start_time.trim()
                 ? sc.start_time.trim()
                 : formatTimecode(startSec),
             duration,
+            ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
+            ...(typeof sc.visual_style === 'string' && sc.visual_style.trim()
+              ? { visual_style: sc.visual_style.trim() }
+              : {}),
             transition: {
               type: transType,
               duration_sec: transType === 'cut' || transType === 'none' ? 0 : transDur
             },
+            ...(scVideoProc
+              ? { video_processing: scVideoProc as NarrativeSceneItem['video_processing'] }
+              : {}),
+            ...(scAudioProc
+              ? { audio_processing: scAudioProc as NarrativeSceneItem['audio_processing'] }
+              : {}),
             text_overlay: overlayText,
             ...(typeof sc.ai_video_prompt === 'string' && sc.ai_video_prompt.trim()
               ? { ai_video_prompt: sc.ai_video_prompt.trim() }
@@ -1317,6 +1522,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               : {}),
             ...(rawSfxStr ? { sfx: rawSfxStr } : {}),
             ...(rawMute !== undefined ? { video_ambient_mute: rawMute } : {}),
+            ...(rawAmbientGainDb !== undefined
+              ? { video_ambient_gain_db: rawAmbientGainDb }
+              : {}),
             ...(rawSfxGain !== undefined ? { sfx_gain_db: rawSfxGain } : {}),
             ...(subtitlesMap ? { subtitles: subtitlesMap } : {})
           };
@@ -1332,12 +1540,103 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       }
     }
 
-    // Парсинг v2.1 пресетов для Таб 1 (H.264 High CRF 18 yuv420p 4K 24fps CFR + блокировки анти-рассинхрона)
+    // Парсинг rhythm_map / rhythm_profile / overlays (2.2-FINAL)
+    const studioPresets =
+      raw.studio_ui_presets && typeof raw.studio_ui_presets === 'object'
+        ? (raw.studio_ui_presets as Record<string, unknown>)
+        : undefined;
+    const tab1Presets =
+      studioPresets?.tab_1_montage && typeof studioPresets.tab_1_montage === 'object'
+        ? (studioPresets.tab_1_montage as Record<string, unknown>)
+        : undefined;
+    const rawRhythmMap = raw.rhythm_map ?? tab1Presets?.rhythm_map;
+    const validOverlaySet = new Set<CinematicOverlayId>([
+      'ambient_particles',
+      'cinematic_film_grain',
+      'historical_lower_thirds',
+      'warm_glow'
+    ]);
+
+    if (typeof rawRhythmMap === 'string' && rawRhythmMap.trim()) {
+      const rmStr = rawRhythmMap.trim();
+      setImportedRhythmMap(rmStr);
+      setLastAppliedDnaSummary(rmStr);
+      const lowerRm = rmStr.toLowerCase();
+      if (lowerRm.includes('ambient') || lowerRm.includes('meditat')) {
+        setRhythmProfile('ambient_meditative');
+      } else if (lowerRm.includes('hist') || lowerRm.includes('doc')) {
+        setRhythmProfile('historical_storytelling');
+      } else {
+        setRhythmProfile('custom_dna');
+      }
+    } else if (rawRhythmMap && typeof rawRhythmMap === 'object' && !Array.isArray(rawRhythmMap)) {
+      const rmObj = rawRhythmMap as Record<string, unknown>;
+      setImportedRhythmMap(rmObj);
+      const rawProf = String(
+        rmObj.profile || rmObj.mode || rmObj.preset || raw.rhythm_profile || ''
+      ).toLowerCase();
+      if (rawProf.includes('ambient') || rawProf.includes('meditat')) {
+        setRhythmProfile('ambient_meditative');
+      } else if (rawProf.includes('hist') || rawProf.includes('doc')) {
+        setRhythmProfile('historical_storytelling');
+      } else if (rawProf) {
+        setRhythmProfile('custom_dna');
+      }
+      const rmSummary = String(
+        rmObj.summary ||
+          rmObj.description ||
+          rmObj.label ||
+          rmObj.dna_summary ||
+          rmObj.pacing_summary ||
+          ''
+      ).trim();
+      if (rmSummary) {
+        setLastAppliedDnaSummary(rmSummary);
+      } else {
+        const summaryParts = [
+          rmObj.profile || rmObj.tempo || rmObj.pace,
+          rmObj.avg_scene_sec ? `~${rmObj.avg_scene_sec} сек` : '',
+          rmObj.style
+        ]
+          .map(v => String(v || '').trim())
+          .filter(Boolean);
+        if (summaryParts.length > 0) {
+          setLastAppliedDnaSummary(summaryParts.join(' • '));
+        }
+      }
+      if (Array.isArray(rmObj.overlays)) {
+        const filtered = rmObj.overlays.filter(
+          (o): o is CinematicOverlayId =>
+            typeof o === 'string' && validOverlaySet.has(o as CinematicOverlayId)
+        );
+        if (filtered.length > 0) {
+          setSelectedOverlays(filtered);
+        }
+      }
+    } else if (typeof raw.rhythm_profile === 'string' && raw.rhythm_profile.trim()) {
+      const rp = raw.rhythm_profile.trim();
+      if (rp === 'historical_storytelling' || rp === 'ambient_meditative' || rp === 'custom_dna') {
+        setRhythmProfile(rp);
+      }
+    }
+
+    if (Array.isArray(raw.overlays)) {
+      const filtered = raw.overlays.filter(
+        (o): o is CinematicOverlayId =>
+          typeof o === 'string' && validOverlaySet.has(o as CinematicOverlayId)
+      );
+      if (filtered.length > 0) {
+        setSelectedOverlays(filtered);
+      }
+    }
+
+    // Парсинг v2.1 / 2.2-FINAL пресетов для Таб 1
     const parsedV21 = parseV21ManifestObject(raw);
     if (parsedV21.isV21Manifest) {
       setExportSettings(prev => ({
         ...prev,
-        resolution: parsedV21.tab1Export.resolution,
+        resolution:
+          parsedV21.tab1Export.resolution === '720p' ? '720p' : parsedV21.tab1Export.resolution,
         video_codec: parsedV21.tab1Export.videoCodec,
         profile: parsedV21.tab1Export.profile,
         pix_fmt: parsedV21.tab1Export.pixFmt,
@@ -1354,10 +1653,26 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       }
     }
 
+    // Маппинг ambient_audio
+    if (raw.ambient_audio && typeof raw.ambient_audio === 'object') {
+      const aa = raw.ambient_audio as Record<string, unknown>;
+      const aaName = String(aa.file_name || aa.filename || aa.asset_name || aa.audio_file || '').trim();
+      setAmbientAudio(prev => ({
+        file_name: aaName || prev.file_name,
+        loop_full_duration:
+          typeof aa.loop_full_duration === 'boolean'
+            ? aa.loop_full_duration
+            : prev.loop_full_duration,
+        volume: typeof aa.volume === 'number' ? aa.volume : prev.volume
+      }));
+    }
+
     // Маппинг master_audio
     if (raw.master_audio && typeof raw.master_audio === 'object') {
       const ma = raw.master_audio as Record<string, unknown>;
-      const audioName = String(ma.file_name || ma.filename || ma.asset_name || '').trim();
+      const audioName = String(
+        ma.file_name || ma.filename || ma.asset_name || ma.voiceover_file || ma.audio_file || ''
+      ).trim();
       setMasterAudio(prev => ({
         file_name: audioName,
         start_timecode:
@@ -2034,18 +2349,136 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     resolvedSrtContentForManifest
   ]);
 
-  // Полный JSON-манифест для N-сцен (собирает весь массив scenes[] любой длины без урезания)
-  const narrativeManifest: NarrativeMontageManifest = useMemo(
-    () => ({
+  const formatScenesReadyLabel = (count: number): string => {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) {
+      return `Манифест готов: ${count} сцена проверена`;
+    }
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+      return `Манифест готов: ${count} сцены проверены`;
+    }
+    return `Манифест готов: ${count} сцен проверены`;
+  };
+
+  const buildExportedSceneObject = (
+    sc: NarrativeSceneItem,
+    idx: number
+  ): ExportedNarrativeSceneItem => {
+    const resolvedVideoFile =
+      (sc.file_name || sc.video_file || sc.assets?.video_file || '').trim() ||
+      `scene_${String(idx + 1).padStart(3, '0')}_vid.mp4`;
+    const resolvedVoiceoverFile = (
+      sc.voiceover_file ||
+      sc.audio_file ||
+      sc.assets?.voiceover_file ||
+      sc.assets?.audio_file ||
+      ''
+    ).trim();
+    const resolvedImageRef = (sc.image_reference || sc.assets?.image_reference || '').trim();
+    const resolvedTransType = sc.transition?.type || 'fade';
+    const resolvedTransDur =
+      resolvedTransType === 'cut' || resolvedTransType === 'none'
+        ? 0
+        : Math.max(0, Number(sc.transition?.duration_sec) || 0.6);
+    const resolvedMute =
+      typeof sc.video_ambient_mute === 'boolean'
+        ? sc.video_ambient_mute
+        : Boolean(sc.audio_processing?.video_ambient_mute);
+    const resolvedAmbientGainDb =
+      typeof sc.video_ambient_gain_db === 'number'
+        ? sc.video_ambient_gain_db
+        : typeof sc.audio_processing?.video_ambient_gain_db === 'number'
+        ? sc.audio_processing.video_ambient_gain_db
+        : 0;
+    const resolvedCamera =
+      sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length];
+    const resolvedSubtitles: Record<string, string> =
+      sc.subtitles || (sc.text_overlay && sc.text_overlay.trim() ? { EN: sc.text_overlay.trim() } : {});
+
+    return {
+      scene_index: idx + 1,
+      scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
+      title: toEnglishSceneTitle(sc, idx),
+      file_name: resolvedVideoFile,
+      video_file: resolvedVideoFile,
+      voiceover_file: resolvedVoiceoverFile,
+      audio_file: resolvedVoiceoverFile,
+      ...(resolvedImageRef ? { image_reference: resolvedImageRef } : {}),
+      start_time: sc.start_time,
+      duration: Number(sc.duration) || 6,
+      camera_movement: resolvedCamera,
+      ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
+      transition: resolvedTransType,
+      transition_duration: resolvedTransDur,
+      mute_audio: resolvedMute,
+      ambient_gain_db: resolvedAmbientGainDb,
+      assets: {
+        ...(sc.assets || {}),
+        video_file: resolvedVideoFile,
+        voiceover_file: resolvedVoiceoverFile,
+        audio_file: resolvedVoiceoverFile,
+        ...(resolvedImageRef ? { image_reference: resolvedImageRef } : {})
+      },
+      video_processing: {
+        ...(sc.video_processing || {}),
+        transition_in: {
+          type: resolvedTransType,
+          duration_sec: resolvedTransDur
+        },
+        camera_movement: resolvedCamera
+      },
+      audio_processing: {
+        ...(sc.audio_processing || {}),
+        video_ambient_mute: resolvedMute,
+        video_ambient_gain_db: resolvedAmbientGainDb,
+        ...(sc.sfx ? { sfx: sc.sfx } : {}),
+        ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {})
+      },
+      subtitles: resolvedSubtitles,
+      text_overlay: sc.text_overlay,
+      video_ambient_mute: resolvedMute,
+      video_ambient_gain_db: resolvedAmbientGainDb,
+      ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {}),
+      ...(sc.needs_revision ? { needs_revision: true } : {}),
+      ...(sc.revision_note && sc.revision_note.trim()
+        ? { revision_note: sc.revision_note.trim() }
+        : {}),
+      ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
+      ...(sc.prompt_ru ? { prompt_ru: sc.prompt_ru } : {}),
+      ...(sc.sfx ? { sfx: sc.sfx } : {})
+    };
+  };
+
+  const buildNormalizedManifestForScenes = (
+    scenesInput: NarrativeSceneItem[]
+  ): NarrativeMontageManifest => {
+    const exportedScenes = scenesInput.map((sc, idx) => buildExportedSceneObject(sc, idx));
+    const computedDuration = Math.round(calcTotalDurationSec(scenesInput) * 10) / 10;
+    const computedDriftDiff = Math.round((computedDuration - masterAudioDurationSec) * 10) / 10;
+    const rhythmMapPayload =
+      typeof importedRhythmMap === 'string'
+        ? importedRhythmMap
+        : {
+            ...(importedRhythmMap || {}),
+            profile: rhythmProfile,
+            summary: lastAppliedDnaSummary,
+            overlays: selectedOverlays
+          };
+
+    return {
       schema_version: '3.0',
-      manifest_version: '2.1',
+      manifest_version: '2.2-FINAL',
       project_type: 'narrative_scenes_montage',
       project_name: projectName.trim() || 'Narrative Movie 4K',
+      ...(youtubeSeo?.title ? { video_title: youtubeSeo.title } : {}),
+      ...(chaptersYoutubeText?.trim() ? { chapters_youtube: chaptersYoutubeText.trim() } : {}),
       manifest_name: importedScenarioName || projectName.trim() || 'Narrative Movie 4K',
       rhythm_profile: rhythmProfile,
+      rhythm_map: rhythmMapPayload,
       overlays: selectedOverlays,
-      total_scenes: narrativeScenes.length,
-      total_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
+      total_scenes: exportedScenes.length,
+      total_duration_sec: computedDuration,
       cloud_export: {
         target_folder_id: gdriveFolderId.trim()
       },
@@ -2089,6 +2522,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         }
       },
       subtitles: subtitlesConfigObject,
+      ...(subtitlesExportConfig
+        ? {
+            subtitles_export: {
+              enabled:
+                subtitlesExportConfig.exportSeparateSrtFiles ||
+                subtitlesExportConfig.burnInVideo ||
+                subtitlesConfigObject.enabled,
+              burn_in_video: subtitlesExportConfig.burnInVideo,
+              export_separate_srt_files: subtitlesExportConfig.exportSeparateSrtFiles,
+              strict_scene_duration_lock: subtitlesExportConfig.strictSceneDurationLock,
+              languages: subtitlesExportConfig.languages
+            }
+          }
+        : {}),
       subtitles_burn_in: {
         enabled: subtitlesConfigObject.enabled,
         burn_in: burnInSrtEnabled,
@@ -2124,39 +2571,62 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           }
         : {}),
       drift_guard: {
-        video_duration_sec: Math.round(totalNarrativeDurationSec * 10) / 10,
+        video_duration_sec: computedDuration,
         audio_duration_sec: masterAudioDurationSec,
-        diff_sec: driftDiffSec,
-        within_tolerance: isDriftWithinTolerance
+        diff_sec: computedDriftDiff,
+        within_tolerance: Math.abs(computedDriftDiff) <= 2
       },
       ...(youtubeSeo ? { youtube_seo: youtubeSeo } : {}),
-      scenes: narrativeScenes.map((sc, idx) => ({
-        scene_index: idx + 1,
-        scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
-        title: toEnglishSceneTitle(sc, idx),
-        file_name: sc.file_name.trim(),
-        start_time: sc.start_time,
-        duration: Number(sc.duration) || 6,
-        camera_movement: sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length],
-        ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
-        transition: sc.transition,
-        text_overlay: sc.text_overlay,
-        ...(sc.video_ambient_mute ? { video_ambient_mute: true } : {}),
-        ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {}),
-        ...(sc.subtitles ? { subtitles: sc.subtitles } : {}),
-        ...(sc.needs_revision ? { needs_revision: true } : {}),
-        ...(sc.revision_note && sc.revision_note.trim()
-          ? { revision_note: sc.revision_note.trim() }
-          : {}),
-        ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
-        ...(sc.prompt_ru ? { prompt_ru: sc.prompt_ru } : {}),
-        ...(sc.sfx ? { sfx: sc.sfx } : {})
-      }))
-    }),
+      scenes: exportedScenes,
+      timeline: exportedScenes
+    };
+  };
+
+  // Проверка и авто-нормализация пустых file_name (подстановка scene_001_vid.mp4) перед экспортом/отправкой
+  const prepareValidatedManifestForOutput = (): NarrativeMontageManifest => {
+    let filledAny = false;
+    const normalizedStateScenes = narrativeScenes.map((sc, idx) => {
+      const fallbackName = `scene_${String(idx + 1).padStart(3, '0')}_vid.mp4`;
+      const existingName = (
+        sc.file_name ||
+        sc.video_file ||
+        sc.assets?.video_file ||
+        ''
+      ).trim();
+      if (existingName && sc.file_name.trim() === existingName) {
+        return sc;
+      }
+      filledAny = true;
+      const finalName = existingName || fallbackName;
+      return transferSceneKey(sc, {
+        ...sc,
+        file_name: finalName,
+        video_file: finalName,
+        assets: {
+          ...(sc.assets || {}),
+          video_file: finalName
+        }
+      });
+    });
+
+    if (filledAny) {
+      setNarrativeScenes(normalizedStateScenes);
+    }
+
+    onNotify(formatScenesReadyLabel(normalizedStateScenes.length), 'success');
+    return buildNormalizedManifestForScenes(normalizedStateScenes);
+  };
+
+  // Полный JSON-манифест для N-сцен (схема 2.2-FINAL с одновременными scenes[] и timeline[])
+  const narrativeManifest: NarrativeMontageManifest = useMemo(
+    () => buildNormalizedManifestForScenes(narrativeScenes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       projectName,
       importedScenarioName,
       rhythmProfile,
+      lastAppliedDnaSummary,
+      importedRhythmMap,
       selectedOverlays,
       narrativeScenes,
       totalNarrativeDurationSec,
@@ -2167,6 +2637,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       exportSettings,
       v21Locks,
       subtitlesConfigObject,
+      subtitlesExportConfig,
+      chaptersYoutubeText,
       burnInSrtEnabled,
       uploadSrtToDriveEnabled,
       subtitleLanguage,
@@ -2177,8 +2649,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       shortsExportConfig,
       telegramBotToken,
       telegramChatId,
-      driftDiffSec,
-      isDriftWithinTolerance,
       youtubeSeo,
       encodeManifestBase64
     ]
@@ -2199,8 +2669,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       return;
     }
 
+    const patchScenes = flaggedRevisionScenes.map((sc, idx) =>
+      buildExportedSceneObject(sc, Math.max(0, (sc.scene_index || idx + 1) - 1))
+    );
     const patchManifest = {
       schema_version: '3.0-patch',
+      manifest_version: '2.2-FINAL',
       patch_mode: true,
       project_name: projectName.trim() || 'Narrative Movie 4K',
       rhythm_profile: rhythmProfile,
@@ -2211,22 +2685,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       cloud_export: {
         target_folder_id: gdriveFolderId.trim()
       },
-      scenes: flaggedRevisionScenes.map(sc => ({
-        scene_index: sc.scene_index,
-        scene_id: sc.scene_id,
-        title: toEnglishSceneTitle(sc, sc.scene_index - 1),
-        file_name: sc.file_name.trim(),
-        start_time: sc.start_time,
-        duration: Number(sc.duration) || 6,
-        camera_movement: sc.camera_movement || 'zoom_in',
-        visual_style: sc.visual_style || 'Historical Storytelling',
-        transition: sc.transition,
-        text_overlay: sc.text_overlay,
-        needs_revision: true,
-        revision_note: sc.revision_note?.trim() || 'Точечная пересборка сцены',
-        ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
-        ...(sc.sfx ? { sfx: sc.sfx } : {})
-      }))
+      scenes: patchScenes,
+      timeline: patchScenes
     };
 
     const jsonString = JSON.stringify(patchManifest, null, 2);
@@ -2244,17 +2704,17 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   };
 
   const handleExportScenarioJson = () => {
-    const jsonString = JSON.stringify(narrativeManifest, null, 2);
+    const manifestToExport = prepareValidatedManifestForOutput();
+    const jsonString = JSON.stringify(manifestToExport, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = importedScenarioName
       ? importedScenarioName.replace(/\.json$/i, '') + '_export.json'
-      : `scenes_manifest_${narrativeScenes.length}scenes_${exportSettings.resolution}.json`;
+      : `scenes_manifest_${manifestToExport.total_scenes}scenes_${exportSettings.resolution}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    onNotify('✅ Манифест (manifest.json) сформирован и готов к отправке', 'success');
   };
 
   // Экспорт автономной интерактивной раскадровки (storyboard.html) без внешних зависимостей
@@ -2719,8 +3179,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       return;
     }
 
+    const manifestToDispatch = prepareValidatedManifestForOutput();
     const dispatchTime = new Date().getTime();
-    const encodedPayload = btoa(unescape(encodeURIComponent(JSON.stringify(narrativeManifest))));
+    const encodedPayload = encodeManifestBase64(manifestToDispatch);
 
     setIsDispatching(true);
     try {
@@ -2746,7 +3207,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       if (response.status === 204) {
         onStartRenderStatus(
           'Сборка успешно запущена в GitHub Actions!',
-          `Workflow: render_scenes.yml (${narrativeScenes.length} сцен • ${calcTotalDuration(narrativeScenes)}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
+          `Workflow: render_scenes.yml (${manifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
           'ZermeXX/aetherflow-render',
           dispatchTime
         );
@@ -2793,8 +3254,46 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   const filledScenesCount = narrativeScenes.filter(s => Boolean(s.file_name.trim())).length;
 
+  const handlePasteScenarioJson = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    const rawText = e.clipboardData?.getData('text/plain')?.trim();
+    if (!rawText || (!rawText.startsWith('{') && !rawText.startsWith('['))) return;
+    try {
+      const parsed = JSON.parse(rawText);
+      if (Array.isArray(parsed)) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyNarrativeScenarioJson({ scenes: parsed }, 'clipboard_manifest.json');
+      } else if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (Array.isArray((parsed as Record<string, unknown>).timeline) ||
+          Array.isArray((parsed as Record<string, unknown>).scenes) ||
+          (parsed as Record<string, unknown>).manifest_version ||
+          (parsed as Record<string, unknown>).project_name)
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyNarrativeScenarioJson(parsed as Record<string, unknown>, 'clipboard_manifest.json');
+      }
+    } catch {
+      // Игнорируем обычный текст в буфере обмена
+    }
+  };
+
   return (
-    <div className="bg-[#111622] border border-slate-800 rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
+    <div
+      onPaste={handlePasteScenarioJson}
+      className="bg-[#111622] border border-slate-800 rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6"
+    >
       {/* Шапка вкладки «Повествовательный монтаж (8–16 мин / 100+ сцен)» */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
         <div className="space-y-1.5">

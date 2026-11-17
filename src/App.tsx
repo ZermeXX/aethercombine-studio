@@ -135,6 +135,13 @@ export interface TimelineSlot {
   title: string;
   asset_id: string;
   file_name: string;
+  video_file?: string;
+  voiceover_file?: string;
+  assets?: {
+    video_file?: string;
+    voiceover_file?: string;
+    [key: string]: unknown;
+  };
   base_content?: {
     file_name: string;
     [key: string]: unknown;
@@ -182,8 +189,11 @@ export interface AudioMasteringConfig {
 
 interface LoopBuildManifest {
   version: string;
+  manifest_version?: string;
   enabled?: boolean;
   project_name: string;
+  video_title?: string;
+  chapters_youtube?: string;
   spec_profile: string;
   hours: number;
   calculated_project_duration_sec: number;
@@ -206,6 +216,13 @@ interface LoopBuildManifest {
     subtitles: SubtitlesFlexibleConfig;
   };
   subtitles: SubtitlesFlexibleConfig;
+  subtitles_export?: {
+    enabled: boolean;
+    burn_in_video: boolean;
+    export_separate_srt_files: boolean;
+    strict_scene_duration_lock: boolean;
+    languages: string[];
+  };
   act_crossfade_sec: number;
   internal_clip_duration_sec: number;
   internal_loop_crossfade_sec: number;
@@ -2920,11 +2937,14 @@ export default function App() {
     srt_content: loopBurnInSubtitles || loopUploadSrtToDrive ? resolvedLoopSrtContent : ''
   };
 
-  // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (без хардкода)
+  // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (2.2-FINAL dual compatibility)
   const currentManifest: LoopBuildManifest = {
     version: '4.0-universal',
+    manifest_version: '2.2-FINAL',
     enabled: ambientLoopEnabled,
     project_name: loopProjectName.trim() || 'Ambient Loop 4K',
+    ...(exportYoutubeSeoBlock?.title ? { video_title: exportYoutubeSeoBlock.title } : {}),
+    ...(verbaFlowChaptersTxt.trim() ? { chapters_youtube: verbaFlowChaptersTxt.trim() } : {}),
     spec_profile:
       importedManifestName ||
       `${loopProjectName.trim() || 'Ambient Loop 4K'} (${videoCodec} CRF ${videoCrf} • ${videoFps}fps • AAC ${audioBitrateKbps}kbps)`,
@@ -2954,6 +2974,14 @@ export default function App() {
       subtitles: loopSubtitlesManifestObj
     },
     subtitles: loopSubtitlesManifestObj,
+    subtitles_export: {
+      enabled:
+        exportSeparateSrtFiles || sidecarBurnInVideo || loopSubtitlesManifestObj.enabled,
+      burn_in_video: sidecarBurnInVideo,
+      export_separate_srt_files: exportSeparateSrtFiles,
+      strict_scene_duration_lock: strictSceneDurationLock,
+      languages: selectedSubtitleLanguages
+    },
     crossfade_loop: seamlessStitchEnabled,
     seamless_mode: seamlessTransitionMode,
     act_crossfade_sec: actCrossfadeSec,
@@ -3003,14 +3031,32 @@ export default function App() {
         idx,
         slot.act_timecode
       );
+      const resolvedVideoFile = (
+        slot.file_name ||
+        slot.video_file ||
+        slot.assets?.video_file ||
+        ''
+      ).trim();
+      const resolvedVoiceoverFile = (
+        slot.voiceover_file ||
+        slot.assets?.voiceover_file ||
+        ''
+      ).trim();
       return {
         ...slot,
         act_title: englishChapterTitle,
         title: englishChapterTitle,
-        file_name: slot.file_name ?? '',
+        file_name: resolvedVideoFile,
+        video_file: resolvedVideoFile,
+        voiceover_file: resolvedVoiceoverFile,
+        assets: {
+          ...(slot.assets || {}),
+          video_file: resolvedVideoFile,
+          voiceover_file: resolvedVoiceoverFile
+        },
         base_content: {
           ...(slot.base_content || {}),
-          file_name: slot.file_name ?? ''
+          file_name: resolvedVideoFile
         },
         inserts: slot.inserts.map(ins => ({
           ...ins,
@@ -3045,18 +3091,26 @@ export default function App() {
       rawSlot.base_content && typeof rawSlot.base_content === 'object'
         ? (rawSlot.base_content as Record<string, unknown>)
         : undefined;
+    const slotAssets =
+      rawSlot.assets && typeof rawSlot.assets === 'object'
+        ? (rawSlot.assets as Record<string, unknown>)
+        : undefined;
 
-    // Универсальная цепочка чтения имени файла слота (без дефолтного fallback-значения)
+    // Универсальная цепочка чтения имени файла слота (2.2-FINAL: assets.video_file || video_file || file_name)
     const rawFileName = String(
-      baseContent?.file_name ||
+      slotAssets?.video_file ||
+        rawSlot.video_file ||
+        rawSlot.file_name ||
+        baseContent?.file_name ||
         baseContent?.filename ||
         baseContent?.asset_name ||
         baseContent?.video_file ||
-        rawSlot.file_name ||
         rawSlot.filename ||
         rawSlot.asset_name ||
-        rawSlot.video_file ||
         ''
+    ).trim();
+    const rawVoiceoverFile = String(
+      slotAssets?.voiceover_file || rawSlot.voiceover_file || rawSlot.audio_file || ''
     ).trim();
 
     let rawInserts: unknown[] = [];
@@ -3205,6 +3259,13 @@ export default function App() {
           : undefined,
       asset_id: resolvedAssetId,
       file_name: rawFileName,
+      video_file: rawFileName,
+      ...(rawVoiceoverFile ? { voiceover_file: rawVoiceoverFile } : {}),
+      assets: {
+        ...(slotAssets || {}),
+        video_file: rawFileName,
+        ...(rawVoiceoverFile ? { voiceover_file: rawVoiceoverFile } : {})
+      },
       base_content: {
         ...(baseContent || {}),
         file_name: rawFileName
@@ -3309,7 +3370,7 @@ export default function App() {
         ? (raw.cloud_export as Record<string, unknown>)
         : undefined;
 
-    // 1. Parse unlimited timeline_slots / slots
+    // 1. Parse unlimited timeline_slots / slots / timeline / scenes
     const rawSlots = Array.isArray(raw.timeline_slots)
       ? raw.timeline_slots
       : Array.isArray(raw.slots)
@@ -3605,11 +3666,58 @@ export default function App() {
       setShortsFactoryEnabled(false);
     }
 
+    const importedSceneCount = Array.isArray(raw.timeline)
+      ? raw.timeline.length
+      : Array.isArray(raw.scenes)
+      ? raw.scenes.length
+      : 0;
     setImportedManifestName(sourceLabel);
     showToast(
-      `JSON-манифест «${sourceLabel}» (${rawSlots ? `${rawSlots.length} слотов` : 'конфиг'}) успешно применен!`,
+      `JSON-манифест «${sourceLabel}» (${
+        rawSlots
+          ? `${rawSlots.length} слотов`
+          : importedSceneCount > 0
+          ? `${importedSceneCount} сцен`
+          : 'конфиг'
+      }) успешно применен!`,
       'success'
     );
+  };
+
+  const handleGlobalManifestPaste = (e: React.ClipboardEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    const rawText = e.clipboardData?.getData('text/plain')?.trim();
+    if (!rawText || (!rawText.startsWith('{') && !rawText.startsWith('['))) return;
+    try {
+      const parsed = JSON.parse(rawText);
+      if (Array.isArray(parsed)) {
+        e.preventDefault();
+        applyManifestObject({ scenes: parsed }, 'clipboard_manifest.json');
+      } else if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (Array.isArray((parsed as Record<string, unknown>).timeline) ||
+          Array.isArray((parsed as Record<string, unknown>).scenes) ||
+          Array.isArray((parsed as Record<string, unknown>).timeline_slots) ||
+          Array.isArray((parsed as Record<string, unknown>).slots) ||
+          (parsed as Record<string, unknown>).manifest_version ||
+          (parsed as Record<string, unknown>).project_name)
+      ) {
+        e.preventDefault();
+        applyManifestObject(parsed as Record<string, unknown>, 'clipboard_manifest.json');
+      }
+    } catch {
+      // Игнорируем обычный текст из буфера обмена
+    }
   };
 
   // Import JSON Manifest from file input
@@ -4272,7 +4380,10 @@ export default function App() {
       </header>
 
       {/* ОСНОВНОЙ КОНТЕНТ */}
-      <main className="relative z-10 flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden">
+      <main
+        onPaste={handleGlobalManifestPaste}
+        className="relative z-10 flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
+      >
         {/* =========================================
             ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
            ========================================= */}
@@ -4316,6 +4427,13 @@ export default function App() {
             externalSceneSubtitleEdit={externalSceneSubtitleEdit}
             onConsumeExternalSceneSubtitleEdit={() => setExternalSceneSubtitleEdit(null)}
             youtubeSeo={exportYoutubeSeoBlock}
+            chaptersYoutubeText={verbaFlowChaptersTxt}
+            subtitlesExportConfig={{
+              strictSceneDurationLock,
+              burnInVideo: sidecarBurnInVideo,
+              exportSeparateSrtFiles,
+              languages: selectedSubtitleLanguages
+            }}
             telegramBotToken={telegramBotToken}
             telegramChatId={telegramChatId}
             onOpenConfigModal={openConfigModal}
