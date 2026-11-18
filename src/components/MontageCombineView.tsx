@@ -52,7 +52,7 @@ import {
   normalizeSceneSubtitlesMap,
   parseV21ManifestObject
 } from '../utils/manifestV21';
-import { buildCompactDispatchPayload } from '../utils/manifestDispatch';
+import { serializeCompactDispatchJson } from '../utils/manifestDispatch';
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
 
@@ -3319,11 +3319,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
     const fullManifestToDispatch = prepareValidatedManifestForOutput();
     const compactManifest = buildCompactDispatchManifest(fullManifestToDispatch);
-    const encodedResult = await buildCompactDispatchPayload(compactManifest);
+    const serialized = serializeCompactDispatchJson(compactManifest);
 
-    if (encodedResult.exceedsLimit) {
+    if (serialized.exceedsLimit) {
       onNotify(
-        `Сжатый payload (${encodedResult.finalLength.toLocaleString('ru-RU')} симв.) превышает лимит GitHub API 60 000 симв. Скачайте manifest.json и загрузите его в папку Google Drive.`,
+        'Манифест слишком большой для API — скачайте manifest.json и закиньте его в папку Google Drive',
         'error',
         {
           label: 'Скачать manifest.json',
@@ -3350,7 +3350,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              manifest_payload: encodedResult.payload
+              manifest_payload: serialized.payload
             }
           })
         }
@@ -3359,7 +3359,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       if (response.status === 204) {
         onStartRenderStatus(
           'Сборка успешно запущена в GitHub Actions!',
-          `Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)}${encodedResult.compressed ? ' • gzip' : ''}) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
+          `Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)} • ${serialized.finalLength} симв.) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
           'ZermeXX/aetherflow-render',
           dispatchTime
         );

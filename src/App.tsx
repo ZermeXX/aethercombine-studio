@@ -87,7 +87,7 @@ import {
   V21SubtitleLang,
   parseV21ManifestObject
 } from './utils/manifestV21';
-import { buildCompactDispatchPayload } from './utils/manifestDispatch';
+import { serializeCompactDispatchJson } from './utils/manifestDispatch';
 
 type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb' | 'editor';
 type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
@@ -4026,10 +4026,10 @@ export default function App() {
       }))
     };
 
-    const encodedLoop = await buildCompactDispatchPayload(compactLoopPayloadObj);
-    if (encodedLoop.exceedsLimit) {
+    const serializedLoop = serializeCompactDispatchJson(compactLoopPayloadObj);
+    if (serializedLoop.exceedsLimit) {
       showToast(
-        `Размер payload (${encodedLoop.finalLength.toLocaleString('ru-RU')} симв.) превышает лимит GitHub API 60 000 симв. Скачайте manifest.json и загрузите его на Google Drive.`,
+        'Манифест слишком большой для API — скачайте manifest.json и закиньте его в папку Google Drive',
         'error',
         {
           label: 'Скачать manifest.json',
@@ -4038,7 +4038,7 @@ export default function App() {
       );
       return;
     }
-    const manifestBase64 = encodedLoop.payload;
+    const manifestPayloadJson = serializedLoop.payload;
 
     lastDispatchWasPreflightRef.current = preflightOnly;
     setIsLoopDispatching(true);
@@ -4057,11 +4057,11 @@ export default function App() {
             ref: targetBranch,
             inputs: preflightOnly
               ? {
-                  manifest_payload: manifestBase64,
+                  manifest_payload: manifestPayloadJson,
                   preflight_only: 'true'
                 }
               : {
-                  manifest_payload: manifestBase64,
+                  manifest_payload: manifestPayloadJson,
                   preflight_only: 'false'
                 }
           })
@@ -4074,7 +4074,7 @@ export default function App() {
           : `Сборка «${manifestToSend.project_name}» запущена в GitHub Actions!`;
         const statusDesc = preflightOnly
           ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${manifestToSend.gdrive_folder_id || 'GDrive'}`
-          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (${encodedLoop.compressed ? 'gzip ' : 'Base64, '}${manifestBase64.length} байт) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
+          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (JSON, ${manifestPayloadJson.length} симв.) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
 
         showStatusBar(statusTitle, statusDesc, targetRepo, startTime);
         appendTerminalLog(
