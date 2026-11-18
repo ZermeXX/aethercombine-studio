@@ -1261,6 +1261,71 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     [continuousSceneTimings]
   );
 
+  const getSceneVoiceoverFileName = (sc: NarrativeSceneItem): string =>
+    (
+      sc.voiceover_file ||
+      sc.audio_file ||
+      sc.assets?.voiceover_file ||
+      sc.assets?.audio_file ||
+      ''
+    ).trim();
+
+  // Авто-расчёт длительности аудио по посегментным озвучкам (с учётом паузы 0.35с между фразами)
+  const perSceneVoiceStats = useMemo(() => {
+    const padSec = v21Locks.voiceoverSentencePadSec || VOICEOVER_SENTENCE_PAD_SEC;
+    const leadInSec = v21Locks.voiceoverLeadInSec || VOICEOVER_LEAD_IN_SEC;
+    let voiceScenesCount = 0;
+    let totalSec = 0;
+
+    narrativeScenes.forEach((sc, idx) => {
+      if (!getSceneVoiceoverFileName(sc)) return;
+      voiceScenesCount += 1;
+
+      if (typeof sc.voiceover_duration_sec === 'number' && sc.voiceover_duration_sec > 0) {
+        const lead = idx === 0 ? leadInSec : 0;
+        totalSec += lead + sc.voiceover_duration_sec + padSec;
+      } else if (
+        typeof sc.voice_start === 'number' &&
+        typeof sc.voice_end === 'number' &&
+        sc.voice_end > sc.voice_start
+      ) {
+        const lead =
+          idx === 0 && sc.voice_start > 0 ? Math.min(leadInSec, sc.voice_start) : 0;
+        totalSec += lead + (sc.voice_end - sc.voice_start) + padSec;
+      } else {
+        const timing = continuousSceneTimings[idx];
+        totalSec += timing
+          ? Math.max(0, timing.segEnd - timing.segStart)
+          : Math.max(0.5, Number(sc.duration) || 6);
+      }
+    });
+
+    return {
+      voiceScenesCount,
+      hasPerSceneVoiceovers: voiceScenesCount > 0,
+      totalVoiceDurationSec: Math.round(totalSec * 10) / 10
+    };
+  }, [
+    narrativeScenes,
+    continuousSceneTimings,
+    v21Locks.voiceoverLeadInSec,
+    v21Locks.voiceoverSentencePadSec
+  ]);
+
+  const isPerSceneVoiceMode =
+    !masterAudio.file_name.trim() && perSceneVoiceStats.hasPerSceneVoiceovers;
+
+  const effectiveMasterAudioDurationSec =
+    isPerSceneVoiceMode && perSceneVoiceStats.totalVoiceDurationSec > 0
+      ? perSceneVoiceStats.totalVoiceDurationSec
+      : masterAudioDurationSec;
+
+  useEffect(() => {
+    if (isPerSceneVoiceMode && perSceneVoiceStats.totalVoiceDurationSec > 0) {
+      setMasterAudioDurationSec(perSceneVoiceStats.totalVoiceDurationSec);
+    }
+  }, [isPerSceneVoiceMode, perSceneVoiceStats.totalVoiceDurationSec]);
+
   const calcTotalDuration = (scenesList: NarrativeSceneItem[]): string => {
     const totalSec = calcTotalDurationSec(scenesList);
     const mins = (totalSec / 60).toFixed(1);
@@ -1759,12 +1824,39 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         fade_in_sec: typeof ma.fade_in_sec === 'number' ? ma.fade_in_sec : prev.fade_in_sec,
         fade_out_sec: typeof ma.fade_out_sec === 'number' ? ma.fade_out_sec : prev.fade_out_sec
       }));
-      if (typeof ma.duration_sec === 'number' && ma.duration_sec > 0) {
+      if (!audioName) {
+        setMasterAudioFile(null);
+      } else if (typeof ma.duration_sec === 'number' && ma.duration_sec > 0) {
         setMasterAudioDurationSec(ma.duration_sec);
       }
     } else if (typeof raw.audio_filename === 'string' || typeof raw.master_audio === 'string') {
       const audioName = String(raw.master_audio || raw.audio_filename || '').trim();
       setMasterAudio(prev => ({ ...prev, file_name: audioName }));
+      if (!audioName) {
+        setMasterAudioFile(null);
+      }
+    } else if (
+      rawScenesArray &&
+      rawScenesArray.some(item => {
+        if (!item || typeof item !== 'object') return false;
+        const sc = item as Record<string, unknown>;
+        const assets =
+          sc.assets && typeof sc.assets === 'object'
+            ? (sc.assets as Record<string, unknown>)
+            : undefined;
+        return Boolean(
+          String(
+            assets?.voiceover_file ||
+              assets?.audio_file ||
+              sc.voiceover_file ||
+              sc.audio_file ||
+              ''
+          ).trim()
+        );
+      })
+    ) {
+      setMasterAudio(prev => ({ ...prev, file_name: '' }));
+      setMasterAudioFile(null);
     }
 
     // Маппинг cloud_export.target_folder_id
@@ -2122,10 +2214,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Авто-синхронизация длительности всех сцен по непрерывной голосовой шкале (без Speech Overlap)
   const syncScenesDurationToMasterAudio = () => {
-    if (narrativeScenes.length === 0 || masterAudioDurationSec <= 0) return;
+    const targetAudioDuration = effectiveMasterAudioDurationSec;
+    if (narrativeScenes.length === 0 || targetAudioDuration <= 0) return;
     const perScene = Math.max(
       1,
-      Math.round((masterAudioDurationSec / narrativeScenes.length) * 10) / 10
+      Math.round((targetAudioDuration / narrativeScenes.length) * 10) / 10
     );
 
     setNarrativeScenes(prev =>
@@ -2137,7 +2230,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       )
     );
     onNotify(
-      `Длительность ${narrativeScenes.length} сцен синхронизирована по непрерывной голосовой шкале (${masterAudioDurationSec} сек)!`,
+      `Длительность ${narrativeScenes.length} сцен синхронизирована по непрерывной голосовой шкале (${targetAudioDuration} сек)!`,
       'success'
     );
   };
@@ -2426,8 +2519,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Расчет расхождения между видео и мастер-аудио (Audio-to-Video Drift Guard)
   const driftDiffSec = useMemo(
-    () => Math.round((totalNarrativeDurationSec - masterAudioDurationSec) * 10) / 10,
-    [totalNarrativeDurationSec, masterAudioDurationSec]
+    () => Math.round((totalNarrativeDurationSec - effectiveMasterAudioDurationSec) * 10) / 10,
+    [totalNarrativeDurationSec, effectiveMasterAudioDurationSec]
   );
   const isDriftWithinTolerance = Math.abs(driftDiffSec) <= 2;
 
@@ -2578,7 +2671,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ): NarrativeMontageManifest => {
     const exportedScenes = scenesInput.map((sc, idx) => buildExportedSceneObject(sc, idx));
     const computedDuration = Math.round(calcTotalDurationSec(scenesInput) * 10) / 10;
-    const computedDriftDiff = Math.round((computedDuration - masterAudioDurationSec) * 10) / 10;
+    const computedDriftDiff =
+      Math.round((computedDuration - effectiveMasterAudioDurationSec) * 10) / 10;
     const rhythmMapPayload =
       typeof importedRhythmMap === 'string'
         ? importedRhythmMap
@@ -2617,7 +2711,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         volume: masterAudio.volume,
         fade_in_sec: masterAudio.fade_in_sec,
         fade_out_sec: masterAudio.fade_out_sec,
-        duration_sec: masterAudioDurationSec
+        duration_sec: effectiveMasterAudioDurationSec
       },
       export_settings: {
         ...exportSettings,
@@ -2720,7 +2814,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         : {}),
       drift_guard: {
         video_duration_sec: computedDuration,
-        audio_duration_sec: masterAudioDurationSec,
+        audio_duration_sec: effectiveMasterAudioDurationSec,
         diff_sec: computedDriftDiff,
         within_tolerance: Math.abs(computedDriftDiff) <= 2
       },
@@ -2781,7 +2875,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       gdriveFolderId,
       ambientAudio,
       masterAudio,
-      masterAudioDurationSec,
+      effectiveMasterAudioDurationSec,
       exportSettings,
       v21Locks,
       subtitlesConfigObject,
@@ -3759,9 +3853,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <input
                   type="text"
                   value={masterAudio.file_name}
-                  onChange={e =>
-                    setMasterAudio(prev => ({ ...prev, file_name: e.target.value }))
-                  }
+                  onChange={e => {
+                    const nextName = e.target.value;
+                    if (!nextName.trim()) {
+                      setMasterAudioFile(null);
+                    }
+                    setMasterAudio(prev => ({ ...prev, file_name: nextName }));
+                  }}
                   placeholder="Напр.: master_voiceover.wav или выберите локальный файл →"
                   className="flex-1 min-w-0 bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-2 text-xs font-mono text-amber-300 outline-none"
                 />
@@ -4167,19 +4265,26 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   Матрица рассинхрона (Audio-to-Video Drift Guard)
                 </h3>
               </div>
-              <span
-                className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
-                  isDriftWithinTolerance
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                    : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                }`}
-              >
-                {isDriftWithinTolerance
-                  ? `В пределах нормы (±2 сек)`
-                  : driftDiffSec > 0
-                  ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
-                  : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
-              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {isPerSceneVoiceMode && (
+                  <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border bg-emerald-500/15 border-emerald-500/40 text-emerald-300">
+                    Авто-синхронизация по {perSceneVoiceStats.voiceScenesCount} сценам (Zero Overlap)
+                  </span>
+                )}
+                <span
+                  className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded border ${
+                    isDriftWithinTolerance
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                  }`}
+                >
+                  {isDriftWithinTolerance
+                    ? `В пределах нормы (±2 сек)`
+                    : driftDiffSec > 0
+                    ? `Видео длиннее аудио на ${Math.round(Math.abs(driftDiffSec))} сек`
+                    : `Аудио длиннее видео на ${Math.round(Math.abs(driftDiffSec))} сек`}
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
@@ -4194,16 +4299,26 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
               <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
                 <label className="text-[10px] text-slate-400 uppercase block mb-0.5">
-                  Длительность мастер-аудио (сек):
+                  {isPerSceneVoiceMode
+                    ? 'Сумма посегментного аудио (сек):'
+                    : 'Длительность мастер-аудио (сек):'}
                 </label>
                 <input
                   type="number"
                   min={1}
                   max={36000}
-                  step={1}
-                  value={masterAudioDurationSec}
-                  onChange={e => setMasterAudioDurationSec(Math.max(1, Number(e.target.value) || 60))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none"
+                  step={0.1}
+                  value={effectiveMasterAudioDurationSec}
+                  readOnly={isPerSceneVoiceMode}
+                  onChange={e => {
+                    if (isPerSceneVoiceMode) return;
+                    setMasterAudioDurationSec(Math.max(1, Number(e.target.value) || 60));
+                  }}
+                  className={`w-full bg-slate-950 border rounded-lg px-2 py-1 text-xs font-mono font-bold outline-none ${
+                    isPerSceneVoiceMode
+                      ? 'border-emerald-500/40 text-emerald-300'
+                      : 'border-slate-700 text-amber-300'
+                  }`}
                 />
               </div>
 
@@ -4227,14 +4342,18 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <span className="text-[11px] text-slate-400">
-                Автоматический контроль длины 100–150+ сцен против хронометража дикторской озвучки.
+                {isPerSceneVoiceMode
+                  ? `Посегментный режим: сумма ${perSceneVoiceStats.voiceScenesCount} сцен с паузами +${(
+                      v21Locks.voiceoverSentencePadSec || VOICEOVER_SENTENCE_PAD_SEC
+                    ).toFixed(2)}с = ${effectiveMasterAudioDurationSec} сек.`
+                  : 'Автоматический контроль длины 100–150+ сцен против хронометража дикторской озвучки.'}
               </span>
               <button
                 type="button"
                 onClick={syncScenesDurationToMasterAudio}
                 className="min-h-[40px] bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-semibold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({masterAudioDurationSec}с)
+                <RefreshCw className="w-3.5 h-3.5" /> Подогнать сцены под аудио ({effectiveMasterAudioDurationSec}с)
               </button>
             </div>
           </div>
