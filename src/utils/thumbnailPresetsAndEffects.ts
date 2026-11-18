@@ -3,33 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type TopLineGradientId =
-  | 'auto'
-  | 'gold'
-  | 'silver'
-  | 'stone'
-  | 'white'
-  | 'ice'
-  | 'amber'
-  | 'fire'
-  | 'emerald'
-  | 'cyan';
-
-export type BottomPlaqueStyleId =
-  | 'none'
-  | 'royal_navy_gold'
-  | 'crimson_brush'
-  | 'highlight_tape'
-  | 'ambient_glass'
-  | 'classified_stamp';
-
-export interface BottomPlaquePaletteOverride {
-  bgStart: string;
-  bgEnd: string;
-  border: string;
-  text: string;
-}
-
 export interface SlotBgAdjustConfig {
   contrastPct: number;
   brightnessPct: number;
@@ -48,495 +21,173 @@ export const YOUTUBE_CINEMA_BG_ADJUST: SlotBgAdjustConfig = {
   vibrancePct: 110
 };
 
-export type PresetCategoryId = 'all' | 'history' | 'mystery' | 'science' | 'ambient';
+export type SplashShapeId =
+  | 'monolith_bristle'
+  | 'jagged_splash'
+  | 'bottom_slash'
+  | 'double_strokes'
+  | 'distressed_grunge'
+  | 'tapered_speed'
+  | 'none';
 
-export interface YoutubeThumbnailPreset {
+export type SplashColorPresetId = 'red' | 'charcoal' | 'gold' | 'custom' | 'none';
+
+export type CornerPositionPresetId = 'top_left' | 'bottom_right' | 'bottom_left';
+
+export interface LineColorSwatch {
   id: string;
-  index: number;
-  category: Exclude<PresetCategoryId, 'all'>;
-  topLine: string;
-  bottomLine: string;
-  topGradient: TopLineGradientId;
-  bottomBadgeStyle: BottomPlaqueStyleId;
-  bottomPlaqueOverride?: BottomPlaquePaletteOverride;
-  topFontId: string;
-  bottomFontId: string;
-  styleTag: string;
-  swatchTop: string;
-  swatchBottomBg: string;
-  swatchBottomText: string;
+  label: string;
 }
 
-export const PRESET_CATEGORIES: Array<{ id: PresetCategoryId; label: string }> = [
-  { id: 'all', label: 'Все (20)' },
-  { id: 'history', label: 'История и Масштаб' },
-  { id: 'mystery', label: 'Тайны и Расследования' },
-  { id: 'science', label: 'Наука и Факты' },
-  { id: 'ambient', label: 'Эмбиент 3 часа' }
+export const LINE_COLOR_SWATCHES: LineColorSwatch[] = [
+  { id: '#FFFFFF', label: 'Белый' },
+  { id: '#FFD600', label: 'Жёлтый' },
+  { id: '#EF4444', label: 'Алый' },
+  { id: '#38BDF8', label: 'Голубой' },
+  { id: '#F97316', label: 'Оранжевый' }
 ];
 
-export const TOP_LINE_GRADIENT_OPTIONS: Array<{
-  id: TopLineGradientId;
+export interface SplashShapeOption {
+  id: SplashShapeId;
   label: string;
-  swatch: string;
-  isPrimary?: boolean;
-}> = [
-  { id: 'auto', label: 'Авто', swatch: 'linear-gradient(135deg, #f8fafc, #94a3b8)', isPrimary: true },
-  { id: 'gold', label: 'Золото', swatch: 'linear-gradient(180deg, #FFF7CC, #F5A623, #B86B00)', isPrimary: true },
-  { id: 'silver', label: 'Серебро', swatch: 'linear-gradient(180deg, #FFFFFF, #CBD5E1, #64748B)', isPrimary: true },
-  { id: 'stone', label: 'Камень', swatch: 'linear-gradient(180deg, #FAF7F0, #C7BCA6, #786D58)', isPrimary: true },
-  { id: 'white', label: 'Чистый белый', swatch: 'linear-gradient(180deg, #FFFFFF, #E2E8F0)', isPrimary: true },
-  { id: 'ice', label: 'Лёд', swatch: 'linear-gradient(180deg, #FFFFFF, #7DD3FC, #0284C7)' },
-  { id: 'amber', label: 'Янтарь', swatch: 'linear-gradient(180deg, #FEF3C7, #FBBF24, #D97706)' },
-  { id: 'fire', label: 'Огонь', swatch: 'linear-gradient(180deg, #FEF08A, #F97316, #DC2626)' },
-  { id: 'emerald', label: 'Изумруд', swatch: 'linear-gradient(180deg, #ECFDF5, #34D399, #059669)' },
-  { id: 'cyan', label: 'Циан', swatch: 'linear-gradient(180deg, #ECFEFF, #22D3EE, #0891B2)' }
-];
+  subtitle: string;
+}
 
-export const BOTTOM_PLAQUE_STYLE_OPTIONS: Array<{
-  id: BottomPlaqueStyleId;
-  label: string;
-  shortDesc: string;
-  previewBg: string;
-  previewBorder: string;
-  previewText: string;
-}> = [
+export const SPLASH_SHAPE_OPTIONS: SplashShapeOption[] = [
+  {
+    id: 'monolith_bristle',
+    label: 'Широкая сухая кисть',
+    subtitle: 'Monolith Bristle'
+  },
+  {
+    id: 'jagged_splash',
+    label: 'Рваный агрессивный мазок',
+    subtitle: 'Jagged Splash'
+  },
+  {
+    id: 'bottom_slash',
+    label: 'Нижний акцентный росчерк',
+    subtitle: 'Bottom Slash'
+  },
+  {
+    id: 'double_strokes',
+    label: 'Двойной раздельный мазок',
+    subtitle: 'Double Strokes'
+  },
+  {
+    id: 'distressed_grunge',
+    label: 'Фактурная потёртая кисть',
+    subtitle: 'Distressed Grunge'
+  },
+  {
+    id: 'tapered_speed',
+    label: 'Клиновидный росчерк',
+    subtitle: 'Tapered Speed Brush'
+  },
   {
     id: 'none',
-    label: 'Нет (только текст)',
-    shortDesc: 'Чистая 2-я строка с обводкой',
-    previewBg: 'rgba(15, 23, 42, 0.5)',
-    previewBorder: 'rgba(255, 255, 255, 0.2)',
-    previewText: '#F8FAFC'
-  },
-  {
-    id: 'royal_navy_gold',
-    label: 'Синяя рамка с золотой каймой',
-    shortDesc: 'Royal Navy & Gold',
-    previewBg: 'linear-gradient(180deg, #0D254D, #061124)',
-    previewBorder: '#F6D365',
-    previewText: '#FEF3C7'
-  },
-  {
-    id: 'crimson_brush',
-    label: 'Алый мазок кисти',
-    shortDesc: 'Distressed Crimson Brush',
-    previewBg: 'linear-gradient(135deg, #B91C1C, #7F1D1D)',
-    previewBorder: '#EF4444',
-    previewText: '#FFFFFF'
-  },
-  {
-    id: 'highlight_tape',
-    label: 'Жёлтый маркер / скотч',
-    shortDesc: 'Highlight Tape',
-    previewBg: 'linear-gradient(180deg, #FDE047, #EAB308)',
-    previewBorder: '#FEF08A',
-    previewText: '#090D16'
-  },
-  {
-    id: 'ambient_glass',
-    label: 'Тёмное матовое стекло',
-    shortDesc: 'Ambient Glass',
-    previewBg: 'rgba(11, 15, 25, 0.85)',
-    previewBorder: 'rgba(255, 255, 255, 0.28)',
-    previewText: '#F8FAFC'
-  },
-  {
-    id: 'classified_stamp',
-    label: 'Красный архивный штамп',
-    shortDesc: 'Classified Stamp',
-    previewBg: 'rgba(24, 6, 8, 0.82)',
-    previewBorder: '#EF4444',
-    previewText: '#FCA5A5'
+    label: 'Без подложки',
+    subtitle: 'None'
   }
 ];
 
-export const YOUTUBE_THUMBNAIL_PRESETS: YoutubeThumbnailPreset[] = [
+export interface SplashColorSwatch {
+  id: string;
+  label: string;
+  mainColor: string;
+  edgeColor: string;
+}
+
+export const SPLASH_COLOR_SWATCHES: SplashColorSwatch[] = [
   {
-    id: 'yt_01_bigger_london',
-    index: 1,
-    category: 'history',
-    topLine: 'BIGGER THAN',
-    bottomLine: 'LONDON',
-    topGradient: 'gold',
-    bottomBadgeStyle: 'royal_navy_gold',
-    topFontId: 'gg_cinzel',
-    bottomFontId: 'gg_cinzel',
-    styleTag: 'Синяя рамка + золото · Античный сериф',
-    swatchTop: '#FFE58F',
-    swatchBottomBg: '#0B2145',
-    swatchBottomText: '#FEF3C7'
+    id: 'crimson_brand',
+    label: 'Фирменный алый',
+    mainColor: '#E10613',
+    edgeColor: '#8A0009'
   },
   {
-    id: 'yt_02_40000_vanished',
-    index: 2,
-    category: 'mystery',
-    topLine: '40,000',
-    bottomLine: 'VANISHED',
-    topGradient: 'stone',
-    bottomBadgeStyle: 'crimson_brush',
-    topFontId: 'gg_cinzel',
-    bottomFontId: 'gg_montserrat',
-    styleTag: 'Алый мазок кисти · Каменное золото',
-    swatchTop: '#E5DEC9',
-    swatchBottomBg: '#B91C1C',
-    swatchBottomText: '#FFFFFF'
+    id: 'dark_carmine',
+    label: 'Тёмный кармин',
+    mainColor: '#B91C1C',
+    edgeColor: '#580606'
   },
   {
-    id: 'yt_03_why_nobody',
-    index: 3,
-    category: 'mystery',
-    topLine: 'WHY NOBODY',
-    bottomLine: 'ENTERS HERE',
-    topGradient: 'white',
-    bottomBadgeStyle: 'highlight_tape',
-    topFontId: 'gg_montserrat',
-    bottomFontId: 'gg_bebas_neue',
-    styleTag: 'Жёлтый маркер · Мощный гротеск',
-    swatchTop: '#FFFFFF',
-    swatchBottomBg: '#FACC15',
-    swatchBottomText: '#090D16'
+    id: 'coal_black',
+    label: 'Угольно-чёрный',
+    mainColor: '#18181B',
+    edgeColor: '#09090B'
   },
   {
-    id: 'yt_04_dark_truth',
-    index: 4,
-    category: 'mystery',
-    topLine: 'THE DARK',
-    bottomLine: 'TRUTH',
-    topGradient: 'silver',
-    bottomBadgeStyle: 'crimson_brush',
-    bottomPlaqueOverride: {
-      bgStart: '#0B0B10',
-      bgEnd: '#3B080E',
-      border: '#EF4444',
-      text: '#F8FAFC'
-    },
-    topFontId: 'gg_montserrat',
-    bottomFontId: 'gg_oswald',
-    styleTag: 'Чёрно-красная плашка · Серебристый металл',
-    swatchTop: '#CBD5E1',
-    swatchBottomBg: '#27070C',
-    swatchBottomText: '#F8FAFC'
+    id: 'amber_gold',
+    label: 'Янтарно-золотой',
+    mainColor: '#D97706',
+    edgeColor: '#78350F'
   },
   {
-    id: 'yt_05_in_4_minutes',
-    index: 5,
-    category: 'science',
-    topLine: 'IT HAPPENED',
-    bottomLine: 'IN 4 MINUTES',
-    topGradient: 'white',
-    bottomBadgeStyle: 'crimson_brush',
-    bottomPlaqueOverride: {
-      bgStart: '#E11D48',
-      bgEnd: '#9F1239',
-      border: '#FB7185',
-      text: '#FFFFFF'
-    },
-    topFontId: 'gg_rubik',
-    bottomFontId: 'gg_montserrat',
-    styleTag: 'Неоново-алый акцент · Чистый гротеск',
-    swatchTop: '#FFFFFF',
-    swatchBottomBg: '#E11D48',
-    swatchBottomText: '#FFFFFF'
-  },
-  {
-    id: 'yt_06_build_this',
-    index: 6,
-    category: 'history',
-    topLine: 'HOW DID THEY',
-    bottomLine: 'BUILD THIS?',
-    topGradient: 'cyan',
-    bottomBadgeStyle: 'highlight_tape',
-    topFontId: 'gg_russo_one',
-    bottomFontId: 'gg_bebas_neue',
-    styleTag: 'Жёлтый индустриальный блок · Циан',
-    swatchTop: '#67E8F9',
-    swatchBottomBg: '#FACC15',
-    swatchBottomText: '#090D16'
-  },
-  {
-    id: 'yt_07_empire_gold',
-    index: 7,
-    category: 'history',
-    topLine: 'EMPIRE OF',
-    bottomLine: 'PURE GOLD',
-    topGradient: 'gold',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: {
-      bgStart: '#24093D',
-      bgEnd: '#3D1063',
-      border: '#F6D365',
-      text: '#FEF08A'
-    },
-    topFontId: 'gg_cinzel_decorative',
-    bottomFontId: 'gg_cinzel',
-    styleTag: 'Пурпурно-золотая рамка · Античный сериф',
-    swatchTop: '#FFE58F',
-    swatchBottomBg: '#310D52',
-    swatchBottomText: '#FEF08A'
-  },
-  {
-    id: 'yt_08_destroyed_overnight',
-    index: 8,
-    category: 'mystery',
-    topLine: 'DESTROYED',
-    bottomLine: 'OVERNIGHT',
-    topGradient: 'fire',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(18, 9, 6, 0.92)',
-      bgEnd: 'rgba(38, 12, 6, 0.95)',
-      border: '#EA580C',
-      text: '#FFEDD5'
-    },
-    topFontId: 'gg_oswald',
-    bottomFontId: 'gg_russo_one',
-    styleTag: 'Тёмная обугленная плашка · Огненный градиент',
-    swatchTop: '#FB923C',
-    swatchBottomBg: '#1C0B06',
-    swatchBottomText: '#FFEDD5'
-  },
-  {
-    id: 'yt_09_classified',
-    index: 9,
-    category: 'mystery',
-    topLine: 'CLASSIFIED',
-    bottomLine: 'FILE #09',
-    topGradient: 'white',
-    bottomBadgeStyle: 'classified_stamp',
-    topFontId: 'gg_jetbrains_mono',
-    bottomFontId: 'gg_special_elite',
-    styleTag: 'Красный архивный штамп · Моноширинный',
-    swatchTop: '#F8FAFC',
-    swatchBottomBg: '#2A0709',
-    swatchBottomText: '#FCA5A5'
-  },
-  {
-    id: 'yt_10_below_zero',
-    index: 10,
-    category: 'science',
-    topLine: '72 HOURS',
-    bottomLine: 'BELOW ZERO',
-    topGradient: 'ice',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: {
-      bgStart: '#061A38',
-      bgEnd: '#0C2D5E',
-      border: '#38BDF8',
-      text: '#E0F2FE'
-    },
-    topFontId: 'gg_montserrat',
-    bottomFontId: 'gg_exo_2',
-    styleTag: 'Тёмно-синий блок · Ледяной голубой',
-    swatchTop: '#BAE6FD',
-    swatchBottomBg: '#09234A',
-    swatchBottomText: '#E0F2FE'
-  },
-  {
-    id: 'yt_11_1000_years',
-    index: 11,
-    category: 'history',
-    topLine: '1,000 YEARS',
-    bottomLine: 'LATER...',
-    topGradient: 'amber',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: {
-      bgStart: '#171547',
-      bgEnd: '#2B2673',
-      border: '#F59E0B',
-      text: '#FEF3C7'
-    },
-    topFontId: 'gg_cormorant',
-    bottomFontId: 'gg_cinzel',
-    styleTag: 'Глубокий индиго · Янтарный градиент',
-    swatchTop: '#FCD34D',
-    swatchBottomBg: '#1F1C5C',
-    swatchBottomText: '#FEF3C7'
-  },
-  {
-    id: 'yt_12_100_billion',
-    index: 12,
-    category: 'science',
-    topLine: '$100 BILLION',
-    bottomLine: 'MISTAKE',
-    topGradient: 'emerald',
-    bottomBadgeStyle: 'crimson_brush',
-    bottomPlaqueOverride: {
-      bgStart: '#DC2626',
-      bgEnd: '#991B1B',
-      border: '#F87171',
-      text: '#FFFFFF'
-    },
-    topFontId: 'gg_montserrat',
-    bottomFontId: 'gg_bebas_neue',
-    styleTag: 'Тревожный красный баннер · Изумрудный верх',
-    swatchTop: '#6EE7B7',
-    swatchBottomBg: '#B91C1C',
-    swatchBottomText: '#FFFFFF'
-  },
-  {
-    id: 'yt_13_forbidden_city',
-    index: 13,
-    category: 'history',
-    topLine: 'INSIDE THE',
-    bottomLine: 'FORBIDDEN CITY',
-    topGradient: 'white',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: {
-      bgStart: '#090D16',
-      bgEnd: '#111827',
-      border: '#EAB308',
-      text: '#FEF08A'
-    },
-    topFontId: 'gg_cinzel',
-    bottomFontId: 'gg_playfair',
-    styleTag: 'Тонкая золотая рамка · Строгий белый',
-    swatchTop: '#FFFFFF',
-    swatchBottomBg: '#0D121F',
-    swatchBottomText: '#FEF08A'
-  },
-  {
-    id: 'yt_14_lied_to',
-    index: 14,
-    category: 'mystery',
-    topLine: 'YOU WERE',
-    bottomLine: 'LIED TO',
-    topGradient: 'white',
-    bottomBadgeStyle: 'highlight_tape',
-    topFontId: 'gg_montserrat',
-    bottomFontId: 'gg_bebas_neue',
-    styleTag: 'Жёлтая лента · Контрастный белый',
-    swatchTop: '#FFFFFF',
-    swatchBottomBg: '#FDE047',
-    swatchBottomText: '#090D16'
-  },
-  {
-    id: 'yt_15_last_survivor',
-    index: 15,
-    category: 'mystery',
-    topLine: 'THE LAST',
-    bottomLine: 'SURVIVOR',
-    topGradient: 'stone',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(28, 20, 12, 0.90)',
-      bgEnd: 'rgba(15, 10, 6, 0.94)',
-      border: '#D6B885',
-      text: '#FEF3C7'
-    },
-    topFontId: 'gg_playfair',
-    bottomFontId: 'gg_cormorant',
-    styleTag: 'Тёмная сепия · Кремовый кино-сериф',
-    swatchTop: '#F5EFE0',
-    swatchBottomBg: '#1C140C',
-    swatchBottomText: '#FEF3C7'
-  },
-  {
-    id: 'yt_16_one_mistake',
-    index: 16,
-    category: 'science',
-    topLine: 'ONE MISTAKE',
-    bottomLine: 'CHANGED ALL',
-    topGradient: 'amber',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(24, 14, 6, 0.90)',
-      bgEnd: 'rgba(12, 8, 5, 0.94)',
-      border: '#F59E0B',
-      text: '#FDE68A'
-    },
-    topFontId: 'gg_russo_one',
-    bottomFontId: 'gg_oswald',
-    styleTag: 'Закатное золото · Крупный рубленый шрифт',
-    swatchTop: '#FBBF24',
-    swatchBottomBg: '#180E06',
-    swatchBottomText: '#FDE68A'
-  },
-  {
-    id: 'yt_17_down_there',
-    index: 17,
-    category: 'mystery',
-    topLine: 'SOMETHING',
-    bottomLine: 'IS DOWN THERE',
-    topGradient: 'cyan',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(3, 5, 9, 0.94)',
-      bgEnd: 'rgba(7, 13, 22, 0.96)',
-      border: '#22D3EE',
-      text: '#CFFAFE'
-    },
-    topFontId: 'gg_oswald',
-    bottomFontId: 'gg_exo_2',
-    styleTag: 'Глубокий чёрный блок · Холодная бирюза',
-    swatchTop: '#67E8F9',
-    swatchBottomBg: '#05080F',
-    swatchBottomText: '#CFFAFE'
-  },
-  {
-    id: 'yt_18_lost_4000',
-    index: 18,
-    category: 'history',
-    topLine: 'LOST FOR',
-    bottomLine: '4,000 YEARS',
-    topGradient: 'stone',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: {
-      bgStart: '#0D4F54',
-      bgEnd: '#0F766E',
-      border: '#5EEAD4',
-      text: '#F0FDFA'
-    },
-    topFontId: 'gg_cinzel',
-    bottomFontId: 'gg_montserrat',
-    styleTag: 'Бирюзовая плашка · Текстура песчаника',
-    swatchTop: '#E5DEC9',
-    swatchBottomBg: '#0F6664',
-    swatchBottomText: '#F0FDFA'
-  },
-  {
-    id: 'yt_19_deep_sleep',
-    index: 19,
-    category: 'ambient',
-    topLine: '3 HOURS',
-    bottomLine: 'DEEP SLEEP',
-    topGradient: 'amber',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(11, 15, 25, 0.80)',
-      bgEnd: 'rgba(17, 24, 39, 0.88)',
-      border: 'rgba(251, 191, 36, 0.45)',
-      text: '#FEF3C7'
-    },
-    topFontId: 'gg_cormorant',
-    bottomFontId: 'gg_inter',
-    styleTag: 'Тёмное матовое стекло · Мягкий янтарь',
-    swatchTop: '#FDE68A',
-    swatchBottomBg: '#0F172A',
-    swatchBottomText: '#FEF3C7'
-  },
-  {
-    id: 'yt_20_rain_fire',
-    index: 20,
-    category: 'ambient',
-    topLine: 'RAIN & FIRE',
-    bottomLine: 'NO ADS',
-    topGradient: 'silver',
-    bottomBadgeStyle: 'ambient_glass',
-    bottomPlaqueOverride: {
-      bgStart: 'rgba(42, 16, 8, 0.88)',
-      bgEnd: 'rgba(20, 8, 4, 0.92)',
-      border: '#FB923C',
-      text: '#FFEDD5'
-    },
-    topFontId: 'gg_cormorant',
-    bottomFontId: 'gg_montserrat',
-    styleTag: 'Тёплая каминная плашка · Лунное серебро',
-    swatchTop: '#E2E8F0',
-    swatchBottomBg: '#2A1008',
-    swatchBottomText: '#FFEDD5'
+    id: 'cobalt_blue',
+    label: 'Кобальтово-синий',
+    mainColor: '#1D4ED8',
+    edgeColor: '#1E3A8A'
   }
 ];
+
+export const DEFAULT_BADGE_CAPSULES: [string, string, string] = [
+  '4K ULTRA HD',
+  'DOCUMENTARY',
+  'TRUE STORY'
+];
+
+/**
+ * Динамически разделяет заголовок текущего проекта из состояния студии на две ударные строки
+ * (без хардкода конкретных названий видеороликов).
+ */
+export function splitProjectTitleIntoTwoLines(rawTitle: string): {
+  line1: string;
+  line2: string;
+} {
+  const cleaned = (rawTitle || '')
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) {
+    return { line1: '', line2: '' };
+  }
+
+  // Если есть явный разделитель двоеточие / тире / слэш — берём первую часть для чистого хука
+  const colonSplit = cleaned.split(/\s*[:|—]\s*/).filter(Boolean);
+  const candidate =
+    colonSplit.length > 1 && colonSplit[0].split(/\s+/).length >= 2
+      ? colonSplit[0].trim()
+      : cleaned;
+
+  const words = candidate.split(/\s+/).filter(Boolean).slice(0, 8);
+  if (words.length === 0) return { line1: '', line2: '' };
+  if (words.length === 1) return { line1: words[0].toUpperCase(), line2: '' };
+  if (words.length === 2) {
+    return {
+      line1: words[0].toUpperCase(),
+      line2: words[1].toUpperCase()
+    };
+  }
+
+  let bestSplit = 1;
+  let bestDiff = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const leftLen = words.slice(0, i).join(' ').length;
+    const rightLen = words.slice(i).join(' ').length;
+    const diff = Math.abs(leftLen - rightLen);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestSplit = i;
+    }
+  }
+
+  return {
+    line1: words.slice(0, bestSplit).join(' ').toUpperCase(),
+    line2: words.slice(bestSplit).join(' ').toUpperCase()
+  };
+}
 
 /**
  * Локальная обработка фонового изображения (Контраст, Яркость, Мягкая сочность/Vibrance, Резкость 3x3)
@@ -629,14 +280,12 @@ export function renderAdjustedBackgroundToCanvas(
         let g = data[i + 1] * brightness;
         let b = data[i + 2] * brightness;
 
-        // Глубина теней и света (Contrast centered at 128)
         if (contrast !== 1) {
           r = (r - 128) * contrast + 128;
           g = (g - 128) * contrast + 128;
           b = (b - 128) * contrast + 128;
         }
 
-        // Деликатная сочность (Vibrance): усиливает менее насыщенные тона и тёплые золотые блики без кислотности
         if (vibrance !== 0) {
           const maxC = r > g ? (r > b ? r : b) : g > b ? g : b;
           const minC = r < g ? (r < b ? r : b) : g < b ? g : b;
@@ -687,419 +336,784 @@ export function renderAdjustedBackgroundToCanvas(
   ctx.drawImage(bgCanvas, 0, 0);
 }
 
-export function buildTopLine3DGradient(
-  ctx: CanvasRenderingContext2D,
-  gradientId: Exclude<TopLineGradientId, 'auto'>,
-  topY: number,
-  bottomY: number
-): CanvasGradient {
-  const grad = ctx.createLinearGradient(0, topY, 0, bottomY);
-  switch (gradientId) {
-    case 'gold':
-      grad.addColorStop(0.0, '#FFF8D6');
-      grad.addColorStop(0.24, '#FFE58F');
-      grad.addColorStop(0.58, '#F5A623');
-      grad.addColorStop(0.92, '#B86B00');
-      grad.addColorStop(1.0, '#8A4800');
-      break;
-    case 'silver':
-      grad.addColorStop(0.0, '#FFFFFF');
-      grad.addColorStop(0.32, '#E2E8F0');
-      grad.addColorStop(0.54, '#94A3B8');
-      grad.addColorStop(0.76, '#CBD5E1');
-      grad.addColorStop(1.0, '#475569');
-      break;
-    case 'stone':
-      grad.addColorStop(0.0, '#FAF7F0');
-      grad.addColorStop(0.35, '#DFD7C5');
-      grad.addColorStop(0.72, '#A89B82');
-      grad.addColorStop(1.0, '#6E624D');
-      break;
-    case 'ice':
-      grad.addColorStop(0.0, '#FFFFFF');
-      grad.addColorStop(0.38, '#BAE6FD');
-      grad.addColorStop(0.78, '#38BDF8');
-      grad.addColorStop(1.0, '#0369A1');
-      break;
-    case 'amber':
-      grad.addColorStop(0.0, '#FFFBEB');
-      grad.addColorStop(0.35, '#FDE68A');
-      grad.addColorStop(0.72, '#F59E0B');
-      grad.addColorStop(1.0, '#B45309');
-      break;
-    case 'fire':
-      grad.addColorStop(0.0, '#FEF9C3');
-      grad.addColorStop(0.32, '#FDBA74');
-      grad.addColorStop(0.68, '#F97316');
-      grad.addColorStop(1.0, '#B91C1C');
-      break;
-    case 'emerald':
-      grad.addColorStop(0.0, '#ECFDF5');
-      grad.addColorStop(0.35, '#6EE7B7');
-      grad.addColorStop(0.75, '#10B981');
-      grad.addColorStop(1.0, '#047857');
-      break;
-    case 'cyan':
-      grad.addColorStop(0.0, '#ECFEFF');
-      grad.addColorStop(0.36, '#A5F3FC');
-      grad.addColorStop(0.74, '#06B6D4');
-      grad.addColorStop(1.0, '#0E7490');
-      break;
-    case 'white':
-    default:
-      grad.addColorStop(0.0, '#FFFFFF');
-      grad.addColorStop(0.55, '#F8FAFC');
-      grad.addColorStop(1.0, '#CBD5E1');
-      break;
-  }
-  return grad;
-}
-
 function deterministicHash(seed: number): number {
   const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
 }
 
-/**
- * Отрисовка нижней акцентной плашки под строкой текста (6 стилей + цветовые пресеты)
- */
-export function drawBottomAccentPlaque(
+function adjustHexBrightness(hex: string, factor: number, addBias: number = 0): string {
+  const clean = hex.replace('#', '').trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return hex;
+  const r = Math.max(
+    0,
+    Math.min(255, Math.round(parseInt(clean.slice(0, 2), 16) * factor + addBias))
+  );
+  const g = Math.max(
+    0,
+    Math.min(255, Math.round(parseInt(clean.slice(2, 4), 16) * factor + addBias))
+  );
+  const b = Math.max(
+    0,
+    Math.min(255, Math.round(parseInt(clean.slice(4, 6), 16) * factor + addBias))
+  );
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+export function buildVertical3DFill(
   ctx: CanvasRenderingContext2D,
-  style: BottomPlaqueStyleId,
+  hexColor: string,
+  topY: number,
+  bottomY: number,
+  useSubtle3DGradient: boolean
+): string | CanvasGradient {
+  const normalized = (hexColor || '#FFFFFF').trim().toUpperCase();
+  if (!useSubtle3DGradient) return normalized;
+
+  const grad = ctx.createLinearGradient(0, topY, 0, bottomY);
+  if (normalized === '#FFD600') {
+    grad.addColorStop(0.0, '#FFF176');
+    grad.addColorStop(0.45, '#FFD600');
+    grad.addColorStop(1.0, '#E09600');
+  } else {
+    grad.addColorStop(0.0, adjustHexBrightness(normalized, 1.18));
+    grad.addColorStop(0.48, normalized);
+    grad.addColorStop(1.0, adjustHexBrightness(normalized, 0.78));
+  }
+  return grad;
+}
+
+export interface ResolvedSplashColorPalette {
+  coreColor: string;
+  mainColor: string;
+  edgeColor: string;
+  deepColor: string;
+}
+
+/**
+ * Автоматически рассчитывает объёмный градиент и внутреннюю глубину
+ * от любого выбранного пользователем цвета (основной тон в центре + глубокий оттенок по краям).
+ */
+export function resolveSplashColorPalette(hexColor: string): ResolvedSplashColorPalette {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test((hexColor || '').trim())
+    ? hexColor.trim().toUpperCase()
+    : '#E10613';
+
+  const preset = SPLASH_COLOR_SWATCHES.find(s => s.mainColor.toUpperCase() === normalized);
+  if (preset) {
+    return {
+      coreColor:
+        normalized === '#18181B'
+          ? '#27272A'
+          : adjustHexBrightness(preset.mainColor, 1.08, 6),
+      mainColor: preset.mainColor,
+      edgeColor: preset.edgeColor,
+      deepColor:
+        normalized === '#18181B'
+          ? '#030305'
+          : adjustHexBrightness(preset.edgeColor, 0.65)
+    };
+  }
+
+  return {
+    coreColor: adjustHexBrightness(normalized, 1.12, 10),
+    mainColor: normalized,
+    edgeColor: adjustHexBrightness(normalized, 0.56),
+    deepColor: adjustHexBrightness(normalized, 0.34)
+  };
+}
+
+export function legacyPresetToSplashColor(
+  preset?: SplashColorPresetId,
+  customColor?: string
+): string {
+  if (preset === 'charcoal') return '#18181B';
+  if (preset === 'gold') return '#D97706';
+  if (preset === 'custom' && customColor && /^#[0-9a-fA-F]{6}$/.test(customColor)) {
+    return customColor.toUpperCase();
+  }
+  return '#E10613';
+}
+
+export interface UnifiedSplashDrawParams {
+  shape: SplashShapeId;
+  colorHex: string;
+  paddingPct: number;
+  shadowPct: number;
+  contentW: number;
+  totalTextH: number;
+  hasTop: boolean;
+  topYCenter: number;
+  topW: number;
+  topH: number;
+  hasBottom: boolean;
+  bottomYCenter: number;
+  bottomW: number;
+  bottomH: number;
+  scale: number;
+  seedText: string;
+}
+
+function createVolumetricBrushFill(
+  ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
-  textW: number,
-  fontSize: number,
-  effScale: number,
-  text: string,
-  fontStr: string,
-  override?: BottomPlaquePaletteOverride | null,
-  customStrokeColor: string = '#000000',
-  strokeMult: number = 1,
-  customShadowColor: string = '#000000',
-  shadowMult: number = 1
-): { width: number; height: number } {
-  const padX = Math.max(22 * effScale, fontSize * 0.42);
-  const padY = Math.max(10 * effScale, fontSize * 0.18);
-  const plaqueW = textW + padX * 2;
-  const plaqueH = fontSize * 1.06 + padY * 2;
-  const halfW = plaqueW / 2;
-  const halfH = plaqueH / 2;
-  const hasCustomStroke = customStrokeColor.toLowerCase() !== '#000000';
-  const hasCustomShadow = customShadowColor.toLowerCase() !== '#000000';
-  const seedBase = Array.from(text).reduce((acc, ch, i) => acc + ch.charCodeAt(0) * (i + 3), 19);
+  halfW: number,
+  halfH: number,
+  palette: ResolvedSplashColorPalette
+): CanvasGradient {
+  const rad = Math.max(halfW * 1.12, halfH * 1.4, 16);
+  const grad = ctx.createRadialGradient(
+    cx,
+    cy - halfH * 0.14,
+    rad * 0.08,
+    cx,
+    cy + halfH * 0.18,
+    rad
+  );
+  grad.addColorStop(0.0, palette.coreColor);
+  grad.addColorStop(0.45, palette.mainColor);
+  grad.addColorStop(0.84, palette.edgeColor);
+  grad.addColorStop(1.0, palette.deepColor);
+  return grad;
+}
 
-  if (style === 'none') {
-    ctx.save();
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0,0,0,0.95)';
-      ctx.shadowBlur = 18 * effScale * shadowMult;
-      ctx.shadowOffsetY = 4 * effScale;
-    }
-    if (strokeMult > 0) {
-      ctx.strokeStyle = hasCustomStroke ? customStrokeColor : '#090D16';
-      ctx.lineWidth = Math.max(1, 8 * effScale * strokeMult);
-      ctx.strokeText(text, cx, cy);
-    }
+function applyBrushShadow(
+  ctx: CanvasRenderingContext2D,
+  scale: number,
+  shadowMult: number
+): void {
+  if (shadowMult <= 0.01) {
     ctx.shadowBlur = 0;
-    ctx.fillStyle = override?.text || '#FDE047';
-    ctx.fillText(text, cx, cy);
-    ctx.restore();
-    return { width: textW, height: fontSize * 1.06 };
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    return;
+  }
+  const alpha = Math.min(0.98, 0.52 + 0.42 * shadowMult);
+  ctx.shadowColor = `rgba(0, 0, 0, ${alpha.toFixed(2)})`;
+  ctx.shadowBlur = (26 * shadowMult + 6) * scale;
+  ctx.shadowOffsetX = 4 * scale * Math.min(1.4, shadowMult);
+  ctx.shadowOffsetY = (9 * shadowMult + 2) * scale;
+}
+
+function clearBrushShadow(ctx: CanvasRenderingContext2D): void {
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+}
+
+/**
+ * Рисует органичный векторный путь мазка через кривые Безье и щетину по торцам.
+ */
+function traceSmoothBristleRectPath(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  hw: number,
+  hh: number,
+  scale: number,
+  seed: number,
+  opts: {
+    bristleReach: number;
+    edgeRoughness: number;
+    bristleCount: number;
+    skewRightY?: number;
+  }
+): void {
+  const segs = 12;
+  const skewY = opts.skewRightY ?? 0;
+
+  const topPts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const x = cx - hw + t * hw * 2;
+    const slopeOffset = (t - 0.5) * skewY;
+    const wave =
+      Math.sin(t * Math.PI * 3.4 + seed * 0.27) * (2.6 * scale) +
+      (deterministicHash(seed + i * 17) - 0.5) * opts.edgeRoughness * scale;
+    topPts.push({ x, y: cy - hh + wave + slopeOffset });
   }
 
+  const botPts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const x = cx - hw + t * hw * 2;
+    const slopeOffset = (t - 0.5) * skewY;
+    const wave =
+      Math.cos(t * Math.PI * 2.9 + seed * 0.41) * (2.8 * scale) +
+      (deterministicHash(seed + i * 23 + 91) - 0.5) * opts.edgeRoughness * scale;
+    botPts.push({ x, y: cy + hh + wave + slopeOffset });
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(topPts[0].x, topPts[0].y);
+  for (let i = 1; i < topPts.length; i++) {
+    const prev = topPts[i - 1];
+    const curr = topPts[i];
+    const mx = (prev.x + curr.x) * 0.5;
+    const my = (prev.y + curr.y) * 0.5;
+    ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+  }
+  ctx.lineTo(topPts[topPts.length - 1].x, topPts[topPts.length - 1].y);
+
+  // Правая сторона с щетинистыми зубцами
+  const rTopY = topPts[topPts.length - 1].y;
+  const rBotY = botPts[botPts.length - 1].y;
+  for (let b = 0; b < opts.bristleCount; b++) {
+    const t0 = b / opts.bristleCount;
+    const t1 = (b + 0.52) / opts.bristleCount;
+    const by0 = rTopY + t0 * (rBotY - rTopY);
+    const by1 = rTopY + t1 * (rBotY - rTopY);
+    const outX =
+      cx + hw + (0.28 + deterministicHash(seed + b * 19 + 5) * 0.72) * opts.bristleReach;
+    const inX = cx + hw - (2 + deterministicHash(seed + b * 31 + 11) * 9) * scale;
+    ctx.lineTo(outX, by0 + (by1 - by0) * 0.25);
+    ctx.quadraticCurveTo(outX * 0.2 + inX * 0.8, by1, inX, by1);
+  }
+  ctx.lineTo(botPts[botPts.length - 1].x, botPts[botPts.length - 1].y);
+
+  // Нижняя кромка справа налево через Bezier
+  for (let i = botPts.length - 2; i >= 0; i--) {
+    const prev = botPts[i + 1];
+    const curr = botPts[i];
+    const mx = (prev.x + curr.x) * 0.5;
+    const my = (prev.y + curr.y) * 0.5;
+    ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+  }
+  ctx.lineTo(botPts[0].x, botPts[0].y);
+
+  // Левая сторона с щетинистыми зубцами
+  const lTopY = topPts[0].y;
+  const lBotY = botPts[0].y;
+  for (let b = opts.bristleCount - 1; b >= 0; b--) {
+    const t0 = (b + 0.5) / opts.bristleCount;
+    const t1 = b / opts.bristleCount;
+    const by0 = lTopY + t0 * (lBotY - lTopY);
+    const by1 = lTopY + t1 * (lBotY - lTopY);
+    const outX =
+      cx - hw - (0.28 + deterministicHash(seed + b * 29 + 13) * 0.72) * opts.bristleReach;
+    const inX = cx - hw + (2 + deterministicHash(seed + b * 37 + 19) * 9) * scale;
+    ctx.lineTo(outX, by0 - (by0 - by1) * 0.25);
+    ctx.quadraticCurveTo(outX * 0.2 + inX * 0.8, by1, inX, by1);
+  }
+  ctx.closePath();
+}
+
+function drawHorizontalBristleFibers(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  hw: number,
+  hh: number,
+  scale: number,
+  seed: number,
+  palette: ResolvedSplashColorPalette,
+  countPerSide: number,
+  maxReach: number
+): void {
   ctx.save();
-  ctx.translate(cx, cy);
+  for (let i = 0; i < countPerSide; i++) {
+    const normY = (i + 0.5) / countPerSide - 0.5;
+    const fy = cy + normY * hh * 1.65;
+    const side = i % 2 === 0 ? 1 : -1;
 
-  if (style === 'royal_navy_gold') {
-    const r = 8 * effScale;
-    const bgGrad = ctx.createLinearGradient(0, -halfH, 0, halfH);
-    bgGrad.addColorStop(0, override?.bgStart || '#0D254D');
-    bgGrad.addColorStop(0.55, override?.bgEnd || '#07142B');
-    bgGrad.addColorStop(1, override?.bgStart || '#0A1C3D');
+    // Тёмные и светлые волокна щетины с правого и левого краёв
+    for (const dir of [1, -1]) {
+      const reach = (0.35 + deterministicHash(seed + i * 41 + dir * 7) * 0.65) * maxReach;
+      const startX = cx + dir * (hw - 12 * scale);
+      const tipX = cx + dir * (hw + reach);
+      const thick = (1.6 + deterministicHash(seed + i * 53 + dir * 3) * 3.8) * scale;
+      const curveY = fy + side * (2 + deterministicHash(seed + i * 17) * 4) * scale;
 
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0, 0, 0, 0.85)';
-      ctx.shadowBlur = 22 * effScale * shadowMult;
-      ctx.shadowOffsetY = 6 * effScale;
-    }
-
-    ctx.fillStyle = bgGrad;
-    ctx.beginPath();
-    ctx.roundRect(-halfW, -halfH, plaqueW, plaqueH, r);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-
-    // 3D золотая или акцентная кайма
-    const borderGrad = ctx.createLinearGradient(-halfW, -halfH, halfW, halfH);
-    if (override?.border) {
-      borderGrad.addColorStop(0, '#FFFFFF');
-      borderGrad.addColorStop(0.28, override.border);
-      borderGrad.addColorStop(0.72, override.border);
-      borderGrad.addColorStop(1, '#FFF8D6');
-    } else {
-      borderGrad.addColorStop(0, '#FFF3B0');
-      borderGrad.addColorStop(0.35, '#F6D365');
-      borderGrad.addColorStop(0.7, '#C59B27');
-      borderGrad.addColorStop(1, '#FFE58F');
-    }
-    ctx.strokeStyle = borderGrad;
-    ctx.lineWidth = Math.max(2, 3.2 * effScale);
-    ctx.beginPath();
-    ctx.roundRect(-halfW, -halfH, plaqueW, plaqueH, r);
-    ctx.stroke();
-
-    // Тонкая внутренняя световая кайма
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-    ctx.lineWidth = Math.max(1, 1.1 * effScale);
-    ctx.beginPath();
-    ctx.roundRect(
-      -halfW + 4.5 * effScale,
-      -halfH + 4.5 * effScale,
-      plaqueW - 9 * effScale,
-      plaqueH - 9 * effScale,
-      Math.max(2, r - 3 * effScale)
-    );
-    ctx.stroke();
-
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-    ctx.shadowBlur = 8 * effScale;
-    ctx.shadowOffsetY = 2 * effScale;
-    ctx.fillStyle = override?.text || '#FFFDF5';
-    ctx.fillText(text, 0, 1.5 * effScale);
-  } else if (style === 'crimson_brush') {
-    ctx.rotate(-0.024);
-    const extW = plaqueW + 28 * effScale;
-    const hw = extW / 2;
-    const hh = halfH * 1.08;
-
-    const brushGrad = ctx.createLinearGradient(-hw, -hh, hw, hh);
-    brushGrad.addColorStop(0, override?.bgStart || '#B91C1C');
-    brushGrad.addColorStop(0.5, override?.bgEnd || '#991B1B');
-    brushGrad.addColorStop(1, override?.bgStart || '#DC2626');
-
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0, 0, 0, 0.88)';
-      ctx.shadowBlur = 20 * effScale * shadowMult;
-      ctx.shadowOffsetY = 6 * effScale;
-    }
-
-    // Органичный мазок кисти с рваными краями щетины
-    ctx.fillStyle = brushGrad;
-    ctx.beginPath();
-    const topSteps = 14;
-    for (let i = 0; i <= topSteps; i++) {
-      const t = i / topSteps;
-      const x = -hw + t * extW;
-      const jitter = (deterministicHash(seedBase + i * 7) - 0.5) * 6 * effScale;
-      const edgeTaper = i === 0 || i === topSteps ? 5 * effScale : 0;
-      const y = -hh + jitter + edgeTaper;
-      if (i === 0) ctx.moveTo(x - 8 * effScale, y + 6 * effScale);
-      else ctx.lineTo(x, y);
-    }
-    // Правые рваные щетинки
-    for (let b = 0; b < 5; b++) {
-      const bt = b / 4;
-      const by = -hh * 0.75 + bt * hh * 1.5;
-      const tipX = hw + (6 + deterministicHash(seedBase + b * 19) * 16) * effScale;
-      ctx.lineTo(tipX, by);
-      ctx.lineTo(hw - 4 * effScale, by + hh * 0.16);
-    }
-    for (let i = topSteps; i >= 0; i--) {
-      const t = i / topSteps;
-      const x = -hw + t * extW;
-      const jitter = (deterministicHash(seedBase + i * 13 + 31) - 0.5) * 6 * effScale;
-      const edgeTaper = i === 0 || i === topSteps ? -5 * effScale : 0;
-      ctx.lineTo(x, hh + jitter + edgeTaper);
-    }
-    // Левые рваные щетинки
-    for (let b = 4; b >= 0; b--) {
-      const bt = b / 4;
-      const by = -hh * 0.75 + bt * hh * 1.5;
-      const tipX = -hw - (6 + deterministicHash(seedBase + b * 23 + 9) * 16) * effScale;
-      ctx.lineTo(tipX, by);
-      ctx.lineTo(-hw + 4 * effScale, by - hh * 0.14);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Сухой акцентный мазок поверх края
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.strokeStyle = override?.border || 'rgba(248, 113, 113, 0.45)';
-    ctx.lineWidth = Math.max(1.2, 2.2 * effScale);
-    ctx.beginPath();
-    ctx.moveTo(-hw * 0.88, -hh * 0.88);
-    ctx.lineTo(hw * 0.9, -hh * 0.84);
-    ctx.stroke();
-
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    if (strokeMult > 0) {
-      ctx.strokeStyle = hasCustomStroke ? customStrokeColor : 'rgba(10, 4, 4, 0.85)';
-      ctx.lineWidth = Math.max(1, 5 * effScale * strokeMult);
-      ctx.strokeText(text, 0, 1.5 * effScale);
-    }
-    ctx.fillStyle = override?.text || '#FFFFFF';
-    ctx.fillText(text, 0, 1.5 * effScale);
-  } else if (style === 'highlight_tape') {
-    ctx.rotate(-0.022);
-    const tapeW = plaqueW + 16 * effScale;
-    const hw = tapeW / 2;
-    const hh = halfH * 0.96;
-
-    const tapeGrad = ctx.createLinearGradient(0, -hh, 0, hh);
-    tapeGrad.addColorStop(0, override?.bgStart || '#FEF08A');
-    tapeGrad.addColorStop(0.35, override?.bgEnd || '#FACC15');
-    tapeGrad.addColorStop(1, '#EAB308');
-
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0, 0, 0, 0.82)';
-      ctx.shadowBlur = 18 * effScale * shadowMult;
-      ctx.shadowOffsetY = 5 * effScale;
-    }
-
-    // Рваные зубчатые края скотча/маркера слева и справа
-    ctx.fillStyle = tapeGrad;
-    ctx.beginPath();
-    ctx.moveTo(-hw, -hh);
-    ctx.lineTo(hw, -hh);
-    const teeth = 7;
-    for (let i = 1; i <= teeth; i++) {
-      const ty = -hh + (i / teeth) * hh * 2;
-      const tx = hw + (i % 2 === 1 ? 5 : -3) * effScale;
-      ctx.lineTo(tx, ty);
-    }
-    ctx.lineTo(-hw, hh);
-    for (let i = teeth - 1; i >= 0; i--) {
-      const ty = -hh + (i / teeth) * hh * 2;
-      const tx = -hw + (i % 2 === 1 ? -5 : 3) * effScale;
-      ctx.lineTo(tx, ty);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Тонкий глянцевый блик ленты сверху
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.fillRect(-hw + 4 * effScale, -hh + 2 * effScale, tapeW - 8 * effScale, 3.5 * effScale);
-
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = override?.text || '#090D16';
-    ctx.fillText(text, 0, 1.5 * effScale);
-  } else if (style === 'ambient_glass') {
-    const r = 12 * effScale;
-    const glassGrad = ctx.createLinearGradient(0, -halfH, 0, halfH);
-    glassGrad.addColorStop(0, override?.bgStart || 'rgba(17, 24, 39, 0.84)');
-    glassGrad.addColorStop(1, override?.bgEnd || 'rgba(8, 12, 20, 0.90)');
-
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0, 0, 0, 0.8)';
-      ctx.shadowBlur = 24 * effScale * shadowMult;
-      ctx.shadowOffsetY = 6 * effScale;
-    }
-
-    ctx.fillStyle = glassGrad;
-    ctx.beginPath();
-    ctx.roundRect(-halfW, -halfH, plaqueW, plaqueH, r);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-
-    // Верхний стеклянный блик
-    const sheen = ctx.createLinearGradient(0, -halfH, 0, 0);
-    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
-    sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = sheen;
-    ctx.beginPath();
-    ctx.roundRect(-halfW + 1, -halfH + 1, plaqueW - 2, halfH, [r, r, 0, 0]);
-    ctx.fill();
-
-    ctx.strokeStyle = override?.border || 'rgba(255, 255, 255, 0.24)';
-    ctx.lineWidth = Math.max(1.2, 1.8 * effScale);
-    ctx.beginPath();
-    ctx.roundRect(-halfW, -halfH, plaqueW, plaqueH, r);
-    ctx.stroke();
-
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-    ctx.shadowBlur = 8 * effScale;
-    ctx.fillStyle = override?.text || '#F8FAFC';
-    ctx.fillText(text, 0, 1.5 * effScale);
-  } else if (style === 'classified_stamp') {
-    ctx.rotate(-0.038);
-    const hw = halfW + 6 * effScale;
-    const hh = halfH * 0.98;
-    const r = 4 * effScale;
-
-    if (shadowMult > 0) {
-      ctx.shadowColor = hasCustomShadow ? customShadowColor : 'rgba(0, 0, 0, 0.85)';
-      ctx.shadowBlur = 18 * effScale * shadowMult;
-      ctx.shadowOffsetY = 4 * effScale;
-    }
-
-    ctx.fillStyle = override?.bgStart || 'rgba(20, 5, 7, 0.82)';
-    ctx.beginPath();
-    ctx.roundRect(-hw, -hh, hw * 2, hh * 2, r);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-
-    // Внешняя и внутренняя рамка архивного штампа
-    const stampRed = override?.border || '#EF4444';
-    ctx.strokeStyle = stampRed;
-    ctx.lineWidth = Math.max(2, 3.6 * effScale);
-    ctx.beginPath();
-    ctx.roundRect(-hw, -hh, hw * 2, hh * 2, r);
-    ctx.stroke();
-
-    ctx.lineWidth = Math.max(1, 1.3 * effScale);
-    ctx.beginPath();
-    ctx.roundRect(
-      -hw + 5.5 * effScale,
-      -hh + 5.5 * effScale,
-      hw * 2 - 11 * effScale,
-      hh * 2 - 11 * effScale,
-      Math.max(1, r - 2 * effScale)
-    );
-    ctx.stroke();
-
-    // Потёртости чернил архивного штампа
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    for (let s = 0; s < 16; s++) {
-      const sx = -hw + deterministicHash(seedBase + s * 11) * hw * 2;
-      const sy = -hh + deterministicHash(seedBase + s * 17) * hh * 2;
-      const sr = (1 + deterministicHash(seedBase + s * 29) * 2.2) * effScale;
+      ctx.fillStyle = i % 3 === 0 ? palette.edgeColor : palette.mainColor;
+      ctx.globalAlpha = 0.65 + deterministicHash(seed + i * 29) * 0.3;
       ctx.beginPath();
-      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.moveTo(startX, fy - thick * 0.6);
+      ctx.quadraticCurveTo((startX + tipX) * 0.55, curveY - thick * 0.25, tipX, curveY);
+      ctx.quadraticCurveTo((startX + tipX) * 0.55, curveY + thick * 0.35, startX, fy + thick * 0.6);
+      ctx.closePath();
       ctx.fill();
     }
+  }
+  ctx.restore();
+}
 
-    ctx.font = fontStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = override?.text || '#FCA5A5';
-    ctx.fillText(text, 0, 1.5 * effScale);
+/**
+ * Процедурный векторный рендер 6 форм гранж-подложки (или 'none')
+ * с детерминированным зерном (нулевое мерцание в 720p и 4K).
+ */
+export function drawUnifiedGrungeSplash(
+  ctx: CanvasRenderingContext2D,
+  params: UnifiedSplashDrawParams
+): { splashW: number; splashH: number } {
+  if (params.shape === 'none') {
+    return {
+      splashW: params.contentW + 24 * params.scale,
+      splashH: params.totalTextH + 20 * params.scale
+    };
   }
 
+  const { scale } = params;
+  const padMult = Math.max(0.5, Math.min(1.6, params.paddingPct / 100));
+  const shadowMult = Math.max(0, Math.min(1.6, params.shadowPct / 100));
+  const palette = resolveSplashColorPalette(params.colorHex);
+  const seedBase =
+    Array.from(`${params.shape}_${params.seedText || 'AETHER'}`).reduce(
+      (acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 7),
+      43
+    ) || 101;
+
+  const padX = Math.max(36 * scale, params.contentW * 0.11) * padMult;
+  const padY = Math.max(18 * scale, params.totalTextH * 0.14) * padMult;
+  const hw = params.contentW * 0.5 + padX;
+  const hh = params.totalTextH * 0.5 + padY;
+
+  ctx.save();
+
+  // 1) «Широкая сухая кисть (Monolith Bristle)»
+  if (params.shape === 'monolith_bristle') {
+    const reach = 34 * scale * padMult;
+    applyBrushShadow(ctx, scale, shadowMult);
+    ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
+    traceSmoothBristleRectPath(ctx, 0, 0, hw, hh, scale, seedBase, {
+      bristleReach: reach,
+      edgeRoughness: 5.5,
+      bristleCount: 10
+    });
+    ctx.fill();
+    clearBrushShadow(ctx);
+
+    // Внутренний слой плотной краски + выступающие горизонтальные волокна щетины
+    ctx.save();
+    ctx.globalAlpha = 0.36;
+    ctx.fillStyle = palette.edgeColor;
+    traceSmoothBristleRectPath(ctx, 0, 2 * scale, hw - 10 * scale, hh - 7 * scale, scale, seedBase + 71, {
+      bristleReach: reach * 0.72,
+      edgeRoughness: 4.5,
+      bristleCount: 9
+    });
+    ctx.fill();
+    ctx.restore();
+
+    drawHorizontalBristleFibers(ctx, 0, 0, hw, hh, scale, seedBase + 13, palette, 12, reach * 1.25);
+
+    // Сухие продольные волокна светлого/глубокого тона внутри мазка
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (let s = 0; s < 6; s++) {
+      const sy = -hh * 0.72 + s * (hh * 0.28) + (deterministicHash(seedBase + s * 11) - 0.5) * 5 * scale;
+      ctx.strokeStyle = s % 2 === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.22)';
+      ctx.lineWidth = (1.4 + deterministicHash(seedBase + s * 19) * 2.4) * scale;
+      ctx.beginPath();
+      ctx.moveTo(-hw * 0.85, sy);
+      ctx.quadraticCurveTo(0, sy + (deterministicHash(seedBase + s * 23) - 0.5) * 8 * scale, hw * 0.85, sy);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.restore();
+    return { splashW: (hw + reach) * 2 + 16 * scale, splashH: hh * 2 + 24 * scale };
+  }
+
+  // 2) «Рваный агрессивный мазок (Jagged Splash)»
+  if (params.shape === 'jagged_splash') {
+    const spikeReach = 44 * scale * padMult;
+    const spikeCountTop = 14;
+    applyBrushShadow(ctx, scale, shadowMult);
+    ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
+
+    ctx.beginPath();
+    for (let i = 0; i <= spikeCountTop; i++) {
+      const t = i / spikeCountTop;
+      const x = -hw + t * hw * 2;
+      const spike =
+        i % 2 === 0
+          ? -deterministicHash(seedBase + i * 19) * 14 * scale
+          : deterministicHash(seedBase + i * 29) * 9 * scale;
+      const diagPull = (t - 0.5) * -8 * scale;
+      const y = -hh + spike + diagPull;
+      if (i === 0) ctx.moveTo(x - 16 * scale, y + 4 * scale);
+      else ctx.lineTo(x, y);
+    }
+
+    // Острые диагональные выпады справа
+    for (let b = 0; b < 9; b++) {
+      const bt = b / 8;
+      const by = -hh * 0.92 + bt * hh * 1.84;
+      const outX = hw + (10 + deterministicHash(seedBase + b * 31 + 7) * spikeReach);
+      const tipY = by - (6 + deterministicHash(seedBase + b * 17) * 12) * scale;
+      const inX = hw - (4 + deterministicHash(seedBase + b * 43) * 18) * scale;
+      ctx.lineTo(outX, tipY);
+      ctx.lineTo(inX, by + hh * 0.14);
+    }
+
+    for (let i = spikeCountTop; i >= 0; i--) {
+      const t = i / spikeCountTop;
+      const x = -hw + t * hw * 2;
+      const spike =
+        i % 2 === 1
+          ? deterministicHash(seedBase + i * 37 + 3) * 15 * scale
+          : -deterministicHash(seedBase + i * 41 + 9) * 8 * scale;
+      const diagPull = (t - 0.5) * -8 * scale;
+      ctx.lineTo(x, hh + spike + diagPull);
+    }
+
+    // Острые диагональные выпады слева
+    for (let b = 8; b >= 0; b--) {
+      const bt = b / 8;
+      const by = -hh * 0.92 + bt * hh * 1.84;
+      const outX = -hw - (10 + deterministicHash(seedBase + b * 47 + 13) * spikeReach);
+      const tipY = by + (6 + deterministicHash(seedBase + b * 23) * 12) * scale;
+      const inX = -hw + (4 + deterministicHash(seedBase + b * 53) * 18) * scale;
+      ctx.lineTo(outX, tipY);
+      ctx.lineTo(inX, by - hh * 0.14);
+    }
+    ctx.closePath();
+    ctx.fill();
+    clearBrushShadow(ctx);
+
+    // Агрессивные диагональные брызги и капли по краям
+    ctx.save();
+    for (let f = 0; f < 18; f++) {
+      const side = f % 2 === 0 ? 1 : -1;
+      const fx = side * (hw + (10 + deterministicHash(seedBase + f * 59) * (spikeReach + 16 * scale)));
+      const fy = (deterministicHash(seedBase + f * 67) - 0.5) * hh * 2.05;
+      const len = (8 + deterministicHash(seedBase + f * 71) * 22) * scale;
+      const rad = (1.6 + deterministicHash(seedBase + f * 73) * 3.8) * scale;
+      ctx.fillStyle = f % 3 === 0 ? palette.edgeColor : palette.mainColor;
+      ctx.globalAlpha = 0.72 + deterministicHash(seedBase + f * 79) * 0.25;
+      ctx.beginPath();
+      ctx.ellipse(fx, fy, len, rad, -0.18 + (deterministicHash(seedBase + f * 13) - 0.5) * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.restore();
+    return { splashW: (hw + spikeReach + 16 * scale) * 2, splashH: (hh + 18 * scale) * 2 };
+  }
+
+  // 3) «Нижний акцентный росчерк (Bottom Slash)»
+  if (params.shape === 'bottom_slash') {
+    const activeW = params.hasBottom ? params.bottomW : params.topW;
+    const activeH = params.hasBottom ? params.bottomH : params.topH;
+    const activeCy = params.hasBottom ? params.bottomYCenter : params.topYCenter;
+
+    // Мягкое тёмное свечение под верхней строкой (если она есть)
+    if (params.hasTop && params.hasBottom) {
+      const glowW = Math.max(120 * scale, params.topW * 0.68 + 60 * scale);
+      const glowH = Math.max(48 * scale, params.topH * 1.15);
+      const glowAlpha = Math.min(0.85, 0.36 + 0.34 * shadowMult);
+      ctx.save();
+      ctx.translate(0, params.topYCenter);
+      ctx.scale(1, glowH / Math.max(1, glowW));
+      const darkSpot = ctx.createRadialGradient(0, 0, glowW * 0.12, 0, 0, glowW);
+      darkSpot.addColorStop(0, `rgba(0, 0, 0, ${glowAlpha.toFixed(2)})`);
+      darkSpot.addColorStop(0.65, `rgba(0, 0, 0, ${(glowAlpha * 0.45).toFixed(2)})`);
+      darkSpot.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = darkSpot;
+      ctx.beginPath();
+      ctx.arc(0, 0, glowW, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Скошенный мазок с заострёнными рваными концами строго под нижней строкой
+    const slashHalfW = activeW * 0.5 + Math.max(42 * scale, activeW * 0.12) * padMult;
+    const slashHalfH = activeH * 0.5 + Math.max(15 * scale, activeH * 0.22) * padMult;
+    const slashTip = 46 * scale * padMult;
+    const slantShift = -8 * scale;
+
+    applyBrushShadow(ctx, scale, shadowMult);
+    ctx.fillStyle = createVolumetricBrushFill(ctx, 0, activeCy, slashHalfW, slashHalfH, palette);
+    ctx.beginPath();
+    ctx.moveTo(-slashHalfW - slashTip, activeCy + slantShift * 0.4 + 4 * scale);
+    ctx.quadraticCurveTo(
+      -slashHalfW * 0.45,
+      activeCy - slashHalfH * 1.08 + slantShift * 0.5,
+      0,
+      activeCy - slashHalfH * 0.96
+    );
+    ctx.quadraticCurveTo(
+      slashHalfW * 0.55,
+      activeCy - slashHalfH * 0.92 - slantShift * 0.5,
+      slashHalfW + slashTip * 1.05,
+      activeCy - slantShift * 0.8 - 2 * scale
+    );
+    // Правые рваные заострённые концы
+    ctx.lineTo(slashHalfW + slashTip * 0.35, activeCy + slashHalfH * 0.28);
+    ctx.lineTo(slashHalfW + slashTip * 0.85, activeCy + slashHalfH * 0.62);
+    ctx.quadraticCurveTo(
+      slashHalfW * 0.35,
+      activeCy + slashHalfH * 1.12,
+      -slashHalfW * 0.2,
+      activeCy + slashHalfH * 0.98
+    );
+    ctx.quadraticCurveTo(
+      -slashHalfW * 0.72,
+      activeCy + slashHalfH * 0.95,
+      -slashHalfW - slashTip * 0.55,
+      activeCy + slashHalfH * 0.42
+    );
+    ctx.lineTo(-slashHalfW - slashTip * 0.15, activeCy + 2 * scale);
+    ctx.closePath();
+    ctx.fill();
+    clearBrushShadow(ctx);
+
+    drawHorizontalBristleFibers(
+      ctx,
+      0,
+      activeCy,
+      slashHalfW * 0.95,
+      slashHalfH * 0.8,
+      scale,
+      seedBase + 55,
+      palette,
+      7,
+      slashTip * 0.95
+    );
+
+    ctx.restore();
+    return {
+      splashW: Math.max(params.contentW, (slashHalfW + slashTip) * 2) + 20 * scale,
+      splashH: params.totalTextH + padY * 2 + 20 * scale
+    };
+  }
+
+  // 4) «Двойной раздельный мазок (Double Strokes)»
+  if (params.shape === 'double_strokes') {
+    const reach = 28 * scale * padMult;
+    const strokePadX = Math.max(30 * scale, params.contentW * 0.085) * padMult;
+    const strokePadY = Math.max(12 * scale, params.totalTextH * 0.09) * padMult;
+
+    let maxSpanW = params.contentW + 30 * scale;
+
+    if (params.hasTop) {
+      const hw1 = params.topW * 0.5 + strokePadX;
+      const hh1 = params.topH * 0.5 + strokePadY;
+      const offX1 = params.hasBottom ? -12 * scale * padMult : 0;
+      maxSpanW = Math.max(maxSpanW, (hw1 + reach + Math.abs(offX1)) * 2);
+
+      applyBrushShadow(ctx, scale, shadowMult);
+      ctx.fillStyle = createVolumetricBrushFill(ctx, offX1, params.topYCenter, hw1, hh1, palette);
+      traceSmoothBristleRectPath(ctx, offX1, params.topYCenter, hw1, hh1, scale, seedBase + 17, {
+        bristleReach: reach,
+        edgeRoughness: 4.5,
+        bristleCount: 7,
+        skewRightY: -3 * scale
+      });
+      ctx.fill();
+      clearBrushShadow(ctx);
+      drawHorizontalBristleFibers(
+        ctx,
+        offX1,
+        params.topYCenter,
+        hw1,
+        hh1,
+        scale,
+        seedBase + 29,
+        palette,
+        6,
+        reach
+      );
+    }
+
+    if (params.hasBottom) {
+      const hw2 = params.bottomW * 0.5 + strokePadX * 1.08;
+      const hh2 = params.bottomH * 0.5 + strokePadY * 1.08;
+      const offX2 = params.hasTop ? 14 * scale * padMult : 0;
+      maxSpanW = Math.max(maxSpanW, (hw2 + reach + Math.abs(offX2)) * 2);
+
+      applyBrushShadow(ctx, scale, shadowMult);
+      ctx.fillStyle = createVolumetricBrushFill(
+        ctx,
+        offX2,
+        params.bottomYCenter,
+        hw2,
+        hh2,
+        palette
+      );
+      traceSmoothBristleRectPath(ctx, offX2, params.bottomYCenter, hw2, hh2, scale, seedBase + 83, {
+        bristleReach: reach * 1.05,
+        edgeRoughness: 5,
+        bristleCount: 7,
+        skewRightY: -3 * scale
+      });
+      ctx.fill();
+      clearBrushShadow(ctx);
+      drawHorizontalBristleFibers(
+        ctx,
+        offX2,
+        params.bottomYCenter,
+        hw2,
+        hh2,
+        scale,
+        seedBase + 97,
+        palette,
+        6,
+        reach * 1.05
+      );
+    }
+
+    ctx.restore();
+    return {
+      splashW: maxSpanW + 16 * scale,
+      splashH: params.totalTextH + strokePadY * 2.8 + 16 * scale
+    };
+  }
+
+  // 5) «Фактурная потёртая кисть (Distressed Grunge)»
+  if (params.shape === 'distressed_grunge') {
+    const reach = 34 * scale * padMult;
+    const offHalfW = Math.ceil(hw + reach + 24 * scale);
+    const offHalfH = Math.ceil(hh + 26 * scale);
+    const offW = Math.max(8, offHalfW * 2);
+    const offH = Math.max(8, offHalfH * 2);
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = offW;
+    offCanvas.height = offH;
+    const octx = offCanvas.getContext('2d');
+
+    if (octx) {
+      octx.translate(offHalfW, offHalfH);
+      octx.fillStyle = createVolumetricBrushFill(octx, 0, 0, hw, hh, palette);
+      traceSmoothBristleRectPath(octx, 0, 0, hw, hh, scale, seedBase + 3, {
+        bristleReach: reach,
+        edgeRoughness: 8.5,
+        bristleCount: 11
+      });
+      octx.fill();
+
+      drawHorizontalBristleFibers(
+        octx,
+        0,
+        0,
+        hw,
+        hh,
+        scale,
+        seedBase + 43,
+        palette,
+        10,
+        reach * 1.1
+      );
+
+      // Прорезаем сухие просветы/царапины щетины только внутри краски (не затрагивая фото фона!)
+      octx.globalCompositeOperation = 'destination-out';
+      for (let g = 0; g < 15; g++) {
+        const edgeSide = g < 8 ? -1 : 1;
+        const gy =
+          edgeSide * (hh * (0.42 + deterministicHash(seedBase + g * 19) * 0.56));
+        const gx1 = (deterministicHash(seedBase + g * 23) - 0.5) * hw * 1.65;
+        const gapLen = (48 + deterministicHash(seedBase + g * 31) * 145) * scale;
+        const gapThick = (1.6 + deterministicHash(seedBase + g * 37) * 4.4) * scale;
+        octx.fillStyle = `rgba(0, 0, 0, ${(0.55 + deterministicHash(seedBase + g * 41) * 0.4).toFixed(2)})`;
+        octx.beginPath();
+        octx.moveTo(gx1 - gapLen * 0.5, gy);
+        octx.quadraticCurveTo(gx1, gy - gapThick, gx1 + gapLen * 0.5, gy + 1.5 * scale);
+        octx.quadraticCurveTo(gx1, gy + gapThick, gx1 - gapLen * 0.5, gy);
+        octx.closePath();
+        octx.fill();
+      }
+
+      // Мелкие потёртые сколы у кромки
+      for (let c = 0; c < 18; c++) {
+        const cx = (deterministicHash(seedBase + c * 59) - 0.5) * hw * 1.9;
+        const cy =
+          (c % 2 === 0 ? -1 : 1) * (hh * (0.68 + deterministicHash(seedBase + c * 61) * 0.34));
+        const rx = (5 + deterministicHash(seedBase + c * 67) * 14) * scale;
+        const ry = (1.8 + deterministicHash(seedBase + c * 71) * 3.8) * scale;
+        octx.beginPath();
+        octx.ellipse(cx, cy, rx, ry, (deterministicHash(seedBase + c * 17) - 0.5) * 0.3, 0, Math.PI * 2);
+        octx.fill();
+      }
+
+      applyBrushShadow(ctx, scale, shadowMult);
+      ctx.drawImage(offCanvas, -offHalfW, -offHalfH);
+      clearBrushShadow(ctx);
+    } else {
+      applyBrushShadow(ctx, scale, shadowMult);
+      ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
+      traceSmoothBristleRectPath(ctx, 0, 0, hw, hh, scale, seedBase + 3, {
+        bristleReach: reach,
+        edgeRoughness: 8.5,
+        bristleCount: 11
+      });
+      ctx.fill();
+      clearBrushShadow(ctx);
+    }
+
+    ctx.restore();
+    return { splashW: offW, splashH: offH };
+  }
+
+  // 6) «Клиновидный росчерк (Tapered Speed Brush)»
+  const leftReach = 24 * scale * padMult;
+  const rightTailReach = 74 * scale * padMult;
+  const leftHH = hh * 1.14;
+  const rightHH = Math.max(hh * 0.42, 16 * scale);
+
+  applyBrushShadow(ctx, scale, shadowMult);
+  ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
+  ctx.beginPath();
+  ctx.moveTo(-hw - leftReach * 0.65, -leftHH * 0.86);
+  ctx.quadraticCurveTo(
+    -hw * 0.15,
+    -leftHH * 0.94,
+    hw + rightTailReach * 0.72,
+    -rightHH * 0.78
+  );
+  // Длинные острые волокна клиновидного хвоста справа
+  for (let b = 0; b < 7; b++) {
+    const bt = b / 6;
+    const by = -rightHH * 0.72 + bt * (rightHH * 1.44);
+    const outX =
+      hw +
+      rightTailReach *
+        (0.45 + (1 - Math.abs(bt - 0.5) * 1.3) * 0.58 + deterministicHash(seedBase + b * 23) * 0.32);
+    const inX = hw + rightTailReach * (0.08 + deterministicHash(seedBase + b * 31) * 0.18);
+    ctx.lineTo(outX, by);
+    ctx.lineTo(inX, by + (rightHH * 1.44) / 10);
+  }
+  ctx.quadraticCurveTo(
+    -hw * 0.15,
+    leftHH * 1.02,
+    -hw - leftReach * 0.5,
+    leftHH * 0.88
+  );
+  // Грубые рваные зубцы у широкого левого основания
+  for (let b = 6; b >= 0; b--) {
+    const bt = b / 6;
+    const by = -leftHH * 0.8 + bt * (leftHH * 1.6);
+    const outX = -hw - leftReach * (0.35 + deterministicHash(seedBase + b * 43) * 0.65);
+    const inX = -hw + (3 + deterministicHash(seedBase + b * 47) * 9) * scale;
+    ctx.lineTo(outX, by);
+    ctx.lineTo(inX, by - (leftHH * 1.6) / 11);
+  }
+  ctx.closePath();
+  ctx.fill();
+  clearBrushShadow(ctx);
+
+  // Тонкие скоростные волокна клина справа
+  ctx.save();
+  ctx.fillStyle = palette.mainColor;
+  for (let s = 0; s < 7; s++) {
+    const sy = ((s / 6) - 0.5) * rightHH * 1.75;
+    const sx = hw + rightTailReach * 0.2;
+    const tx = hw + rightTailReach * (0.85 + deterministicHash(seedBase + s * 59) * 0.65);
+    const th = (1.5 + deterministicHash(seedBase + s * 61) * 3) * scale;
+    ctx.globalAlpha = 0.65;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - th * 0.5);
+    ctx.lineTo(tx, sy);
+    ctx.lineTo(sx, sy + th * 0.5);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
-  return { width: plaqueW + 24 * effScale, height: plaqueH + 8 * effScale };
+
+  ctx.restore();
+  return {
+    splashW: hw * 2 + leftReach + rightTailReach * 1.25,
+    splashH: leftHH * 2 + 20 * scale
+  };
 }
+

@@ -28,40 +28,35 @@ import {
   Upload,
   Zap,
   KeyRound,
+  SlidersHorizontal,
   Type,
-  Flame,
   RotateCcw,
   Move,
   ChevronDown,
   Image as ImageIcon,
   ArrowRight,
   Sun,
-  LayoutTemplate
+  AlignCenterHorizontal,
+  Paintbrush,
+  Tag
 } from 'lucide-react';
-import { CompactFontSelector } from './CompactFontSelector';
 import {
-  FILM_GAME_FONT_PRESETS,
-  GOOGLE_FONT_PRESETS,
-  StudioFontEntry,
-  ensureFontEntryLoaded,
-  preloadCatalogFonts
-} from '../utils/fontCatalog';
-import {
-  BOTTOM_PLAQUE_STYLE_OPTIONS,
-  BottomPlaquePaletteOverride,
-  BottomPlaqueStyleId,
+  CornerPositionPresetId,
+  DEFAULT_BADGE_CAPSULES,
   DEFAULT_BG_ADJUST,
-  PRESET_CATEGORIES,
-  PresetCategoryId,
+  LINE_COLOR_SWATCHES,
+  SPLASH_COLOR_SWATCHES,
+  SPLASH_SHAPE_OPTIONS,
   SlotBgAdjustConfig,
-  TOP_LINE_GRADIENT_OPTIONS,
-  TopLineGradientId,
+  SplashColorPresetId,
+  SplashShapeId,
   YOUTUBE_CINEMA_BG_ADJUST,
-  YOUTUBE_THUMBNAIL_PRESETS,
-  YoutubeThumbnailPreset,
-  buildTopLine3DGradient,
-  drawBottomAccentPlaque,
-  renderAdjustedBackgroundToCanvas
+  buildVertical3DFill,
+  drawUnifiedGrungeSplash,
+  legacyPresetToSplashColor,
+  renderAdjustedBackgroundToCanvas,
+  resolveSplashColorPalette,
+  splitProjectTitleIntoTwoLines
 } from '../utils/thumbnailPresetsAndEffects';
 
 declare global {
@@ -728,82 +723,6 @@ function renderProcedural16x9ArtworkDataUrl(
   return c.toDataURL('image/jpeg', 0.94);
 }
 
-export type CinematicBadgeId =
-  | '4k_ultra_hd'
-  | 'documentary'
-  | 'true_story'
-  | 'full_story'
-  | 'untold_history'
-  | 'lost_archives'
-  | 'real_footage'
-  | 'deep_dive'
-  | 'no_ads'
-  | '3_hours'
-  | 'no_ads_seamless'
-  | 'ambience_asmr'
-  | 'deep_sleep'
-  | 'cozy_fireplace'
-  | 'winter_nights'
-  | 'rain_and_thunder'
-  | 'study_and_focus';
-
-export interface CinematicBadgeOption {
-  id: CinematicBadgeId;
-  label: string;
-}
-
-const HISTOVIVA_BADGE_OPTIONS: CinematicBadgeOption[] = [
-  { id: '4k_ultra_hd', label: '4K ULTRA HD' },
-  { id: 'documentary', label: 'DOCUMENTARY' },
-  { id: 'true_story', label: 'TRUE STORY' },
-  { id: 'full_story', label: 'FULL STORY' },
-  { id: 'untold_history', label: 'UNTOLD HISTORY' },
-  { id: 'lost_archives', label: 'LOST ARCHIVES' },
-  { id: 'real_footage', label: 'REAL FOOTAGE' },
-  { id: 'deep_dive', label: 'DEEP DIVE' },
-  { id: 'no_ads', label: 'NO ADS' }
-];
-
-const AMBIENT_BADGE_OPTIONS: CinematicBadgeOption[] = [
-  { id: '3_hours', label: '3 HOURS' },
-  { id: 'no_ads_seamless', label: 'NO ADS • SEAMLESS' },
-  { id: 'ambience_asmr', label: 'AMBIENCE • ASMR' },
-  { id: 'deep_sleep', label: 'DEEP SLEEP' },
-  { id: 'cozy_fireplace', label: 'COZY FIREPLACE' },
-  { id: 'winter_nights', label: 'WINTER NIGHTS' },
-  { id: 'rain_and_thunder', label: 'RAIN & THUNDER' },
-  { id: 'study_and_focus', label: 'STUDY & FOCUS' }
-];
-
-const CINEMATIC_BADGE_OPTIONS: CinematicBadgeOption[] = [
-  ...HISTOVIVA_BADGE_OPTIONS,
-  ...AMBIENT_BADGE_OPTIONS
-];
-
-const BADGE_LABEL_BY_ID: Record<CinematicBadgeId, string> = CINEMATIC_BADGE_OPTIONS.reduce(
-  (acc, item) => {
-    acc[item.id] = item.label;
-    return acc;
-  },
-  {} as Record<CinematicBadgeId, string>
-);
-
-const VALID_BADGE_IDS = new Set<string>(CINEMATIC_BADGE_OPTIONS.map(b => b.id));
-
-function parseBadgeIds(raw: string): CinematicBadgeId[] {
-  if (!raw || raw.trim().toLowerCase() === 'none') return [];
-  const normalized = raw
-    .split(',')
-    .map(s => {
-      const trimmed = s.trim();
-      if (trimmed === '4k_gold') return '4k_ultra_hd';
-      if (trimmed === 'archive_file') return 'lost_archives';
-      if (trimmed === 'classified_doc') return 'true_story';
-      return trimmed;
-    })
-    .filter((s): s is CinematicBadgeId => VALID_BADGE_IDS.has(s));
-  return Array.from(new Set(normalized)).slice(0, 3);
-}
 
 export type ThumbnailFontStyleId =
   | 'cinematic_sans'
@@ -812,58 +731,14 @@ export type ThumbnailFontStyleId =
   | 'medieval_serif'
   | 'minimal_clean';
 
-interface FontStyleOption {
-  id: ThumbnailFontStyleId;
-  label: string;
-  subtitle: string;
-  previewFontFamily: string;
-}
-
-const FONT_STYLE_OPTIONS: FontStyleOption[] = [
-  {
-    id: 'cinematic_sans',
-    label: 'Кино-гротеск',
-    subtitle: 'Современный контрастный 4K заголовок с глубокой тенью',
-    previewFontFamily: '"Montserrat", Impact, sans-serif'
-  },
-  {
-    id: 'gold_ice_magic',
-    label: '3D Золото и Лёд',
-    subtitle: '3D-золото сверху (#FFE58F → #B86B00) и морозный лёд с инеем снизу (#FFFFFF → #5B9BD5)',
-    previewFontFamily: '"Cinzel", "Cinzel Decorative", serif'
-  },
-  {
-    id: 'royal_gold_laurels',
-    label: 'Королевские лавры',
-    subtitle: 'Золотой градиент #F6D365 → #C59B27 и лавровые ветви',
-    previewFontFamily: '"Cinzel Decorative", "Cinzel", serif'
-  },
-  {
-    id: 'medieval_serif',
-    label: 'Исторический / Свечение',
-    subtitle: 'Атмосферный тёплый градиент пергамента с мягким свечением',
-    previewFontFamily: '"Cormorant Garamond", Georgia, serif'
-  },
-  {
-    id: 'minimal_clean',
-    label: 'Минимал',
-    subtitle: 'Чистый плакатный контур без лишнего декора',
-    previewFontFamily: '"Bebas Neue", "Inter", sans-serif'
-  }
-];
-
-const DEFAULT_FONT_ID_BY_STYLE: Record<ThumbnailFontStyleId, string> = {
-  cinematic_sans: 'gg_montserrat',
-  gold_ice_magic: 'gg_cinzel',
-  royal_gold_laurels: 'gg_cinzel_decorative',
-  medieval_serif: 'gg_cormorant',
-  minimal_clean: 'gg_bebas_neue'
-};
-
 export interface HookTextLayout {
   xPct: number;
   yPct: number;
-  fontScalePct: number;
+  topScalePct: number;
+  bottomScalePct: number;
+  autoFitBottomToTop: boolean;
+  blockTiltDeg: number;
+  lineSpacingPct: number;
 }
 
 interface HookBoundingBoxPct {
@@ -875,607 +750,65 @@ interface HookBoundingBoxPct {
 
 const DEFAULT_HOOK_LAYOUT: HookTextLayout = {
   xPct: 50,
-  yPct: 80,
-  fontScalePct: 100
+  yPct: 76,
+  topScalePct: 100,
+  bottomScalePct: 100,
+  autoFitBottomToTop: true,
+  blockTiltDeg: -2,
+  lineSpacingPct: 100
 };
-
-function splitHookLines(rawText: string, balanceTwoLinesOnSpace: boolean): string[] {
-  const trimmed = (rawText || '').replace(/\r\n/g, '\n').trim();
-  if (!trimmed) return [];
-
-  if (trimmed.includes('\n')) {
-    return trimmed
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean);
-  }
-
-  if (!balanceTwoLinesOnSpace) {
-    return [trimmed];
-  }
-
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  if (words.length <= 1) return [trimmed];
-  if (words.length === 2) return [words[0], words[1]];
-
-  let bestSplit = 1;
-  let bestDiff = Infinity;
-  for (let i = 1; i < words.length; i++) {
-    const leftLen = words.slice(0, i).join(' ').length;
-    const rightLen = words.slice(i).join(' ').length;
-    const diff = Math.abs(leftLen - rightLen);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestSplit = i;
-    }
-  }
-  return [words.slice(0, bestSplit).join(' '), words.slice(bestSplit).join(' ')];
-}
-
-function drawSparkleStar(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  color: string,
-  glowColor: string
-): void {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = radius * 1.1;
-
-  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 1.25);
-  halo.addColorStop(0, color);
-  halo.addColorStop(0.45, glowColor);
-  halo.addColorStop(1, 'transparent');
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius * 1.25, 0, Math.PI * 2);
-  ctx.fill();
-
-  const inner = radius * 0.19;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(0, -radius);
-  ctx.quadraticCurveTo(inner * 0.4, -inner * 0.4, radius, 0);
-  ctx.quadraticCurveTo(inner * 0.4, inner * 0.4, 0, radius);
-  ctx.quadraticCurveTo(-inner * 0.4, inner * 0.4, -radius, 0);
-  ctx.quadraticCurveTo(-inner * 0.4, -inner * 0.4, 0, -radius);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.restore();
-}
-
-function drawSnowflake(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  radius: number,
-  rotationRad: number,
-  alpha: number,
-  scale: number
-): void {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(rotationRad);
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = '#E8F7FF';
-  ctx.shadowColor = 'rgba(130, 210, 255, 0.85)';
-  ctx.shadowBlur = 10 * scale;
-  ctx.lineCap = 'round';
-  ctx.lineWidth = Math.max(1, 1.8 * scale);
-
-  for (let arm = 0; arm < 6; arm++) {
-    ctx.save();
-    ctx.rotate((arm * Math.PI) / 3);
-
-    // Main branch
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(0, -radius);
-    ctx.stroke();
-
-    // Outer V-barb
-    const b1 = radius * 0.64;
-    const b1Len = radius * 0.28;
-    ctx.beginPath();
-    ctx.moveTo(-b1Len * 0.65, -b1 - b1Len * 0.55);
-    ctx.lineTo(0, -b1);
-    ctx.lineTo(b1Len * 0.65, -b1 - b1Len * 0.55);
-    ctx.stroke();
-
-    // Inner V-barb
-    const b2 = radius * 0.36;
-    const b2Len = radius * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(-b2Len * 0.65, -b2 - b2Len * 0.55);
-    ctx.lineTo(0, -b2);
-    ctx.lineTo(b2Len * 0.65, -b2 - b2Len * 0.55);
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // Tiny bright core dot
-  ctx.fillStyle = '#FFFFFF';
-  ctx.beginPath();
-  ctx.arc(0, 0, Math.max(1, radius * 0.12), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawGoldenMagicSwirl(
-  ctx: CanvasRenderingContext2D,
-  anchorX: number,
-  anchorY: number,
-  span: number,
-  side: -1 | 1,
-  scale: number
-): void {
-  ctx.save();
-  ctx.translate(anchorX, anchorY);
-  ctx.scale(side, 1);
-
-  const grad = ctx.createLinearGradient(0, -span * 0.45, span * 0.9, span * 0.45);
-  grad.addColorStop(0, '#FFF8D6');
-  grad.addColorStop(0.45, '#FFE58F');
-  grad.addColorStop(0.85, '#F5A623');
-  grad.addColorStop(1, 'rgba(245, 166, 35, 0)');
-
-  ctx.shadowColor = 'rgba(255, 195, 65, 0.85)';
-  ctx.shadowBlur = 14 * scale;
-  ctx.strokeStyle = grad;
-  ctx.lineCap = 'round';
-
-  // Primary curling flourish ribbon
-  ctx.lineWidth = Math.max(1.2, 2.8 * scale);
-  ctx.beginPath();
-  ctx.moveTo(0, -span * 0.14);
-  ctx.bezierCurveTo(
-    span * 0.42,
-    -span * 0.56,
-    span * 0.88,
-    -span * 0.15,
-    span * 0.64,
-    span * 0.22
-  );
-  ctx.bezierCurveTo(
-    span * 0.48,
-    span * 0.44,
-    span * 0.24,
-    span * 0.24,
-    span * 0.42,
-    span * 0.06
-  );
-  ctx.stroke();
-
-  // Secondary delicate arc
-  ctx.lineWidth = Math.max(0.9, 1.5 * scale);
-  ctx.globalAlpha = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(span * 0.08, span * 0.06);
-  ctx.quadraticCurveTo(span * 0.52, -span * 0.28, span * 0.94, -span * 0.08);
-  ctx.stroke();
-
-  // Golden magic dust dots along the swirl
-  const dustPts = [
-    { x: span * 0.22, y: -span * 0.34, r: 2.3 },
-    { x: span * 0.54, y: -span * 0.36, r: 1.8 },
-    { x: span * 0.78, y: -span * 0.02, r: 2.5 },
-    { x: span * 0.52, y: span * 0.28, r: 1.7 },
-    { x: span * 0.88, y: -span * 0.24, r: 1.5 }
-  ];
-  ctx.fillStyle = '#FFF3B0';
-  for (const pt of dustPts) {
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, Math.max(1, pt.r * scale), 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-function drawMagicGlowAndSnowflakes(
-  ctx: CanvasRenderingContext2D,
-  centerX: number,
-  centerY: number,
-  maxLineW: number,
-  blockH: number,
-  fontSize: number,
-  scale: number,
-  fontScale: number
-): void {
-  const effScale = scale * fontScale;
-  const halfW = maxLineW / 2;
-
-  ctx.save();
-
-  // 1. Soft warm gold + cool ice dual aura behind the title
-  const goldAura = ctx.createRadialGradient(
-    centerX,
-    centerY - blockH * 0.22,
-    10 * effScale,
-    centerX,
-    centerY - blockH * 0.22,
-    Math.max(halfW * 1.15, 160 * effScale)
-  );
-  goldAura.addColorStop(0, 'rgba(255, 200, 75, 0.24)');
-  goldAura.addColorStop(0.55, 'rgba(245, 166, 35, 0.08)');
-  goldAura.addColorStop(1, 'transparent');
-  ctx.fillStyle = goldAura;
-  ctx.fillRect(
-    centerX - halfW * 1.4 - 120 * effScale,
-    centerY - blockH - 80 * effScale,
-    maxLineW * 1.4 + 240 * effScale,
-    blockH * 1.4 + 120 * effScale
-  );
-
-  const iceAura = ctx.createRadialGradient(
-    centerX,
-    centerY + blockH * 0.26,
-    10 * effScale,
-    centerX,
-    centerY + blockH * 0.26,
-    Math.max(halfW * 1.15, 160 * effScale)
-  );
-  iceAura.addColorStop(0, 'rgba(140, 215, 255, 0.22)');
-  iceAura.addColorStop(0.55, 'rgba(91, 155, 213, 0.08)');
-  iceAura.addColorStop(1, 'transparent');
-  ctx.fillStyle = iceAura;
-  ctx.fillRect(
-    centerX - halfW * 1.4 - 120 * effScale,
-    centerY - 40 * effScale,
-    maxLineW * 1.4 + 240 * effScale,
-    blockH * 1.4 + 120 * effScale
-  );
-
-  // 2. Golden light swirls flanking the left & right edges
-  const swirlSpan = Math.max(66 * effScale, fontSize * 1.05);
-  drawGoldenMagicSwirl(ctx, centerX - halfW - 14 * effScale, centerY - blockH * 0.14, swirlSpan, -1, effScale);
-  drawGoldenMagicSwirl(ctx, centerX + halfW + 14 * effScale, centerY - blockH * 0.14, swirlSpan, 1, effScale);
-
-  // 3. Detailed snowflakes flanking left & right of the text
-  const snowOffsetX = halfW + 34 * effScale;
-  drawSnowflake(ctx, centerX - snowOffsetX, centerY + blockH * 0.22, 18 * effScale, 0.22, 0.92, effScale);
-  drawSnowflake(ctx, centerX - snowOffsetX - 38 * effScale, centerY - blockH * 0.04, 11 * effScale, 0.65, 0.72, effScale);
-  drawSnowflake(ctx, centerX + snowOffsetX, centerY + blockH * 0.22, 18 * effScale, -0.22, 0.92, effScale);
-  drawSnowflake(ctx, centerX + snowOffsetX + 38 * effScale, centerY - blockH * 0.04, 11 * effScale, -0.65, 0.72, effScale);
-
-  // 4. Warm gold & icy white sparkle star flares
-  drawSparkleStar(ctx, centerX - halfW - 22 * effScale, centerY - blockH * 0.36, 15 * effScale, '#FFF9DB', 'rgba(255, 210, 80, 0.9)');
-  drawSparkleStar(ctx, centerX + halfW + 22 * effScale, centerY - blockH * 0.36, 15 * effScale, '#FFF9DB', 'rgba(255, 210, 80, 0.9)');
-  drawSparkleStar(ctx, centerX - halfW * 0.68, centerY - blockH * 0.48, 9 * effScale, '#FFE58F', 'rgba(245, 166, 35, 0.8)');
-  drawSparkleStar(ctx, centerX + halfW * 0.72, centerY + blockH * 0.44, 10 * effScale, '#FFFFFF', 'rgba(140, 215, 255, 0.85)');
-  drawSparkleStar(ctx, centerX - halfW - 58 * effScale, centerY + blockH * 0.34, 11 * effScale, '#E0F4FF', 'rgba(130, 210, 255, 0.85)');
-  drawSparkleStar(ctx, centerX + halfW + 58 * effScale, centerY + blockH * 0.34, 11 * effScale, '#E0F4FF', 'rgba(130, 210, 255, 0.85)');
-
-  ctx.restore();
-}
-
-function drawGoldenLaurelBranch(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  height: number,
-  side: -1 | 1,
-  scale: number
-): void {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(side, 1);
-
-  const grad = ctx.createLinearGradient(0, -height * 0.52, 0, height * 0.52);
-  grad.addColorStop(0, '#FFF3B0');
-  grad.addColorStop(0.42, '#F6D365');
-  grad.addColorStop(1, '#C59B27');
-
-  ctx.shadowColor = 'rgba(246, 211, 101, 0.48)';
-  ctx.shadowBlur = 10 * scale;
-
-  // Изогнутый стебель ветви
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = Math.max(1.5, 2.6 * scale);
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(-height * 0.16, height * 0.48);
-  ctx.quadraticCurveTo(height * 0.22, height * 0.04, -height * 0.06, -height * 0.48);
-  ctx.stroke();
-
-  // Листья лавра вдоль дуги (внешние и внутренние)
-  const leafCount = 6;
-  for (let i = 0; i < leafCount; i++) {
-    const t = i / (leafCount - 1);
-    const inv = 1 - t;
-    const p0x = -height * 0.16;
-    const p0y = height * 0.48;
-    const p1x = height * 0.22;
-    const p1y = height * 0.04;
-    const p2x = -height * 0.06;
-    const p2y = -height * 0.48;
-
-    const sx = inv * inv * p0x + 2 * inv * t * p1x + t * t * p2x;
-    const sy = inv * inv * p0y + 2 * inv * t * p1y + t * t * p2y;
-
-    const leafLen = height * (0.18 - t * 0.04);
-    const leafW = leafLen * 0.42;
-
-    for (const dir of [-1, 1]) {
-      ctx.save();
-      ctx.translate(sx, sy);
-      ctx.rotate(dir === 1 ? -0.58 + t * 0.22 : -2.18 + t * 0.18);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(leafLen * 0.52, -leafW, leafLen, 0);
-      ctx.quadraticCurveTo(leafLen * 0.52, leafW, 0, 0);
-      ctx.closePath();
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = 'rgba(15, 10, 4, 0.85)';
-      ctx.lineWidth = Math.max(1, 1.4 * scale);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  ctx.restore();
-}
-
-function drawGoldenCandle(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  bottomY: number,
-  height: number,
-  scale: number
-): void {
-  ctx.save();
-  const flameCenterY = bottomY - height * 0.72;
-
-  // Тёплое свечение пламени свечи
-  const halo = ctx.createRadialGradient(
-    cx,
-    flameCenterY,
-    2 * scale,
-    cx,
-    flameCenterY,
-    height * 0.95
-  );
-  halo.addColorStop(0, 'rgba(254, 240, 138, 0.75)');
-  halo.addColorStop(0.35, 'rgba(246, 211, 101, 0.34)');
-  halo.addColorStop(0.7, 'rgba(197, 155, 39, 0.12)');
-  halo.addColorStop(1, 'transparent');
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(cx, flameCenterY, height * 0.95, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Основание свечи (блюдце / подсвечник)
-  const plateW = height * 0.44;
-  const plateGrad = ctx.createLinearGradient(cx - plateW, bottomY, cx + plateW, bottomY);
-  plateGrad.addColorStop(0, '#92400E');
-  plateGrad.addColorStop(0.5, '#F6D365');
-  plateGrad.addColorStop(1, '#92400E');
-  ctx.fillStyle = plateGrad;
-  ctx.strokeStyle = 'rgba(12, 8, 3, 0.9)';
-  ctx.lineWidth = Math.max(1, 1.6 * scale);
-  ctx.beginPath();
-  ctx.roundRect(cx - plateW, bottomY - 4 * scale, plateW * 2, 5 * scale, 2.5 * scale);
-  ctx.fill();
-  ctx.stroke();
-
-  // Восковой цилиндр свечи
-  const bodyW = height * 0.24;
-  const bodyH = height * 0.48;
-  const bodyTop = bottomY - 4 * scale - bodyH;
-  const bodyGrad = ctx.createLinearGradient(cx - bodyW / 2, bodyTop, cx + bodyW / 2, bottomY);
-  bodyGrad.addColorStop(0, '#FFFBEB');
-  bodyGrad.addColorStop(0.45, '#F6D365');
-  bodyGrad.addColorStop(1, '#B45309');
-  ctx.fillStyle = bodyGrad;
-  ctx.beginPath();
-  ctx.roundRect(cx - bodyW / 2, bodyTop, bodyW, bodyH, 3 * scale);
-  ctx.fill();
-  ctx.stroke();
-
-  // Фитиль
-  ctx.strokeStyle = '#1c1917';
-  ctx.lineWidth = Math.max(1, 1.5 * scale);
-  ctx.beginPath();
-  ctx.moveTo(cx, bodyTop);
-  ctx.lineTo(cx, bodyTop - height * 0.09);
-  ctx.stroke();
-
-  // Внешнее пламя
-  const flameBottom = bodyTop - height * 0.06;
-  const flameTop = flameBottom - height * 0.36;
-  const flameW = height * 0.14;
-  const flameGrad = ctx.createLinearGradient(cx, flameTop, cx, flameBottom);
-  flameGrad.addColorStop(0, '#FEF08A');
-  flameGrad.addColorStop(0.55, '#F59E0B');
-  flameGrad.addColorStop(1, '#D97706');
-  ctx.fillStyle = flameGrad;
-  ctx.beginPath();
-  ctx.moveTo(cx, flameTop);
-  ctx.bezierCurveTo(
-    cx + flameW,
-    flameBottom - height * 0.14,
-    cx + flameW * 0.85,
-    flameBottom,
-    cx,
-    flameBottom
-  );
-  ctx.bezierCurveTo(
-    cx - flameW * 0.85,
-    flameBottom,
-    cx - flameW,
-    flameBottom - height * 0.14,
-    cx,
-    flameTop
-  );
-  ctx.closePath();
-  ctx.fill();
-
-  // Ядро пламени
-  ctx.fillStyle = '#FFFBEB';
-  ctx.beginPath();
-  ctx.ellipse(
-    cx,
-    flameBottom - height * 0.1,
-    flameW * 0.36,
-    height * 0.09,
-    0,
-    0,
-    Math.PI * 2
-  );
-  ctx.fill();
-
-  ctx.restore();
-}
 
 export type ThumbnailSlotId = 'A' | 'B' | 'C';
 
 export interface ThumbnailSlotConfig {
-  title: string;
-  bottomLine: string;
-  topGradient: TopLineGradientId;
-  bottomBadgeStyle: BottomPlaqueStyleId;
-  bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
-  badges: CinematicBadgeId[];
+  topText: string;
+  topColor: string;
+  bottomText: string;
+  bottomColor: string;
+  splashShape: SplashShapeId;
+  splashColor: string;
+  splashPaddingPct: number;
+  splashShadowPct: number;
+  badgesEnabled: boolean;
+  badgeTexts: [string, string, string];
   badgeScalePct: number;
-  fontStyle: ThumbnailFontStyleId;
-  fontEntry: StudioFontEntry;
-  bottomFontEntry?: StudioFontEntry | null;
-  applyFontToBadges: boolean;
-  royalDecorEnabled: boolean;
-  magicDecorEnabled: boolean;
-  textColor: string;
-  strokeColor: string;
-  strokeWidthPct: number;
-  shadowColor: string;
-  shadowBlurPct: number;
   hookLayout: HookTextLayout;
   bgAdjust: SlotBgAdjustConfig;
 }
 
 interface PersistedSlotState {
+  topText?: string;
+  topColor?: string;
+  bottomText?: string;
+  bottomColor?: string;
+  splashShape?: SplashShapeId;
+  splashColor?: string;
+  splashPaddingPct?: number;
+  splashShadowPct?: number;
+  badgesEnabled?: boolean;
+  badgeTexts?: string[];
+  badgeScalePct?: number;
+  hookLayout?: Partial<HookTextLayout>;
+  bgAdjust?: Partial<SlotBgAdjustConfig>;
+  // Обратная совместимость миграции v1/v2
   title?: string;
   bottomLine?: string;
-  topGradient?: TopLineGradientId;
-  bottomBadgeStyle?: BottomPlaqueStyleId;
-  bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
-  badges?: CinematicBadgeId[];
-  badgeScalePct?: number;
-  fontStyle?: ThumbnailFontStyleId;
-  fontId?: string;
-  bottomFontId?: string;
-  applyFontToBadges?: boolean;
-  royalDecorEnabled?: boolean;
-  magicDecorEnabled?: boolean;
-  textColor?: string;
-  strokeColor?: string;
-  strokeWidthPct?: number;
-  shadowColor?: string;
-  shadowBlurPct?: number;
-  hookLayout?: HookTextLayout;
-  bgAdjust?: Partial<SlotBgAdjustConfig>;
+  splashPreset?: SplashColorPresetId;
+  splashCustomColor?: string;
 }
 
-const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v1';
+const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v2';
+const THUMB_ABC_SLOTS_LEGACY_KEY = 'aether_thumb_abc_slots_v1';
 
-const ALL_CATALOG_FONTS: StudioFontEntry[] = [...FILM_GAME_FONT_PRESETS, ...GOOGLE_FONT_PRESETS];
-
-const findCatalogFontById = (id?: string): StudioFontEntry | undefined =>
-  id ? ALL_CATALOG_FONTS.find(f => f.id === id) : undefined;
-
-const DEFAULT_SLOT_FONT_ENTRY: StudioFontEntry =
-  GOOGLE_FONT_PRESETS.find(f => f.id === 'gg_montserrat') || GOOGLE_FONT_PRESETS[0];
-
-const createDefaultSlotConfig = (slot: ThumbnailSlotId): ThumbnailSlotConfig => {
-  if (slot === 'B') {
-    return {
-      title: '3 HOURS',
-      bottomLine: 'DEEP SLEEP',
-      topGradient: 'amber',
-      bottomBadgeStyle: 'ambient_glass',
-      bottomPlaqueOverride: {
-        bgStart: 'rgba(11, 15, 25, 0.80)',
-        bgEnd: 'rgba(17, 24, 39, 0.88)',
-        border: 'rgba(251, 191, 36, 0.45)',
-        text: '#FEF3C7'
-      },
-      badges: ['3_hours', 'no_ads_seamless', 'deep_sleep'],
-      badgeScalePct: 100,
-      fontStyle: 'cinematic_sans',
-      fontEntry: findCatalogFontById('gg_cormorant') || DEFAULT_SLOT_FONT_ENTRY,
-      bottomFontEntry: findCatalogFontById('gg_inter') || DEFAULT_SLOT_FONT_ENTRY,
-      applyFontToBadges: false,
-      royalDecorEnabled: true,
-      magicDecorEnabled: true,
-      textColor: '',
-      strokeColor: '#000000',
-      strokeWidthPct: 100,
-      shadowColor: '#000000',
-      shadowBlurPct: 100,
-      hookLayout: { ...DEFAULT_HOOK_LAYOUT },
-      bgAdjust: { ...DEFAULT_BG_ADJUST }
-    };
-  }
-  if (slot === 'C') {
-    return {
-      title: 'THE DARK',
-      bottomLine: 'TRUTH',
-      topGradient: 'silver',
-      bottomBadgeStyle: 'crimson_brush',
-      bottomPlaqueOverride: {
-        bgStart: '#0B0B10',
-        bgEnd: '#3B080E',
-        border: '#EF4444',
-        text: '#F8FAFC'
-      },
-      badges: ['4k_ultra_hd', 'true_story'],
-      badgeScalePct: 100,
-      fontStyle: 'gold_ice_magic',
-      fontEntry: findCatalogFontById('gg_montserrat') || DEFAULT_SLOT_FONT_ENTRY,
-      bottomFontEntry: findCatalogFontById('gg_oswald') || DEFAULT_SLOT_FONT_ENTRY,
-      applyFontToBadges: false,
-      royalDecorEnabled: true,
-      magicDecorEnabled: true,
-      textColor: '',
-      strokeColor: '#000000',
-      strokeWidthPct: 100,
-      shadowColor: '#000000',
-      shadowBlurPct: 100,
-      hookLayout: { ...DEFAULT_HOOK_LAYOUT },
-      bgAdjust: { ...DEFAULT_BG_ADJUST }
-    };
-  }
-  return {
-    title: 'SEALED ARCHIVE',
-    bottomLine: 'FILE #09',
-    topGradient: 'gold',
-    bottomBadgeStyle: 'royal_navy_gold',
-    bottomPlaqueOverride: null,
-    badges: ['4k_ultra_hd', 'documentary', 'lost_archives'],
-    badgeScalePct: 100,
-    fontStyle: 'cinematic_sans',
-    fontEntry: DEFAULT_SLOT_FONT_ENTRY,
-    bottomFontEntry: null,
-    applyFontToBadges: false,
-    royalDecorEnabled: true,
-    magicDecorEnabled: true,
-    textColor: '',
-    strokeColor: '#000000',
-    strokeWidthPct: 100,
-    shadowColor: '#000000',
-    shadowBlurPct: 100,
-    hookLayout: { ...DEFAULT_HOOK_LAYOUT },
-    bgAdjust: { ...DEFAULT_BG_ADJUST }
-  };
-};
-
-const VALID_TOP_GRADIENTS = new Set<string>(TOP_LINE_GRADIENT_OPTIONS.map(g => g.id));
-const VALID_PLAQUE_STYLES = new Set<string>(BOTTOM_PLAQUE_STYLE_OPTIONS.map(p => p.id));
+const VALID_SPLASH_SHAPES = new Set<SplashShapeId>([
+  'monolith_bristle',
+  'jagged_splash',
+  'bottom_slash',
+  'double_strokes',
+  'distressed_grunge',
+  'tapered_speed',
+  'none'
+]);
 
 const clampBgAdjust = (raw?: Partial<SlotBgAdjustConfig> | null): SlotBgAdjustConfig => ({
   contrastPct:
@@ -1492,83 +825,159 @@ const clampBgAdjust = (raw?: Partial<SlotBgAdjustConfig> | null): SlotBgAdjustCo
       : 100
 });
 
+const createDefaultSlotConfig = (
+  slot: ThumbnailSlotId,
+  projectTitleSeed: string
+): ThumbnailSlotConfig => {
+  const split = splitProjectTitleIntoTwoLines(projectTitleSeed);
+  const defaultSplashColor =
+    slot === 'B' ? '#18181B' : slot === 'C' ? '#D97706' : '#E10613';
+  const defaultSplashShape: SplashShapeId =
+    slot === 'B' ? 'double_strokes' : slot === 'C' ? 'tapered_speed' : 'monolith_bristle';
+  return {
+    topText: split.line1,
+    topColor: '#FFFFFF',
+    bottomText: split.line2,
+    bottomColor: '#FFD600',
+    splashShape: defaultSplashShape,
+    splashColor: defaultSplashColor,
+    splashPaddingPct: 100,
+    splashShadowPct: 100,
+    badgesEnabled: true,
+    badgeTexts: [...DEFAULT_BADGE_CAPSULES],
+    badgeScalePct: 100,
+    hookLayout: { ...DEFAULT_HOOK_LAYOUT },
+    bgAdjust: { ...DEFAULT_BG_ADJUST }
+  };
+};
+
 const hydrateSlotConfig = (
   slot: ThumbnailSlotId,
+  projectTitleSeed: string,
   raw?: PersistedSlotState | null
 ): ThumbnailSlotConfig => {
-  const base = createDefaultSlotConfig(slot);
+  const base = createDefaultSlotConfig(slot, projectTitleSeed);
   if (!raw || typeof raw !== 'object') return base;
-  const matchedFont = findCatalogFontById(raw.fontId);
-  const matchedBottomFont = findCatalogFontById(raw.bottomFontId);
-  const validBadges = Array.isArray(raw.badges)
-    ? raw.badges.filter((id): id is CinematicBadgeId => VALID_BADGE_IDS.has(id)).slice(0, 3)
-    : base.badges;
+
+  const migratedTop =
+    typeof raw.topText === 'string'
+      ? raw.topText
+      : typeof raw.title === 'string'
+        ? raw.title.toUpperCase()
+        : base.topText;
+  const migratedBottom =
+    typeof raw.bottomText === 'string'
+      ? raw.bottomText
+      : typeof raw.bottomLine === 'string'
+        ? raw.bottomLine.toUpperCase()
+        : base.bottomText;
+
+  const normalizedBadges: [string, string, string] = [
+    typeof raw.badgeTexts?.[0] === 'string' ? raw.badgeTexts[0] : base.badgeTexts[0],
+    typeof raw.badgeTexts?.[1] === 'string' ? raw.badgeTexts[1] : base.badgeTexts[1],
+    typeof raw.badgeTexts?.[2] === 'string' ? raw.badgeTexts[2] : base.badgeTexts[2]
+  ];
+
+  const resolvedShape: SplashShapeId =
+    raw.splashShape && VALID_SPLASH_SHAPES.has(raw.splashShape)
+      ? raw.splashShape
+      : raw.splashPreset === 'none'
+        ? 'none'
+        : raw.splashPreset
+          ? 'monolith_bristle'
+          : base.splashShape;
+
+  const resolvedColor =
+    typeof raw.splashColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.splashColor)
+      ? raw.splashColor.toUpperCase()
+      : raw.splashPreset || raw.splashCustomColor
+        ? legacyPresetToSplashColor(raw.splashPreset, raw.splashCustomColor)
+        : base.splashColor;
+
+  const hl = raw.hookLayout || {};
   return {
     ...base,
-    title: typeof raw.title === 'string' ? raw.title : base.title,
-    bottomLine: typeof raw.bottomLine === 'string' ? raw.bottomLine : base.bottomLine,
-    topGradient:
-      raw.topGradient && VALID_TOP_GRADIENTS.has(raw.topGradient)
-        ? raw.topGradient
-        : base.topGradient,
-    bottomBadgeStyle:
-      raw.bottomBadgeStyle && VALID_PLAQUE_STYLES.has(raw.bottomBadgeStyle)
-        ? raw.bottomBadgeStyle
-        : base.bottomBadgeStyle,
-    bottomPlaqueOverride:
-      raw.bottomPlaqueOverride !== undefined ? raw.bottomPlaqueOverride : base.bottomPlaqueOverride,
-    badges: validBadges,
+    topText: migratedTop,
+    topColor: typeof raw.topColor === 'string' && raw.topColor.trim() ? raw.topColor : base.topColor,
+    bottomText: migratedBottom,
+    bottomColor:
+      typeof raw.bottomColor === 'string' && raw.bottomColor.trim()
+        ? raw.bottomColor
+        : base.bottomColor,
+    splashShape: resolvedShape,
+    splashColor: resolvedColor,
+    splashPaddingPct:
+      typeof raw.splashPaddingPct === 'number'
+        ? Math.max(50, Math.min(160, raw.splashPaddingPct))
+        : base.splashPaddingPct,
+    splashShadowPct:
+      typeof raw.splashShadowPct === 'number'
+        ? Math.max(0, Math.min(160, raw.splashShadowPct))
+        : base.splashShadowPct,
+    badgesEnabled: typeof raw.badgesEnabled === 'boolean' ? raw.badgesEnabled : base.badgesEnabled,
+    badgeTexts: normalizedBadges,
     badgeScalePct:
       typeof raw.badgeScalePct === 'number'
         ? Math.max(60, Math.min(150, raw.badgeScalePct))
         : base.badgeScalePct,
-    fontStyle: raw.fontStyle || base.fontStyle,
-    fontEntry: matchedFont || base.fontEntry,
-    bottomFontEntry:
-      raw.bottomFontId !== undefined ? matchedBottomFont || null : base.bottomFontEntry,
-    applyFontToBadges:
-      typeof raw.applyFontToBadges === 'boolean' ? raw.applyFontToBadges : base.applyFontToBadges,
-    royalDecorEnabled:
-      typeof raw.royalDecorEnabled === 'boolean' ? raw.royalDecorEnabled : base.royalDecorEnabled,
-    magicDecorEnabled:
-      typeof raw.magicDecorEnabled === 'boolean' ? raw.magicDecorEnabled : base.magicDecorEnabled,
-    textColor: typeof raw.textColor === 'string' ? raw.textColor : base.textColor,
-    strokeColor: typeof raw.strokeColor === 'string' ? raw.strokeColor : base.strokeColor,
-    strokeWidthPct:
-      typeof raw.strokeWidthPct === 'number'
-        ? Math.max(0, Math.min(200, raw.strokeWidthPct))
-        : base.strokeWidthPct,
-    shadowColor: typeof raw.shadowColor === 'string' ? raw.shadowColor : base.shadowColor,
-    shadowBlurPct:
-      typeof raw.shadowBlurPct === 'number'
-        ? Math.max(0, Math.min(200, raw.shadowBlurPct))
-        : base.shadowBlurPct,
-    hookLayout:
-      raw.hookLayout && typeof raw.hookLayout.xPct === 'number'
-        ? {
-            xPct: Math.max(4, Math.min(96, raw.hookLayout.xPct)),
-            yPct: Math.max(6, Math.min(94, raw.hookLayout.yPct)),
-            fontScalePct: Math.max(60, Math.min(150, raw.hookLayout.fontScalePct || 100))
-          }
-        : base.hookLayout,
+    hookLayout: {
+      xPct:
+        typeof hl.xPct === 'number'
+          ? Math.max(6, Math.min(94, hl.xPct))
+          : DEFAULT_HOOK_LAYOUT.xPct,
+      yPct:
+        typeof hl.yPct === 'number'
+          ? Math.max(8, Math.min(92, hl.yPct))
+          : DEFAULT_HOOK_LAYOUT.yPct,
+      topScalePct:
+        typeof hl.topScalePct === 'number'
+          ? Math.max(40, Math.min(180, hl.topScalePct))
+          : DEFAULT_HOOK_LAYOUT.topScalePct,
+      bottomScalePct:
+        typeof hl.bottomScalePct === 'number'
+          ? Math.max(40, Math.min(180, hl.bottomScalePct))
+          : DEFAULT_HOOK_LAYOUT.bottomScalePct,
+      autoFitBottomToTop:
+        typeof hl.autoFitBottomToTop === 'boolean'
+          ? hl.autoFitBottomToTop
+          : DEFAULT_HOOK_LAYOUT.autoFitBottomToTop,
+      blockTiltDeg:
+        typeof hl.blockTiltDeg === 'number'
+          ? Math.max(-6, Math.min(6, hl.blockTiltDeg))
+          : DEFAULT_HOOK_LAYOUT.blockTiltDeg,
+      lineSpacingPct:
+        typeof hl.lineSpacingPct === 'number'
+          ? Math.max(70, Math.min(160, hl.lineSpacingPct))
+          : DEFAULT_HOOK_LAYOUT.lineSpacingPct
+    },
     bgAdjust: clampBgAdjust(raw.bgAdjust)
   };
 };
 
-const TEXT_COLOR_PRESETS = [
-  { id: '', label: 'Авто' },
-  { id: '#FFFFFF', label: 'Белый' },
-  { id: '#FDE047', label: 'Золотой' },
-  { id: '#38BDF8', label: 'Ледяной' },
-  { id: '#F87171', label: 'Алый' },
-  { id: '#34D399', label: 'Изумруд' }
-] as const;
+const formatBytesLabel = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 КБ';
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(2)} МБ`;
+  }
+  return `${Math.round(bytes / 1024)} КБ`;
+};
+
+const buildImpactCanvasFont = (fontSizePx: number): string => {
+  const safePx = Math.max(1, Math.round(fontSizePx));
+  const antonLoaded =
+    typeof document !== 'undefined' &&
+    Boolean(document.fonts?.check?.(`400 ${Math.min(48, safePx)}px "Anton"`));
+  if (antonLoaded) {
+    return `400 ${safePx}px "Anton", "Montserrat", Impact, "Arial Black", sans-serif`;
+  }
+  return `900 ${safePx}px "Montserrat", "Anton", Impact, "Arial Black", sans-serif`;
+};
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   thumbTitle,
   onThumbTitleChange,
-  thumbBadge,
-  onThumbBadgeChange,
+  thumbBadge: _thumbBadge,
+  onThumbBadgeChange: _onThumbBadgeChange,
   externalFontStyle,
   onConsumeExternalFontStyle,
   externalCoverAImageUrl,
@@ -1603,77 +1012,56 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     C: null
   });
 
+  const projectTitleSeed = (youtubeMockTitle || thumbTitle || '').trim();
+  const lastSyncedExternalTitleRef = useRef<string>(thumbTitle);
+
   const [slotConfigs, setSlotConfigs] = useState<Record<ThumbnailSlotId, ThumbnailSlotConfig>>(() => {
     let parsed: Partial<Record<ThumbnailSlotId, PersistedSlotState>> | null = null;
     try {
-      const raw = localStorage.getItem(THUMB_ABC_SLOTS_STORAGE_KEY);
-      if (raw) {
-        parsed = JSON.parse(raw) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+      const rawV2 = localStorage.getItem(THUMB_ABC_SLOTS_STORAGE_KEY);
+      if (rawV2) {
+        parsed = JSON.parse(rawV2) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+      } else {
+        const rawV1 = localStorage.getItem(THUMB_ABC_SLOTS_LEGACY_KEY);
+        if (rawV1) {
+          parsed = JSON.parse(rawV1) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+        }
       }
     } catch {
       parsed = null;
     }
-    const cfgA = hydrateSlotConfig('A', parsed?.A);
-    const cfgB = hydrateSlotConfig('B', parsed?.B);
-    const cfgC = hydrateSlotConfig('C', parsed?.C);
-    cfgA.title = thumbTitle;
-    cfgA.badges = parseBadgeIds(thumbBadge);
+
+    const cfgA = hydrateSlotConfig('A', projectTitleSeed, parsed?.A);
+    const cfgB = hydrateSlotConfig('B', projectTitleSeed, parsed?.B);
+    const cfgC = hydrateSlotConfig('C', projectTitleSeed, parsed?.C);
+
+    if (!parsed?.A?.topText && thumbTitle.trim()) {
+      const split = splitProjectTitleIntoTwoLines(thumbTitle);
+      cfgA.topText = split.line1;
+      cfgA.bottomText = split.line2;
+    }
+
     return { A: cfgA, B: cfgB, C: cfgC };
   });
 
-  // Синхронизация Слота A с внешними пропсами thumbTitle / thumbBadge для полной обратной совместимости
+  // Односторонняя безопасная синхронизация при внешнем изменении thumbTitle (без цикла ввода)
   useEffect(() => {
-    setSlotConfigs(prev => {
-      const parsedBadges = parseBadgeIds(thumbBadge);
-      const sameTitle = prev.A.title === thumbTitle;
-      const sameBadges =
-        prev.A.badges.length === parsedBadges.length &&
-        prev.A.badges.every((b, idx) => b === parsedBadges[idx]);
-      if (sameTitle && sameBadges) return prev;
-      return {
-        ...prev,
-        A: {
-          ...prev.A,
-          title: thumbTitle,
-          badges: parsedBadges
-        }
-      };
-    });
-  }, [thumbTitle, thumbBadge]);
+    if (thumbTitle === lastSyncedExternalTitleRef.current) return;
+    lastSyncedExternalTitleRef.current = thumbTitle;
+    const split = splitProjectTitleIntoTwoLines(thumbTitle);
+    setSlotConfigs(prev => ({
+      ...prev,
+      A: {
+        ...prev.A,
+        topText: split.line1,
+        bottomText: split.line2
+      }
+    }));
+  }, [thumbTitle]);
 
-  // Сохранение A/B/C настроек в localStorage (с поддержкой миграции старых проектов A/B)
   useEffect(() => {
     try {
-      const serializable: Record<ThumbnailSlotId, PersistedSlotState> = {
-        A: {
-          ...slotConfigs.A,
-          fontId: slotConfigs.A.fontEntry.id,
-          bottomFontId: slotConfigs.A.bottomFontEntry?.id
-        },
-        B: {
-          ...slotConfigs.B,
-          fontId: slotConfigs.B.fontEntry.id,
-          bottomFontId: slotConfigs.B.bottomFontEntry?.id
-        },
-        C: {
-          ...slotConfigs.C,
-          fontId: slotConfigs.C.fontEntry.id,
-          bottomFontId: slotConfigs.C.bottomFontEntry?.id
-        }
-      };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.A as any).fontEntry;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.A as any).bottomFontEntry;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.B as any).fontEntry;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.B as any).bottomFontEntry;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.C as any).fontEntry;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (serializable.C as any).bottomFontEntry;
-      localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(serializable));
+      localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(slotConfigs));
     } catch {
       // ignore quota errors
     }
@@ -1694,16 +1082,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
   useEffect(() => {
     if (externalFontStyle) {
-      const mappedId = DEFAULT_FONT_ID_BY_STYLE[externalFontStyle];
-      const matched = GOOGLE_FONT_PRESETS.find(f => f.id === mappedId);
-      updateSlotConfig('A', prev => ({
-        ...prev,
-        fontStyle: externalFontStyle,
-        fontEntry: matched || prev.fontEntry
-      }));
       onConsumeExternalFontStyle?.();
     }
-  }, [externalFontStyle, onConsumeExternalFontStyle, updateSlotConfig]);
+  }, [externalFontStyle, onConsumeExternalFontStyle]);
 
   useEffect(() => {
     if (!externalCoverAImageUrl) return;
@@ -1721,17 +1102,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [hoveredSlot, setHoveredSlot] = useState<ThumbnailSlotId | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
 
-  // Локальная подготовка разрешения, 3x3 резкости базового кадра и умный экспорт < 2 МБ
+  // Локальная подготовка разрешения, 3x3 резкости базового кадра и мультиформатный экспорт
   const [baseSharpenPct, setBaseSharpenPct] = useState<number>(0);
   const [baseResolutionPreset, setBaseResolutionPreset] = useState<
     'original' | '1920x1080' | '2560x1440' | '3840x2160'
   >('original');
-  const [isOptimizingYtThumb, setIsOptimizingYtThumb] = useState<boolean>(false);
+  const [isExportingFormat, setIsExportingFormat] = useState<string | null>(null);
   const [batchExportStatus, setBatchExportStatus] = useState<string>('');
+  const [lastExportReport, setLastExportReport] = useState<
+    Record<
+      ThumbnailSlotId,
+      { formatLabel: string; filename: string; sizeText: string } | null
+    >
+  >({ A: null, B: null, C: null });
   const [showCopyMenu, setShowCopyMenu] = useState<boolean>(false);
-  const [showPresetLibrary, setShowPresetLibrary] = useState<boolean>(true);
-  const [presetCategory, setPresetCategory] = useState<PresetCategoryId>('all');
-  const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
 
   // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
@@ -1825,13 +1209,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [feedViewportMode, setFeedViewportMode] = useState<'both' | 'desktop' | 'mobile'>('both');
   const [bwContrastFilter, setBwContrastFilter] = useState<boolean>(false);
 
-  // Оверлей интерфейса YouTube (таймкод 3:00:00, аватарка, мобильный масштаб 160x90)
+  // Оверлей интерфейса YouTube (таймкод, аватарка, мобильный масштаб 160x90)
   const [showYoutubeOverlay, setShowYoutubeOverlay] = useState<boolean>(true);
   const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>('3:00:00');
   const [youtubeChannelName] = useState<string>('Aether Documentary 4K');
   const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(
-    youtubeMockTitle ||
-      'The Classified Alpine Tape: Why This Station Was Sealed in 24 Hours (4K Documentary)'
+    youtubeMockTitle || thumbTitle || '4K Documentary Release'
   );
 
   useEffect(() => {
@@ -1857,82 +1240,38 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [showVideoExtractor, setShowVideoExtractor] = useState<boolean>(false);
   const [showPromptGenerator, setShowPromptGenerator] = useState<boolean>(false);
 
+  // Предзагрузка Google Fonts Anton + Montserrat:wght@900 для 100% идентичности Canvas и UI
   useEffect(() => {
     let cancelled = false;
-    preloadCatalogFonts().then(() => {
-      if (!cancelled) {
-        setFontsReadyTick(t => t + 1);
-      }
-    });
+    if (typeof document !== 'undefined' && document.fonts) {
+      Promise.allSettled([
+        document.fonts.load('400 72px "Anton"'),
+        document.fonts.load('900 72px "Montserrat"'),
+        document.fonts.load('800 24px "Montserrat"')
+      ]).then(() => {
+        if (!cancelled) {
+          setFontsReadyTick(t => t + 1);
+        }
+      });
+    }
     return () => {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fontPairs: Array<[string, StudioFontEntry]> = [
-      [slotConfigs.A.fontEntry.id, slotConfigs.A.fontEntry],
-      [slotConfigs.B.fontEntry.id, slotConfigs.B.fontEntry],
-      [slotConfigs.C.fontEntry.id, slotConfigs.C.fontEntry]
-    ];
-    (['A', 'B', 'C'] as const).forEach(s => {
-      const bf = slotConfigs[s].bottomFontEntry;
-      if (bf) fontPairs.push([bf.id, bf]);
-    });
-    const uniqueFonts = Array.from(new Map<string, StudioFontEntry>(fontPairs).values());
-    Promise.all(uniqueFonts.map(entry => ensureFontEntryLoaded(entry))).then(() => {
-      if (!cancelled) {
-        setFontsReadyTick(t => t + 1);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    slotConfigs.A.fontEntry,
-    slotConfigs.A.bottomFontEntry,
-    slotConfigs.B.fontEntry,
-    slotConfigs.B.bottomFontEntry,
-    slotConfigs.C.fontEntry,
-    slotConfigs.C.bottomFontEntry
-  ]);
-
-  const toggleBadgeForSlot = (slot: ThumbnailSlotId, badgeId: CinematicBadgeId) => {
-    const current = slotConfigs[slot].badges;
-    const exists = current.includes(badgeId);
-    let next: CinematicBadgeId[];
-    if (exists) {
-      next = current.filter(id => id !== badgeId);
-    } else {
-      if (current.length >= 3) {
-        onNotify('Максимум 3 бейджа', 'info');
-        return;
-      }
-      next = [...current, badgeId];
-    }
-    if (slot === 'A') {
-      onThumbBadgeChange(next.length > 0 ? next.join(',') : 'none');
-    } else {
-      updateSlotConfig(slot, prev => ({ ...prev, badges: next }));
-    }
-  };
 
   const handleCopySlotSettingsTo = (targetSlot: ThumbnailSlotId) => {
     if (targetSlot === activeSlot) return;
     const sourceCfg = slotConfigs[activeSlot];
     const clonedCfg: ThumbnailSlotConfig = {
       ...sourceCfg,
-      badges: [...sourceCfg.badges],
+      badgeTexts: [...sourceCfg.badgeTexts] as [string, string, string],
       hookLayout: { ...sourceCfg.hookLayout },
-      bgAdjust: { ...sourceCfg.bgAdjust },
-      bottomPlaqueOverride: sourceCfg.bottomPlaqueOverride
-        ? { ...sourceCfg.bottomPlaqueOverride }
-        : null
+      bgAdjust: { ...sourceCfg.bgAdjust }
     };
     if (targetSlot === 'A') {
-      onThumbTitleChange(clonedCfg.title);
-      onThumbBadgeChange(clonedCfg.badges.length > 0 ? clonedCfg.badges.join(',') : 'none');
+      const combined = [clonedCfg.topText, clonedCfg.bottomText].filter(Boolean).join(' ').trim();
+      lastSyncedExternalTitleRef.current = combined;
+      onThumbTitleChange(combined);
     }
     setSlotConfigs(prev => ({
       ...prev,
@@ -1950,47 +1289,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     onNotify(`📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`, 'success');
   };
 
-  const applyYoutubeThumbnailPreset = (preset: YoutubeThumbnailPreset) => {
-    const topFont = findCatalogFontById(preset.topFontId) || DEFAULT_SLOT_FONT_ENTRY;
-    const bottomFont = findCatalogFontById(preset.bottomFontId) || topFont;
-
-    if (activeSlot === 'A') {
-      onThumbTitleChange(preset.topLine);
-    }
-
-    updateSlotConfig(activeSlot, prev => ({
-      ...prev,
-      title: preset.topLine,
-      bottomLine: preset.bottomLine,
-      topGradient: preset.topGradient,
-      bottomBadgeStyle: preset.bottomBadgeStyle,
-      bottomPlaqueOverride: preset.bottomPlaqueOverride
-        ? { ...preset.bottomPlaqueOverride }
-        : null,
-      fontEntry: topFont,
-      bottomFontEntry: bottomFont,
-      textColor: ''
-    }));
-
-    setAppliedPresetId(preset.id);
-    Promise.allSettled([
-      ensureFontEntryLoaded(topFont),
-      ensureFontEntryLoaded(bottomFont)
-    ]).then(() => setFontsReadyTick(t => t + 1));
-
-    onNotify(
-      `🔥 Шаблон #${preset.index} «${preset.topLine} + ${preset.bottomLine}» применён к Слоту ${activeSlot}!`,
-      'success'
-    );
-  };
-
   // Автогенератор визуального промпта на английском языке
   const generatedCoverPrompt = (() => {
     const rawContext = (
       scriptContext ||
-      activeConfig.title ||
+      [activeConfig.topText, activeConfig.bottomText].filter(Boolean).join(' ') ||
       thumbTitle ||
-      'abandoned alpine weather station mystery'
+      'dramatic historical documentary scene'
     )
       .replace(/[а-яёА-ЯЁ]+/g, '')
       .replace(/\s+/g, ' ')
@@ -1998,42 +1303,54 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const topicHint =
       rawContext.length > 5
         ? rawContext.slice(0, 110)
-        : 'classified alpine weather station anomaly, sealed bunker magnetic tape recording';
+        : 'cinematic historical documentary mystery, dramatic lighting';
 
     const styleMap = {
       mystery_dark:
-        'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, extreme foreground focus on vintage reel-to-reel tape recorder glowing red indicator in snow, shadowy silhouette in background, negative space on left for bold English typography, dramatic chiaroscuro, volumetric fog, 35mm f/1.4 lens, 8k photorealistic',
+        'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, dramatic chiaroscuro, volumetric fog, shadowy silhouette in background, negative space for bold typography, 35mm f/1.4 lens, 8k photorealistic',
       ambient_4k:
-        'Ultra-cozy 4K ambient loop thumbnail, warm fireplace embers contrasting against deep blue arctic blizzard outside window, hyper-detailed snow crystals, soft volumetric warm light, cinematic color grading, Kodachrome 64 aesthetic, 8k resolution',
+        'Ultra-cozy 4K ambient loop thumbnail, warm amber glow contrasting against deep blue twilight storm outside window, soft volumetric light, cinematic color grading, Kodachrome 64 aesthetic, 8k resolution',
       truecrime_contrast:
-        'True crime investigative YouTube thumbnail, high-contrast split composition, classified dossier folder with red TOP SECRET stamp on metal table, cold cyan rim lighting, intense dramatic shadows, ultra sharp focus, rule of thirds',
+        'True crime investigative YouTube thumbnail, high-contrast split composition, classified dossier archive lighting, cold cyan rim lighting, intense dramatic shadows, ultra sharp focus, rule of thirds',
       scifi_neon:
-        'Anomalous signal documentary thumbnail, glowing green oscilloscope waveform spiking in dark bunker, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k octane render realism'
+        'Anomalous signal documentary thumbnail, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k realism'
     };
 
-    const trimmedTitle = (activeConfig.title || '').trim();
-    const hookWords = trimmedTitle
-      ? trimmedTitle.split(/\s+/).slice(0, 3).join(' ')
-      : '';
+    const hookWords = [activeConfig.topText, activeConfig.bottomText]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join(' ');
 
     const hookClause = hookWords
-      ? `Thumbnail Hook (max 3 words): "${hookWords.toUpperCase()}" | `
+      ? `Composition focus for hook: "${hookWords.toUpperCase()}" | `
       : 'Pure clean artwork without embedded text overlays | ';
 
-    return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | ${hookClause}Clean 16:9 composition without watermarks, clear silhouette readability on mobile 160x90px`;
+    return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | ${hookClause}Clean 16:9 composition without text or watermarks, clear silhouette readability on mobile 160x90px`;
   })();
 
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
-  const handleSlotHookChange = (slot: ThumbnailSlotId, val: string) => {
+  const updateSlotLines = (
+    slot: ThumbnailSlotId,
+    nextTop: string,
+    nextBottom: string
+  ) => {
+    updateSlotConfig(slot, prev => ({
+      ...prev,
+      topText: nextTop,
+      bottomText: nextBottom
+    }));
     if (slot === 'A') {
-      onThumbTitleChange(val);
-    } else {
-      updateSlotConfig(slot, prev => ({ ...prev, title: val }));
+      const combined = [nextTop.trim(), nextBottom.trim()].filter(Boolean).join(' ').trim();
+      lastSyncedExternalTitleRef.current = combined;
+      onThumbTitleChange(combined);
     }
   };
 
-  // Интерактивное перетаскивание мышкой и пальцем исключительно для заголовка (текста-хука) активного слота
+  // Интерактивное перетаскивание мышкой и пальцем для 2-строчного блока заголовка
   const startHookDrag = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, slot: ThumbnailSlotId) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -2053,8 +1370,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const onPointerMove = (moveEv: PointerEvent) => {
         const dxPct = ((moveEv.clientX - startX) / Math.max(1, rect.width)) * 100;
         const dyPct = ((moveEv.clientY - startY) / Math.max(1, rect.height)) * 100;
-        const nextX = Math.max(4, Math.min(96, Number((initialLayout.xPct + dxPct).toFixed(2))));
-        const nextY = Math.max(6, Math.min(94, Number((initialLayout.yPct + dyPct).toFixed(2))));
+        const nextX = Math.max(6, Math.min(94, Number((initialLayout.xPct + dxPct).toFixed(1))));
+        const nextY = Math.max(8, Math.min(92, Number((initialLayout.yPct + dyPct).toFixed(1))));
         updateSlotConfig(slot, prev => ({
           ...prev,
           hookLayout: { ...prev.hookLayout, xPct: nextX, yPct: nextY }
@@ -2075,34 +1392,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     [slotConfigs, updateSlotConfig]
   );
 
-  // Отрисовка обложки на выбранном Canvas (320x180, 1280x720 или 3840x2160) без водяных знаков
+  // Отрисовка обложки «Documentary Impact + Grunge Splash» на Canvas (320x180, 1280x720 или 3840x2160)
   const drawCoverOnCanvas = useCallback(
     (
       canvas: HTMLCanvasElement | null,
       image: HTMLImageElement | null,
-      titleText: string,
-      activeBadges: CinematicBadgeId[],
-      activeFontStyle: ThumbnailFontStyleId,
-      showRoyalDecor: boolean,
-      showMagicDecor: boolean,
-      hookLayout: HookTextLayout,
-      variantLabel?: string,
-      fontOptions?: {
-        fontEntry?: StudioFontEntry;
-        bottomFontEntry?: StudioFontEntry | null;
-        bottomLine?: string;
-        topGradient?: TopLineGradientId;
-        bottomBadgeStyle?: BottomPlaqueStyleId;
-        bottomPlaqueOverride?: BottomPlaquePaletteOverride | null;
-        bgAdjust?: SlotBgAdjustConfig;
-        applyToBadges?: boolean;
-        badgeScalePct?: number;
-        textColor?: string;
-        strokeColor?: string;
-        strokeWidthPct?: number;
-        shadowColor?: string;
-        shadowBlurPct?: number;
-      },
+      cfg: ThumbnailSlotConfig,
+      fallbackLabel?: string,
       baseSharpenPercent: number = 0
     ): HookBoundingBoxPct | null => {
       if (!canvas) return null;
@@ -2121,7 +1417,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           image,
           w,
           h,
-          fontOptions?.bgAdjust || DEFAULT_BG_ADJUST,
+          cfg.bgAdjust || DEFAULT_BG_ADJUST,
           baseSharpenPercent,
           drawCoverImageToCanvas
         );
@@ -2141,7 +1437,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           h * 0.42,
           440 * scale
         );
-        radial.addColorStop(0, 'rgba(245, 158, 11, 0.28)');
+        radial.addColorStop(0, 'rgba(245, 158, 11, 0.24)');
         radial.addColorStop(0.6, 'rgba(56, 189, 248, 0.08)');
         radial.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = radial;
@@ -2151,72 +1447,48 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.font = `600 ${Math.round(20 * scale)}px Inter, sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText(
-          variantLabel
-            ? `${variantLabel} — нажмите «Flux.1 AI Horde (2×2)»`
+          fallbackLabel
+            ? `${fallbackLabel} — нажмите «Flux.1 AI Horde (2×2)»`
             : 'Нажмите «Flux.1 AI Horde (2×2)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
       }
 
-      const bottomLineTrimmed = (fontOptions?.bottomLine || '').trim();
-      const topGradientId: TopLineGradientId = fontOptions?.topGradient || 'auto';
-      const bottomBadgeStyle: BottomPlaqueStyleId = fontOptions?.bottomBadgeStyle || 'none';
-      const isTwoTierActive = bottomLineTrimmed.length > 0;
-      const hookLines = splitHookLines(
-        titleText,
-        !isTwoTierActive && activeFontStyle === 'gold_ice_magic'
-      );
-      const hasHook = hookLines.length > 0 || isTwoTierActive;
-      const centerX = (Math.max(4, Math.min(96, hookLayout.xPct)) / 100) * w;
-      const centerY = (Math.max(6, Math.min(94, hookLayout.yPct)) / 100) * h;
-      const fontScale = Math.max(0.6, Math.min(1.5, hookLayout.fontScalePct / 100));
+      const topUpper = (cfg.topText || '').trim().toUpperCase();
+      const bottomUpper = (cfg.bottomText || '').trim().toUpperCase();
+      const hasHeadline = topUpper.length > 0 || bottomUpper.length > 0;
 
-      // Затемнение/контрастная подложка под текст рисуется ТОЛЬКО если текст-хук не пустой
-      if (hasHook) {
-        if (hookLayout.yPct >= 55) {
-          const grad = ctx.createLinearGradient(0, h * 0.44, 0, h);
-          grad.addColorStop(0, 'rgba(0,0,0,0)');
-          grad.addColorStop(1, 'rgba(0,0,0,0.84)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(0, h * 0.44, w, h * 0.56);
-        } else {
-          const softSpot = ctx.createRadialGradient(
-            centerX,
-            centerY,
-            40 * scale,
-            centerX,
-            centerY,
-            520 * scale * fontScale
-          );
-          softSpot.addColorStop(0, 'rgba(2, 6, 14, 0.58)');
-          softSpot.addColorStop(0.65, 'rgba(2, 6, 14, 0.22)');
-          softSpot.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = softSpot;
-          ctx.fillRect(0, 0, w, h);
-        }
+      // Лёгкая кинематографическая виньетка под зоной заголовка для контраста
+      if (hasHeadline) {
+        const rawVx = (cfg.hookLayout.xPct / 100) * w;
+        const rawVy = (cfg.hookLayout.yPct / 100) * h;
+        const vignette = ctx.createRadialGradient(
+          rawVx,
+          rawVy,
+          40 * scale,
+          rawVx,
+          rawVy,
+          560 * scale
+        );
+        vignette.addColorStop(0, 'rgba(4, 7, 15, 0.46)');
+        vignette.addColorStop(0.65, 'rgba(4, 7, 15, 0.16)');
+        vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, w, h);
       }
 
-      // Жёстко закреплённый блок бейджей (1..3 шт.) в верхнем правом углу с индивидуальным масштабом слота
-      const badgesToDraw = activeBadges
-        .map(id => BADGE_LABEL_BY_ID[id])
-        .filter((lbl): lbl is string => Boolean(lbl))
-        .map(lbl => lbl.toUpperCase())
-        .slice(0, 3);
+      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (Правый верхний угол)
+      const activeBadges = cfg.badgesEnabled
+        ? cfg.badgeTexts.map(t => (t || '').trim().toUpperCase()).filter(Boolean)
+        : [];
 
-      if (badgesToDraw.length > 0) {
-        const badgeUserScale = Math.max(0.6, Math.min(1.5, (fontOptions?.badgeScalePct ?? 100) / 100));
+      if (activeBadges.length > 0) {
+        const badgeUserScale = Math.max(0.6, Math.min(1.5, (cfg.badgeScalePct ?? 100) / 100));
         const bScale = scale * badgeUserScale;
-        const badgeFontPx = 13.5 * bScale;
-        const badgeFontFamily =
-          fontOptions?.applyToBadges && fontOptions?.fontEntry
-            ? fontOptions.fontEntry.cssFamily
-            : '"Montserrat", "Inter", sans-serif';
-        const badgeFontWeight =
-          fontOptions?.applyToBadges && fontOptions?.fontEntry
-            ? fontOptions.fontEntry.weight || '800'
-            : '800';
-        const baseTrackingPx = 1.4 * bScale;
+        const badgeFontPx = 14 * bScale;
+        const badgeFontFamily = '"Montserrat", "Inter", sans-serif';
+        const baseTrackingPx = 2.0 * bScale;
 
         const measureTrackedWidth = (text: string, trackingPx: number): number => {
           const chars = Array.from(text);
@@ -2245,22 +1517,22 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           }
         };
 
-        ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
+        ctx.font = `800 ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
 
         const horizontalPad = 36 * bScale;
         const badgeGap = 12 * bScale;
         const badgeH = 42 * bScale;
-        const rawWidths = badgesToDraw.map(lbl =>
-          Math.max(112 * bScale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
+        const rawWidths = activeBadges.map(lbl =>
+          Math.max(106 * bScale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
         );
         const totalRawW =
           rawWidths.reduce((sum, bw) => sum + bw, 0) +
-          badgeGap * Math.max(0, badgesToDraw.length - 1);
+          badgeGap * Math.max(0, activeBadges.length - 1);
         const maxAvailableW = w - 64 * scale;
         const fitFactor = totalRawW > maxAvailableW ? maxAvailableW / totalRawW : 1;
 
         if (fitFactor < 1) {
-          ctx.font = `${badgeFontWeight} ${Math.max(1, Math.round(badgeFontPx * fitFactor))}px ${badgeFontFamily}`;
+          ctx.font = `800 ${Math.max(1, Math.round(badgeFontPx * fitFactor))}px ${badgeFontFamily}`;
         }
 
         const effectiveH = badgeH * fitFactor;
@@ -2270,21 +1542,21 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const topY = 28 * scale;
 
         let cursorX = w - 32 * scale;
-        for (let i = badgesToDraw.length - 1; i >= 0; i--) {
+        for (let i = activeBadges.length - 1; i >= 0; i--) {
           const bw = widths[i];
           const bx = cursorX - bw;
-          const label = badgesToDraw[i];
+          const label = activeBadges[i];
 
           ctx.save();
-          ctx.fillStyle = 'rgba(9, 13, 22, 0.90)';
-          ctx.strokeStyle = '#FACC15';
+          ctx.fillStyle = 'rgba(10, 14, 24, 0.85)';
+          ctx.strokeStyle = '#F59E0B';
           ctx.lineWidth = Math.max(1.5, 2 * bScale * fitFactor);
           ctx.beginPath();
-          ctx.roundRect(bx, topY, bw, effectiveH, 9 * bScale * fitFactor);
+          ctx.roundRect(bx, topY, bw, effectiveH, 8 * bScale * fitFactor);
           ctx.fill();
           ctx.stroke();
 
-          ctx.fillStyle = '#FDE047';
+          ctx.fillStyle = '#FACC15';
           drawTrackedCenteredText(label, bx + bw / 2, topY + effectiveH * 0.52, effectiveTracking);
           ctx.restore();
 
@@ -2292,766 +1564,185 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      // Отрисовка текста-хука (с точным сохранением текста, цвета, обводки, тени, переносов и координат x/y)
-      if (!hasHook) {
+      if (!hasHeadline) {
         return null;
       }
 
-      let returnBox: HookBoundingBoxPct | null = null;
-      const customFamily = fontOptions?.fontEntry?.cssFamily;
-      const customWeight = fontOptions?.fontEntry?.weight || '800';
-      const bottomFamily = fontOptions?.bottomFontEntry?.cssFamily || customFamily;
-      const bottomWeight = fontOptions?.bottomFontEntry?.weight || customWeight;
-      const customTextColor = (fontOptions?.textColor || '').trim();
-      const customStrokeColor = fontOptions?.strokeColor || '#000000';
-      const strokeMult = Math.max(0, Math.min(2, (fontOptions?.strokeWidthPct ?? 100) / 100));
-      const customShadowColor = fontOptions?.shadowColor || '#000000';
-      const shadowMult = Math.max(0, Math.min(2, (fontOptions?.shadowBlurPct ?? 100) / 100));
-      const hasCustomStrokeColor = customStrokeColor.toLowerCase() !== '#000000';
-      const hasCustomShadowColor = customShadowColor.toLowerCase() !== '#000000';
+      // 2. ЕДИНЫЙ СТИЛЬ «DOCUMENTARY IMPACT + GRUNGE SPLASH» (2 независимые строки)
+      const hl = cfg.hookLayout;
+      const maxSafeW = w * 0.82;
+      let fontSize1 = topUpper ? 88 * scale * (hl.topScalePct / 100) : 0;
+      let line1W = 0;
+
+      if (topUpper) {
+        ctx.font = buildImpactCanvasFont(fontSize1);
+        line1W = ctx.measureText(topUpper).width;
+        if (line1W > maxSafeW) {
+          fontSize1 = fontSize1 * (maxSafeW / Math.max(1, line1W));
+          ctx.font = buildImpactCanvasFont(fontSize1);
+          line1W = ctx.measureText(topUpper).width;
+        }
+      }
+
+      let fontSize2 = bottomUpper ? 88 * scale * (hl.bottomScalePct / 100) : 0;
+      let line2W = 0;
+
+      if (bottomUpper) {
+        if (hl.autoFitBottomToTop && topUpper && line1W > 0) {
+          const refSize = 100 * scale;
+          ctx.font = buildImpactCanvasFont(refSize);
+          const refW = Math.max(1, ctx.measureText(bottomUpper).width);
+          fontSize2 = Math.max(28 * scale, Math.min(200 * scale, refSize * (line1W / refW)));
+        }
+        ctx.font = buildImpactCanvasFont(fontSize2);
+        line2W = ctx.measureText(bottomUpper).width;
+        if (line2W > maxSafeW) {
+          fontSize2 = fontSize2 * (maxSafeW / Math.max(1, line2W));
+          ctx.font = buildImpactCanvasFont(fontSize2);
+          line2W = ctx.measureText(bottomUpper).width;
+        }
+      }
+
+      const capH1 = topUpper ? fontSize1 * 0.78 : 0;
+      const capH2 = bottomUpper ? fontSize2 * 0.78 : 0;
+      const avgFs = topUpper && bottomUpper ? (fontSize1 + fontSize2) * 0.5 : Math.max(fontSize1, fontSize2);
+      const lineGap =
+        topUpper && bottomUpper
+          ? Math.max(8 * scale, avgFs * 0.16 * (hl.lineSpacingPct / 100))
+          : 0;
+      const totalTextH = capH1 + lineGap + capH2;
+      const skewOverhang = Math.max(fontSize1, fontSize2) * 0.16;
+      const contentW = Math.max(line1W, line2W) + skewOverhang;
+      const splashPadMult = Math.max(0.5, Math.min(1.6, (cfg.splashPaddingPct ?? 100) / 100));
+
+      const estPadX = Math.max(48 * scale, contentW * 0.14) * splashPadMult;
+      const estPadY = Math.max(22 * scale, totalTextH * 0.18) * splashPadMult;
+      const estBoxW = contentW + estPadX * 2 + 24 * scale;
+      const estBoxH = totalTextH + estPadY * 2 + 14 * scale;
+
+      const rawCx = (Math.max(6, Math.min(94, hl.xPct)) / 100) * w;
+      const rawCy = (Math.max(8, Math.min(92, hl.yPct)) / 100) * h;
+      const edgeMargin = 24 * scale;
+      const drawCx =
+        estBoxW + edgeMargin * 2 < w
+          ? Math.max(estBoxW / 2 + edgeMargin, Math.min(w - estBoxW / 2 - edgeMargin, rawCx))
+          : w / 2;
+      const drawCy =
+        estBoxH + edgeMargin * 2 < h
+          ? Math.max(estBoxH / 2 + edgeMargin, Math.min(h - estBoxH / 2 - edgeMargin, rawCy))
+          : h / 2;
+
+      const tiltRad = (Math.max(-6, Math.min(6, hl.blockTiltDeg)) * Math.PI) / 180;
+      const skewXSlope = Math.tan((-10 * Math.PI) / 180);
+      const topYCenter = -totalTextH / 2 + capH1 / 2;
+      const bottomYCenter = topUpper
+        ? -totalTextH / 2 + capH1 + lineGap + capH2 / 2
+        : 0;
 
       ctx.save();
-      ctx.textBaseline = 'alphabetic';
-      ctx.textAlign = 'center';
-      ctx.lineJoin = 'round';
+      ctx.translate(drawCx, drawCy);
+      ctx.rotate(tiltRad);
 
-      if (isTwoTierActive || topGradientId !== 'auto') {
-        const effScale = scale * fontScale;
-        const resolvedTopGrad: Exclude<TopLineGradientId, 'auto'> =
-          topGradientId !== 'auto'
-            ? topGradientId
-            : activeFontStyle === 'gold_ice_magic' || activeFontStyle === 'royal_gold_laurels'
-              ? 'gold'
-              : activeFontStyle === 'medieval_serif'
-                ? 'amber'
-                : 'white';
+      // Процедурная векторная гранж-подложка (6 форм кисти + None) с детерминированным зерном
+      const splashBounds = drawUnifiedGrungeSplash(ctx, {
+        shape: cfg.splashShape || 'monolith_bristle',
+        colorHex: cfg.splashColor || '#E10613',
+        paddingPct: cfg.splashPaddingPct ?? 100,
+        shadowPct: cfg.splashShadowPct ?? 100,
+        contentW,
+        totalTextH,
+        hasTop: Boolean(topUpper),
+        topYCenter,
+        topW: line1W + fontSize1 * 0.14,
+        topH: capH1,
+        hasBottom: Boolean(bottomUpper),
+        bottomYCenter,
+        bottomW: line2W + fontSize2 * 0.14,
+        bottomH: capH2,
+        scale,
+        seedText: `${topUpper}_${bottomUpper}`
+      });
+      const finalW = Math.max(contentW + 40 * scale, splashBounds.splashW);
+      const finalH = Math.max(totalTextH + 30 * scale, splashBounds.splashH);
 
-        let topFontSize = 72 * effScale;
-        const maxTopW = w * 0.88;
-        const buildTopFont = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
-          }`;
+      const drawDocumentaryImpactLine = (
+        text: string,
+        fontSizePx: number,
+        lineCenterY: number,
+        hexColor: string,
+        useSubtle3DGradient: boolean
+      ) => {
+        const fontStr = buildImpactCanvasFont(fontSizePx);
+        const strokeWidth = Math.max(3, fontSizePx * 0.135);
+        const hardShadowOffX = Math.max(2, fontSizePx * 0.055);
+        const hardShadowOffY = Math.max(3, fontSizePx * 0.08);
 
-        let maxTopLineW = 0;
-        if (hookLines.length > 0) {
-          ctx.font = buildTopFont(topFontSize);
-          maxTopLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-          if (maxTopLineW > maxTopW) {
-            topFontSize = topFontSize * (maxTopW / maxTopLineW);
-            ctx.font = buildTopFont(topFontSize);
-            maxTopLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-          }
-        }
-        const topFontStr = buildTopFont(topFontSize);
+        ctx.save();
+        ctx.translate(0, lineCenterY);
+        ctx.transform(1, 0, skewXSlope, 1, 0, 0);
+        ctx.font = fontStr;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.miterLimit = 2;
 
-        let bottomFontSize = 60 * effScale;
-        const maxBottomTextW = w * 0.78;
-        const buildBottomFont = (fs: number) =>
-          `${bottomWeight} ${Math.max(1, Math.round(fs))}px ${
-            bottomFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
-          }`;
+        // 1. Жёсткая смещённая тень (Hard Offset Drop Shadow)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.92)';
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeText(text, hardShadowOffX, hardShadowOffY);
+        ctx.fillText(text, hardShadowOffX, hardShadowOffY);
 
-        let bottomTextW = 0;
-        if (isTwoTierActive) {
-          ctx.font = buildBottomFont(bottomFontSize);
-          bottomTextW = ctx.measureText(bottomLineTrimmed).width;
-          if (bottomTextW > maxBottomTextW) {
-            bottomFontSize = bottomFontSize * (maxBottomTextW / bottomTextW);
-            ctx.font = buildBottomFont(bottomFontSize);
-            bottomTextW = ctx.measureText(bottomLineTrimmed).width;
-          }
-        }
-        const bottomFontStr = buildBottomFont(bottomFontSize);
+        // 2. Плотная чёрная обводка с мягким контуром подъёма
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
+        ctx.shadowBlur = 10 * scale;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 2 * scale;
+        ctx.strokeStyle = '#05070C';
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeText(text, 0, 0);
 
-        const topLineHeight = topFontSize * 1.1;
-        const topCapHeight = topFontSize * 0.72;
-        const topSpan =
-          hookLines.length > 0 ? (hookLines.length - 1) * topLineHeight + topCapHeight : 0;
-        const tierGap = hookLines.length > 0 && isTwoTierActive ? 18 * effScale : 0;
-        const bottomPlaquePadY =
-          bottomBadgeStyle === 'none'
-            ? 0
-            : Math.max(10 * effScale, bottomFontSize * 0.18) * 2;
-        const bottomSpan = isTwoTierActive ? bottomFontSize * 1.06 + bottomPlaquePadY : 0;
-        const totalSpan = topSpan + tierGap + bottomSpan;
-        const topEdgeY = centerY - totalSpan / 2;
-
-        const maxCombinedW = Math.max(
-          maxTopLineW,
-          isTwoTierActive ? bottomTextW + (bottomBadgeStyle === 'none' ? 0 : 72 * effScale) : 0
+        // 3. Чистая заливка (верх — насыщенный плотный цвет, низ — с лёгким 3D градиентом)
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = buildVertical3DFill(
+          ctx,
+          hexColor,
+          -fontSizePx * 0.42,
+          fontSizePx * 0.42,
+          useSubtle3DGradient
         );
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
+      };
 
-        if (activeFontStyle === 'gold_ice_magic' && showMagicDecor) {
-          drawMagicGlowAndSnowflakes(
-            ctx,
-            centerX,
-            centerY,
-            maxCombinedW,
-            totalSpan,
-            topFontSize,
-            scale,
-            fontScale
-          );
-        } else if (activeFontStyle === 'royal_gold_laurels' && showRoyalDecor) {
-          drawGoldenLaurelBranch(
-            ctx,
-            centerX - maxCombinedW / 2 - 42 * effScale,
-            centerY,
-            Math.max(topFontSize * 1.16, totalSpan * 1.04),
-            -1,
-            effScale
-          );
-          drawGoldenLaurelBranch(
-            ctx,
-            centerX + maxCombinedW / 2 + 42 * effScale,
-            centerY,
-            Math.max(topFontSize * 1.16, totalSpan * 1.04),
-            1,
-            effScale
-          );
-          drawGoldenCandle(
-            ctx,
-            centerX,
-            topEdgeY - 12 * effScale,
-            topFontSize * 0.85,
-            effScale
-          );
-        }
-
-        if (hookLines.length > 0) {
-          const firstTopBaseline = topEdgeY + topCapHeight;
-          hookLines.forEach((line, idx) => {
-            const baselineY = firstTopBaseline + idx * topLineHeight;
-            const depthSteps = 4;
-            for (let d = depthSteps; d >= 1; d--) {
-              ctx.save();
-              ctx.font = topFontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.lineJoin = 'round';
-              if (d === depthSteps && shadowMult > 0) {
-                ctx.shadowColor = hasCustomShadowColor
-                  ? customShadowColor
-                  : 'rgba(0, 0, 0, 0.94)';
-                ctx.shadowBlur = 18 * effScale * shadowMult;
-                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
-              } else {
-                ctx.shadowBlur = 0;
-              }
-              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#06080F';
-              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9 * effScale * strokeMult) : 0;
-              const ox = d * 0.4 * effScale;
-              const oy = d * 1.1 * effScale;
-              if (strokeMult > 0) {
-                ctx.strokeText(line, centerX + ox, baselineY + oy);
-              }
-              ctx.fillStyle = resolvedTopGrad === 'gold' ? '#3B1903' : '#0B101B';
-              ctx.fillText(line, centerX + ox, baselineY + oy);
-              ctx.restore();
-            }
-
-            ctx.save();
-            ctx.font = topFontStr;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'alphabetic';
-            ctx.lineJoin = 'round';
-            if (strokeMult > 0) {
-              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#06080F';
-              ctx.lineWidth = Math.max(1, 8 * effScale * strokeMult);
-              ctx.strokeText(line, centerX, baselineY);
-            }
-            if (customTextColor) {
-              ctx.fillStyle = customTextColor;
-            } else {
-              ctx.fillStyle = buildTopLine3DGradient(
-                ctx,
-                resolvedTopGrad,
-                baselineY - topFontSize * 0.78,
-                baselineY + topFontSize * 0.08
-              );
-            }
-            ctx.fillText(line, centerX, baselineY);
-            ctx.restore();
-          });
-        }
-
-        if (isTwoTierActive) {
-          const bottomCenterY = topEdgeY + topSpan + tierGap + bottomSpan / 2;
-          drawBottomAccentPlaque(
-            ctx,
-            bottomBadgeStyle,
-            centerX,
-            bottomCenterY,
-            bottomTextW,
-            bottomFontSize,
-            effScale,
-            bottomLineTrimmed,
-            bottomFontStr,
-            fontOptions?.bottomPlaqueOverride,
-            customStrokeColor,
-            strokeMult,
-            customShadowColor,
-            shadowMult
-          );
-        }
-
-        const padX = 22 * effScale;
-        const padY = 14 * effScale;
-        const rawLeft = Math.max(0, centerX - maxCombinedW / 2 - padX);
-        const rawTop = Math.max(0, topEdgeY - padY);
-        const rawRight = Math.min(w, centerX + maxCombinedW / 2 + padX);
-        const rawBottom = Math.min(h, topEdgeY + totalSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
-      } else if (activeFontStyle === 'gold_ice_magic') {
-        let fontSize = 80 * scale * fontScale;
-        const maxTextW = w * 0.88;
-        const buildFontStr = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Cinzel", "Cinzel Decorative", Georgia, serif'
-          }`;
-
-        ctx.font = buildFontStr(fontSize);
-        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        if (maxLineW > maxTextW) {
-          fontSize = fontSize * (maxTextW / maxLineW);
-          ctx.font = buildFontStr(fontSize);
-          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        }
-
-        const fontStr = buildFontStr(fontSize);
-        const lineHeight = fontSize * 1.12;
-        const capHeight = fontSize * 0.72;
-        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
-        const topOfCaps = centerY - visualSpan / 2;
-        const firstBaselineY = topOfCaps + capHeight;
-
-        if (showMagicDecor) {
-          drawMagicGlowAndSnowflakes(
-            ctx,
-            centerX,
-            centerY,
-            maxLineW,
-            visualSpan,
-            fontSize,
-            scale,
-            fontScale
-          );
-        }
-
-        const effScale = scale * fontScale;
-
-        hookLines.forEach((line, lineIdx) => {
-          const baselineY = firstBaselineY + lineIdx * lineHeight;
-          const isTopGoldLine = lineIdx === 0;
-
-          if (isTopGoldLine) {
-            const depthSteps = 5;
-            for (let d = depthSteps; d >= 1; d--) {
-              ctx.save();
-              ctx.font = fontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.lineJoin = 'round';
-              if (d === depthSteps && shadowMult > 0) {
-                ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.92)';
-                ctx.shadowBlur = 18 * effScale * shadowMult;
-                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
-              } else {
-                ctx.shadowBlur = 0;
-              }
-              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#291102';
-              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9.5 * effScale * strokeMult) : 0;
-              const ox = d * 0.45 * effScale;
-              const oy = d * 1.15 * effScale;
-              if (strokeMult > 0) {
-                ctx.strokeText(line, centerX + ox, baselineY + oy);
-              }
-              ctx.fillStyle = '#3B1903';
-              ctx.fillText(line, centerX + ox, baselineY + oy);
-              ctx.restore();
-            }
-
-            if (strokeMult > 0 || shadowMult > 0) {
-              ctx.save();
-              ctx.font = fontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.lineJoin = 'round';
-              if (shadowMult > 0) {
-                ctx.shadowColor = hasCustomShadowColor
-                  ? customShadowColor
-                  : 'rgba(255, 190, 55, 0.78)';
-                ctx.shadowBlur = 24 * effScale * shadowMult;
-              }
-              if (strokeMult > 0) {
-                ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#3A1B02';
-                ctx.lineWidth = Math.max(1, 9 * effScale * strokeMult);
-                ctx.strokeText(line, centerX, baselineY);
-              }
-              ctx.restore();
-            }
-
-            ctx.save();
-            ctx.font = fontStr;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'alphabetic';
-            if (customTextColor) {
-              ctx.fillStyle = customTextColor;
-            } else {
-              const goldGrad = ctx.createLinearGradient(
-                0,
-                baselineY - fontSize * 0.78,
-                0,
-                baselineY + fontSize * 0.1
-              );
-              goldGrad.addColorStop(0.0, '#FFF7CC');
-              goldGrad.addColorStop(0.2, '#FFE58F');
-              goldGrad.addColorStop(0.56, '#F5A623');
-              goldGrad.addColorStop(0.9, '#B86B00');
-              goldGrad.addColorStop(1.0, '#8A4800');
-              ctx.fillStyle = goldGrad;
-            }
-            ctx.fillText(line, centerX, baselineY);
-            ctx.restore();
-          } else {
-            const lineW = ctx.measureText(line).width;
-
-            const depthSteps = 5;
-            for (let d = depthSteps; d >= 1; d--) {
-              ctx.save();
-              ctx.font = fontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.lineJoin = 'round';
-              if (d === depthSteps && shadowMult > 0) {
-                ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(2, 12, 28, 0.94)';
-                ctx.shadowBlur = 18 * effScale * shadowMult;
-                ctx.shadowOffsetY = 5 * effScale * Math.min(1.4, shadowMult);
-              } else {
-                ctx.shadowBlur = 0;
-              }
-              ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#091E3A';
-              ctx.lineWidth = strokeMult > 0 ? Math.max(1, 9.5 * effScale * strokeMult) : 0;
-              const ox = d * 0.45 * effScale;
-              const oy = d * 1.15 * effScale;
-              if (strokeMult > 0) {
-                ctx.strokeText(line, centerX + ox, baselineY + oy);
-              }
-              ctx.fillStyle = '#0D2B4F';
-              ctx.fillText(line, centerX + ox, baselineY + oy);
-              ctx.restore();
-            }
-
-            if (strokeMult > 0 || shadowMult > 0) {
-              ctx.save();
-              ctx.font = fontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.lineJoin = 'round';
-              if (shadowMult > 0) {
-                ctx.shadowColor = hasCustomShadowColor
-                  ? customShadowColor
-                  : 'rgba(120, 210, 255, 0.82)';
-                ctx.shadowBlur = 24 * effScale * shadowMult;
-              }
-              if (strokeMult > 0) {
-                ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : '#123A68';
-                ctx.lineWidth = Math.max(1, 9 * effScale * strokeMult);
-                ctx.strokeText(line, centerX, baselineY);
-              }
-              ctx.restore();
-            }
-
-            if (customTextColor) {
-              ctx.save();
-              ctx.font = fontStr;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'alphabetic';
-              ctx.fillStyle = customTextColor;
-              ctx.fillText(line, centerX, baselineY);
-              ctx.restore();
-            } else {
-              const padX = Math.ceil(36 * effScale);
-              const padY = Math.ceil(32 * effScale);
-              const boxW = Math.max(8, Math.ceil(lineW + padX * 2));
-              const boxH = Math.max(8, Math.ceil(fontSize * 1.25 + padY * 2));
-              const off = document.createElement('canvas');
-              off.width = boxW;
-              off.height = boxH;
-              const octx = off.getContext('2d');
-
-              if (octx) {
-                const localCx = boxW / 2;
-                const localBaselineY = padY + fontSize * 0.92;
-                octx.font = fontStr;
-                octx.textAlign = 'center';
-                octx.textBaseline = 'alphabetic';
-
-                const iceGrad = octx.createLinearGradient(
-                  0,
-                  localBaselineY - fontSize * 0.78,
-                  0,
-                  localBaselineY + fontSize * 0.1
-                );
-                iceGrad.addColorStop(0.0, '#FFFFFF');
-                iceGrad.addColorStop(0.4, '#BCE6FF');
-                iceGrad.addColorStop(0.82, '#5B9BD5');
-                iceGrad.addColorStop(1.0, '#3C7AB8');
-                octx.fillStyle = iceGrad;
-                octx.fillText(line, localCx, localBaselineY);
-
-                octx.globalCompositeOperation = 'source-atop';
-
-                const facetSeed = Array.from(line).reduce(
-                  (acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 7),
-                  41
-                );
-                const facetCount = Math.max(14, Math.round(lineW / Math.max(8, 18 * effScale)));
-                for (let f = 0; f < facetCount; f++) {
-                  const fx = padX + ((f * 73 + facetSeed * 13) % Math.max(10, Math.round(lineW)));
-                  const fy = padY + ((f * 37 + facetSeed * 5) % Math.max(10, Math.round(fontSize * 0.95)));
-                  const fw = (14 + (f % 5) * 8) * effScale;
-                  const fh = (18 + (f % 4) * 9) * effScale;
-                  octx.fillStyle =
-                    f % 2 === 0 ? 'rgba(255, 255, 255, 0.25)' : 'rgba(125, 211, 252, 0.22)';
-                  octx.beginPath();
-                  octx.moveTo(fx, fy);
-                  octx.lineTo(fx + fw, fy - fh * 0.35);
-                  octx.lineTo(fx + fw * 0.45, fy + fh);
-                  octx.closePath();
-                  octx.fill();
-                }
-
-                const speckCount = Math.min(
-                  360,
-                  Math.max(80, Math.round((lineW * fontSize) / Math.max(12, 110 * effScale * effScale)))
-                );
-                for (let s = 0; s < speckCount; s++) {
-                  const sx = padX + ((s * 137 + facetSeed * 19) % Math.max(10, Math.round(lineW)));
-                  const sy = padY + ((s * 67 + facetSeed * 11) % Math.max(10, Math.round(fontSize * 0.96)));
-                  const sr = (0.7 + (s % 4) * 0.45) * effScale;
-                  octx.fillStyle =
-                    s % 3 === 0 ? 'rgba(255, 255, 255, 0.65)' : 'rgba(210, 240, 255, 0.45)';
-                  octx.beginPath();
-                  octx.arc(sx, sy, sr, 0, Math.PI * 2);
-                  octx.fill();
-                }
-
-                octx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
-                octx.lineWidth = Math.max(0.7, 1.1 * effScale);
-                const veinCount = Math.max(8, Math.round(lineW / Math.max(12, 34 * effScale)));
-                for (let v = 0; v < veinCount; v++) {
-                  const vx = padX + ((v * 97 + facetSeed * 23) % Math.max(10, Math.round(lineW)));
-                  const vy = localBaselineY - fontSize * (0.1 + ((v * 17) % 60) / 100);
-                  const len = (8 + (v % 4) * 6) * effScale;
-                  const ang = ((v % 6) - 2.5) * 0.45;
-                  octx.beginPath();
-                  octx.moveTo(vx, vy);
-                  octx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
-                  octx.lineTo(
-                    vx + Math.cos(ang + 0.5) * len * 1.4,
-                    vy + Math.sin(ang + 0.5) * len * 1.4
-                  );
-                  octx.stroke();
-                }
-
-                ctx.drawImage(off, centerX - localCx, baselineY - localBaselineY);
-              } else {
-                const iceFallback = ctx.createLinearGradient(
-                  0,
-                  baselineY - fontSize * 0.78,
-                  0,
-                  baselineY + fontSize * 0.1
-                );
-                iceFallback.addColorStop(0.0, '#FFFFFF');
-                iceFallback.addColorStop(0.45, '#BCE6FF');
-                iceFallback.addColorStop(1.0, '#5B9BD5');
-                ctx.fillStyle = iceFallback;
-                ctx.fillText(line, centerX, baselineY);
-              }
-            }
-          }
-        });
-
-        const padX = 20 * effScale;
-        const padY = 14 * effScale;
-        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
-        const rawTop = Math.max(0, topOfCaps - padY);
-        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
-        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
-      } else if (activeFontStyle === 'royal_gold_laurels') {
-        let fontSize = 68 * scale * fontScale;
-        const decorReserve = showRoyalDecor ? 190 * scale * fontScale : 32 * scale;
-        const maxTextW = Math.max(160 * scale, w - 120 * scale - decorReserve);
-        const buildFontStr = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Cinzel Decorative", "Cinzel", Georgia, serif'
-          }`;
-
-        ctx.font = buildFontStr(fontSize);
-        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        if (maxLineW > maxTextW) {
-          fontSize = fontSize * (maxTextW / maxLineW);
-          ctx.font = buildFontStr(fontSize);
-          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        }
-
-        const lineHeight = fontSize * 1.14;
-        const capHeight = fontSize * 0.72;
-        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
-        const topOfCaps = centerY - visualSpan / 2;
-        const firstBaselineY = topOfCaps + capHeight;
-
-        if (showRoyalDecor) {
-          const effScale = scale * fontScale;
-          drawGoldenLaurelBranch(
-            ctx,
-            centerX - maxLineW / 2 - 42 * effScale,
-            centerY,
-            Math.max(fontSize * 1.16, visualSpan * 1.08),
-            -1,
-            effScale
-          );
-          drawGoldenLaurelBranch(
-            ctx,
-            centerX + maxLineW / 2 + 42 * effScale,
-            centerY,
-            Math.max(fontSize * 1.16, visualSpan * 1.08),
-            1,
-            effScale
-          );
-          drawGoldenCandle(
-            ctx,
-            centerX,
-            topOfCaps - 12 * effScale,
-            fontSize * 0.88,
-            effScale
-          );
-        }
-
-        hookLines.forEach((line, idx) => {
-          const baselineY = firstBaselineY + idx * lineHeight;
-          ctx.save();
-          if (shadowMult > 0) {
-            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.96)';
-            ctx.shadowBlur = 20 * scale * shadowMult;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 5 * scale * Math.min(1.4, shadowMult);
-          }
-          if (strokeMult > 0) {
-            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(10, 6, 2, 0.96)';
-            ctx.lineWidth = Math.max(1, 10 * scale * fontScale * strokeMult);
-            ctx.strokeText(line, centerX, baselineY);
-          }
-
-          ctx.shadowBlur = 0;
-          ctx.shadowOffsetY = 0;
-          if (customTextColor) {
-            ctx.fillStyle = customTextColor;
-          } else {
-            const goldGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.88, 0, baselineY + 6 * scale);
-            goldGrad.addColorStop(0, '#FFF5B8');
-            goldGrad.addColorStop(0.45, '#F6D365');
-            goldGrad.addColorStop(0.78, '#D4AF37');
-            goldGrad.addColorStop(1, '#C59B27');
-            ctx.fillStyle = goldGrad;
-          }
-          ctx.fillText(line, centerX, baselineY);
-          ctx.restore();
-        });
-
-        const padX = 20 * scale * fontScale;
-        const padY = 14 * scale * fontScale;
-        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
-        const rawTop = Math.max(0, topOfCaps - padY);
-        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
-        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
-      } else if (activeFontStyle === 'medieval_serif') {
-        let fontSize = 76 * scale * fontScale;
-        const maxTextW = w * 0.88;
-        const buildFontStr = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Cormorant Garamond", "Cinzel", Georgia, serif'
-          }`;
-
-        ctx.font = buildFontStr(fontSize);
-        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        if (maxLineW > maxTextW) {
-          fontSize = fontSize * (maxTextW / maxLineW);
-          ctx.font = buildFontStr(fontSize);
-          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        }
-
-        const lineHeight = fontSize * 1.1;
-        const capHeight = fontSize * 0.7;
-        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
-        const topOfCaps = centerY - visualSpan / 2;
-        const firstBaselineY = topOfCaps + capHeight;
-
-        hookLines.forEach((line, idx) => {
-          const baselineY = firstBaselineY + idx * lineHeight;
-          ctx.save();
-          if (shadowMult > 0) {
-            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(245, 158, 11, 0.65)';
-            ctx.shadowBlur = 24 * scale * shadowMult;
-          }
-          if (strokeMult > 0) {
-            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(10, 7, 4, 0.94)';
-            ctx.lineWidth = Math.max(1, 6 * scale * fontScale * strokeMult);
-            ctx.strokeText(line, centerX, baselineY);
-          }
-
-          if (customTextColor) {
-            ctx.fillStyle = customTextColor;
-          } else {
-            const parchmentGrad = ctx.createLinearGradient(0, baselineY - fontSize * 0.85, 0, baselineY);
-            parchmentGrad.addColorStop(0, '#FFFBEB');
-            parchmentGrad.addColorStop(1, '#FDE68A');
-            ctx.fillStyle = parchmentGrad;
-          }
-          ctx.fillText(line, centerX, baselineY);
-          ctx.restore();
-        });
-
-        const padX = 20 * scale * fontScale;
-        const padY = 14 * scale * fontScale;
-        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
-        const rawTop = Math.max(0, topOfCaps - padY);
-        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
-        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
-      } else if (activeFontStyle === 'minimal_clean') {
-        let fontSize = 78 * scale * fontScale;
-        const maxTextW = w * 0.88;
-        const buildFontStr = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Bebas Neue", "Inter", sans-serif'
-          }`;
-
-        ctx.font = buildFontStr(fontSize);
-        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        if (maxLineW > maxTextW) {
-          fontSize = fontSize * (maxTextW / maxLineW);
-          ctx.font = buildFontStr(fontSize);
-          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        }
-
-        const lineHeight = fontSize * 1.08;
-        const capHeight = fontSize * 0.72;
-        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
-        const topOfCaps = centerY - visualSpan / 2;
-        const firstBaselineY = topOfCaps + capHeight;
-
-        hookLines.forEach((line, idx) => {
-          const baselineY = firstBaselineY + idx * lineHeight;
-          ctx.save();
-          if (shadowMult > 0) {
-            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.88)';
-            ctx.shadowBlur = 12 * scale * shadowMult;
-          }
-          if (strokeMult > 0) {
-            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(0, 0, 0, 0.82)';
-            ctx.lineWidth = Math.max(1, 4.5 * scale * fontScale * strokeMult);
-            ctx.strokeText(line, centerX, baselineY);
-          }
-
-          ctx.fillStyle = customTextColor || '#F8FAFC';
-          ctx.fillText(line, centerX, baselineY);
-          ctx.restore();
-        });
-
-        const padX = 20 * scale * fontScale;
-        const padY = 14 * scale * fontScale;
-        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
-        const rawTop = Math.max(0, topOfCaps - padY);
-        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
-        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
-      } else {
-        // Cinematic Sans (Montserrat / Impact)
-        let fontSize = 72 * scale * fontScale;
-        const maxTextW = w * 0.88;
-        const buildFontStr = (fs: number) =>
-          `${customWeight} ${Math.max(1, Math.round(fs))}px ${
-            customFamily || '"Montserrat", Impact, "Arial Black", sans-serif'
-          }`;
-
-        ctx.font = buildFontStr(fontSize);
-        let maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        if (maxLineW > maxTextW) {
-          fontSize = fontSize * (maxTextW / maxLineW);
-          ctx.font = buildFontStr(fontSize);
-          maxLineW = Math.max(...hookLines.map(line => ctx.measureText(line).width));
-        }
-
-        const lineHeight = fontSize * 1.12;
-        const capHeight = fontSize * 0.72;
-        const visualSpan = (hookLines.length - 1) * lineHeight + capHeight;
-        const topOfCaps = centerY - visualSpan / 2;
-        const firstBaselineY = topOfCaps + capHeight;
-
-        hookLines.forEach((line, idx) => {
-          const baselineY = firstBaselineY + idx * lineHeight;
-          ctx.save();
-          if (shadowMult > 0) {
-            ctx.shadowColor = hasCustomShadowColor ? customShadowColor : 'rgba(0, 0, 0, 0.95)';
-            ctx.shadowBlur = 18 * scale * shadowMult;
-          }
-          if (strokeMult > 0) {
-            ctx.strokeStyle = hasCustomStrokeColor ? customStrokeColor : 'rgba(0, 0, 0, 0.88)';
-            ctx.lineWidth = Math.max(1, 7 * scale * fontScale * strokeMult);
-            ctx.strokeText(line, centerX, baselineY);
-          }
-
-          ctx.fillStyle = customTextColor || '#ffffff';
-          ctx.fillText(line, centerX, baselineY);
-          ctx.restore();
-        });
-
-        const padX = 20 * scale * fontScale;
-        const padY = 14 * scale * fontScale;
-        const rawLeft = Math.max(0, centerX - maxLineW / 2 - padX);
-        const rawTop = Math.max(0, topOfCaps - padY);
-        const rawRight = Math.min(w, centerX + maxLineW / 2 + padX);
-        const rawBottom = Math.min(h, topOfCaps + visualSpan + padY);
-        returnBox = {
-          leftPct: (rawLeft / w) * 100,
-          topPct: (rawTop / h) * 100,
-          widthPct: ((rawRight - rawLeft) / w) * 100,
-          heightPct: ((rawBottom - rawTop) / h) * 100
-        };
+      if (topUpper) {
+        drawDocumentaryImpactLine(topUpper, fontSize1, topYCenter, cfg.topColor || '#FFFFFF', false);
+      }
+      if (bottomUpper) {
+        drawDocumentaryImpactLine(
+          bottomUpper,
+          fontSize2,
+          bottomYCenter,
+          cfg.bottomColor || '#FFD600',
+          true
+        );
       }
 
       ctx.restore();
-      return returnBox;
+
+      const rawLeft = Math.max(0, drawCx - finalW / 2);
+      const rawTop = Math.max(0, drawCy - finalH / 2);
+      const rawRight = Math.min(w, drawCx + finalW / 2);
+      const rawBottom = Math.min(h, drawCy + finalH / 2);
+
+      return {
+        leftPct: (rawLeft / w) * 100,
+        topPct: (rawTop / h) * 100,
+        widthPct: ((rawRight - rawLeft) / w) * 100,
+        heightPct: ((rawBottom - rawTop) / h) * 100
+      };
     },
     []
   );
@@ -3064,34 +1755,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     ): HookBoundingBoxPct | null => {
       const cfg = slotConfigs[slot];
       const img = slotImages[slot] || slotImages.A;
-      return drawCoverOnCanvas(
-        canvas,
-        img,
-        cfg.title,
-        cfg.badges,
-        cfg.fontStyle,
-        cfg.royalDecorEnabled,
-        cfg.magicDecorEnabled,
-        cfg.hookLayout,
-        fallbackLabel,
-        {
-          fontEntry: cfg.fontEntry,
-          bottomFontEntry: cfg.bottomFontEntry,
-          bottomLine: cfg.bottomLine,
-          topGradient: cfg.topGradient,
-          bottomBadgeStyle: cfg.bottomBadgeStyle,
-          bottomPlaqueOverride: cfg.bottomPlaqueOverride,
-          bgAdjust: cfg.bgAdjust,
-          applyToBadges: cfg.applyFontToBadges,
-          badgeScalePct: cfg.badgeScalePct,
-          textColor: cfg.textColor,
-          strokeColor: cfg.strokeColor,
-          strokeWidthPct: cfg.strokeWidthPct,
-          shadowColor: cfg.shadowColor,
-          shadowBlurPct: cfg.shadowBlurPct
-        },
-        baseSharpenPct
-      );
+      return drawCoverOnCanvas(canvas, img, cfg, fallbackLabel, baseSharpenPct);
     },
     [drawCoverOnCanvas, slotConfigs, slotImages, baseSharpenPct]
   );
@@ -3171,34 +1835,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const offscreen = document.createElement('canvas');
       offscreen.width = 3840;
       offscreen.height = 2160;
-      drawCoverOnCanvas(
-        offscreen,
-        tempImg,
-        cfg.title,
-        cfg.badges,
-        cfg.fontStyle,
-        cfg.royalDecorEnabled,
-        cfg.magicDecorEnabled,
-        cfg.hookLayout,
-        undefined,
-        {
-          fontEntry: cfg.fontEntry,
-          bottomFontEntry: cfg.bottomFontEntry,
-          bottomLine: cfg.bottomLine,
-          topGradient: cfg.topGradient,
-          bottomBadgeStyle: cfg.bottomBadgeStyle,
-          bottomPlaqueOverride: cfg.bottomPlaqueOverride,
-          bgAdjust: cfg.bgAdjust,
-          applyToBadges: cfg.applyFontToBadges,
-          badgeScalePct: cfg.badgeScalePct,
-          textColor: cfg.textColor,
-          strokeColor: cfg.strokeColor,
-          strokeWidthPct: cfg.strokeWidthPct,
-          shadowColor: cfg.shadowColor,
-          shadowBlurPct: cfg.shadowBlurPct
-        },
-        baseSharpenPct
-      );
+      drawCoverOnCanvas(offscreen, tempImg, cfg, undefined, baseSharpenPct);
       const link = document.createElement('a');
       link.download = `thumbnail_4k_${idx + 1}.png`;
       link.href = offscreen.toDataURL('image/png');
@@ -3207,6 +1844,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     };
     tempImg.src = url;
   };
+
+
 
   // Кнопка «Привязать к YouTube релизу»
   const handleAttachToYoutubeRelease = (idx: number) => {
@@ -3220,8 +1859,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         'youtube_release_thumbnail',
         JSON.stringify({
           variantIndex: idx + 1,
-          titleHook: slotConfigs.A.title,
-          badge: thumbBadge,
+          titleHook: [slotConfigs.A.topText, slotConfigs.A.bottomText]
+            .filter(Boolean)
+            .join(' ')
+            .trim(),
+          badges: slotConfigs.A.badgesEnabled ? slotConfigs.A.badgeTexts : [],
           attachedAt: new Date().toISOString()
         })
       );
@@ -3663,36 +2305,64 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     return offscreen;
   };
 
-  // Кнопка «📥 Скачать 4K обложку» (финальный экспорт 3840×2160 PNG с сохранёнными x/y и масштабом)
-  const downloadCover4K = (slot: ThumbnailSlotId) => {
-    const offscreen = buildFullResThumbnailCanvas(slot);
-    const link = document.createElement('a');
-    link.download = `thumbnail_4k_3840x2160_${slot}.png`;
-    link.href = offscreen.toDataURL('image/png');
-    link.click();
-    onNotify(`📥 4K обложка ${slot} (3840×2160 PNG без водяных знаков) скачана!`, 'success');
+  // Пересэмплирование собранного 4K Canvas на 1280x720 с высоким сглаживанием (imageSmoothingQuality = 'high')
+  const buildDownsampled720pCanvas = (
+    source4K: HTMLCanvasElement,
+    quantizeForCompactPng: boolean = false
+  ): HTMLCanvasElement => {
+    const hd = document.createElement('canvas');
+    hd.width = 1280;
+    hd.height = 720;
+    const ctx = hd.getContext('2d', { willReadFrequently: quantizeForCompactPng });
+    if (!ctx) return hd;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source4K, 0, 0, 1280, 720);
+
+    // Лёгкое 6-битное квантование каналов для максимально компактного PNG без потери резкости контуров
+    if (quantizeForCompactPng) {
+      try {
+        const imgData = ctx.getImageData(0, 0, 1280, 720);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          d[i] = d[i] & 0xf8;
+          d[i + 1] = d[i + 1] & 0xf8;
+          d[i + 2] = d[i + 2] & 0xf8;
+        }
+        ctx.putImageData(imgData, 0, 0);
+      } catch {
+        // ignore if unavailable
+      }
+    }
+    return hd;
   };
+
+  const canvasToBlobAsync = (
+    canvas: HTMLCanvasElement,
+    mime: 'image/jpeg' | 'image/png',
+    quality?: number
+  ): Promise<Blob | null> =>
+    new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), mime, quality);
+    });
 
   // Бинарный подбор JPEG-качества строго <= 1.95 МБ для требований YouTube
   const compressCanvasToYouTubeJpeg = async (
-    offscreen: HTMLCanvasElement
+    canvas: HTMLCanvasElement,
+    initialQuality: number = 0.95
   ): Promise<{ blob: Blob; quality: number } | null> => {
     const MAX_YT_THUMB_BYTES = Math.floor(1.95 * 1024 * 1024);
-    const toJpegBlob = (canvas: HTMLCanvasElement, q: number): Promise<Blob | null> =>
-      new Promise(resolve => {
-        canvas.toBlob(blob => resolve(blob), 'image/jpeg', q);
-      });
 
-    let bestBlob = await toJpegBlob(offscreen, 0.95);
-    let bestQ = 0.95;
+    let bestBlob = await canvasToBlobAsync(canvas, 'image/jpeg', initialQuality);
+    let bestQ = initialQuality;
 
     if (!bestBlob || bestBlob.size > MAX_YT_THUMB_BYTES) {
       let low = 0.2;
-      let high = 0.94;
+      let high = Math.min(0.94, initialQuality);
       bestBlob = null;
       for (let step = 0; step < 8; step++) {
         const mid = Number(((low + high) / 2).toFixed(3));
-        const candidate = await toJpegBlob(offscreen, mid);
+        const candidate = await canvasToBlobAsync(canvas, 'image/jpeg', mid);
         if (!candidate) break;
         if (candidate.size <= MAX_YT_THUMB_BYTES) {
           bestBlob = candidate;
@@ -3703,7 +2373,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
       if (!bestBlob) {
-        bestBlob = await toJpegBlob(offscreen, 0.15);
+        bestBlob = await canvasToBlobAsync(canvas, 'image/jpeg', 0.15);
         bestQ = 0.15;
       }
     }
@@ -3722,33 +2392,67 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     window.setTimeout(() => URL.revokeObjectURL(url), 1800);
   };
 
-  // Умный экспорт одной обложки под лимит YouTube (< 2 МБ)
-  const downloadCoverYouTube2Mb = async (slot: ThumbnailSlotId) => {
-    if (isOptimizingYtThumb) return;
-    setIsOptimizingYtThumb(true);
+  // Мультиформатный экспорт для слотов A, B, C:
+  // 1) 4k_jpg (3840x2160 JPEG q=0.95)
+  // 2) 4k_png (3840x2160 PNG lossless)
+  // 3) 720p_jpg (1280x720 JPEG high smoothing <= 1.95 МБ)
+  // 4) 720p_png (1280x720 PNG high smoothing + лёгкое квантование)
+  const exportSlotInFormat = async (
+    slot: ThumbnailSlotId,
+    format: '4k_jpg' | '4k_png' | '720p_jpg' | '720p_png'
+  ) => {
+    if (isExportingFormat) return;
+    setIsExportingFormat(`${slot}_${format}`);
     try {
-      const offscreen = buildFullResThumbnailCanvas(slot);
-      const result = await compressCanvasToYouTubeJpeg(offscreen);
-      if (!result) {
-        onNotify('Не удалось сформировать оптимизированную обложку для YouTube.', 'error');
+      await new Promise(resolve => window.setTimeout(resolve, 16));
+      const full4K = buildFullResThumbnailCanvas(slot);
+
+      let blob: Blob | null = null;
+      let filename = '';
+      let formatLabel = '';
+
+      if (format === '4k_jpg') {
+        filename = `thumbnail_4k_3840x2160_${slot}.jpg`;
+        formatLabel = '4K JPEG';
+        blob = await canvasToBlobAsync(full4K, 'image/jpeg', 0.95);
+      } else if (format === '4k_png') {
+        filename = `thumbnail_4k_3840x2160_${slot}.png`;
+        formatLabel = '4K PNG';
+        blob = await canvasToBlobAsync(full4K, 'image/png');
+      } else if (format === '720p_jpg') {
+        filename = `thumbnail_720p_1280x720_${slot}.jpg`;
+        formatLabel = '720p JPEG';
+        const hd = buildDownsampled720pCanvas(full4K, false);
+        const compressed = await compressCanvasToYouTubeJpeg(hd, 0.94);
+        blob = compressed?.blob || null;
+      } else {
+        filename = `thumbnail_720p_1280x720_${slot}.png`;
+        formatLabel = '720p PNG';
+        const hdQuant = buildDownsampled720pCanvas(full4K, true);
+        blob = await canvasToBlobAsync(hdQuant, 'image/png');
+      }
+
+      if (!blob) {
+        onNotify(`Не удалось экспортировать ${formatLabel} для слота ${slot}.`, 'error');
         return;
       }
-      triggerBlobDownload(result.blob, slotFilenames[slot]);
-      const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
-      const qPct = Math.round(result.quality * 100);
-      onNotify(
-        `✅ Обложка ${slotFilenames[slot]} оптимизирована для YouTube: ${mbText} МБ (качество ${qPct}%)`,
-        'success'
-      );
+
+      const sizeText = formatBytesLabel(blob.size);
+      triggerBlobDownload(blob, filename);
+      setLastExportReport(prev => ({
+        ...prev,
+        [slot]: { formatLabel, filename, sizeText }
+      }));
+      onNotify(`✅ ${filename} скачан • ${sizeText}`, 'success');
     } finally {
-      setIsOptimizingYtThumb(false);
+      setIsExportingFormat(null);
     }
   };
 
-  // Пакетный экспорт всех 3 вариантов (thumbnail_4k_3840x2160_A/B/C.jpg) < 2 МБ
+  // Пакетный экспорт всех 3 вариантов (< 2 МБ YouTube JPEG)
   const downloadAll3CoversYouTube2Mb = async () => {
-    if (isOptimizingYtThumb) return;
-    setIsOptimizingYtThumb(true);
+    if (isExportingFormat) return;
+    setIsExportingFormat('batch_all');
     const slots: ThumbnailSlotId[] = ['A', 'B', 'C'];
     const summaryParts: string[] = [];
 
@@ -3762,8 +2466,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const result = await compressCanvasToYouTubeJpeg(offscreen);
         if (result) {
           triggerBlobDownload(result.blob, slotFilenames[slot]);
-          const mbText = (result.blob.size / (1024 * 1024)).toFixed(2);
-          summaryParts.push(`${slot}: ${mbText} МБ`);
+          summaryParts.push(`${slot}: ${formatBytesLabel(result.blob.size)}`);
           if (i < slots.length - 1) {
             await new Promise(resolve => window.setTimeout(resolve, 180));
           }
@@ -3780,7 +2483,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
     } finally {
       setBatchExportStatus('');
-      setIsOptimizingYtThumb(false);
+      setIsExportingFormat(null);
     }
   };
 
@@ -3820,11 +2523,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     );
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
-
-  const activeLineCountHook = splitHookLines(
-    activeConfig.title,
-    activeConfig.fontStyle === 'gold_ice_magic'
-  ).length;
 
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
@@ -4256,399 +2954,40 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </button>
           </div>
 
-          {/* Шрифт, цвет, обводка и тень активного слота */}
-          <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
-            <div className="flex items-center justify-between gap-2">
-              <label
-                htmlFor="thumb-font-style-select"
-                className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2"
-              >
+          {/* ЕДИНЫЙ ART-EDITOR: DOCUMENTARY IMPACT + GRUNGE SPLASH (Слот A / B / C) */}
+          <div className="aether-card rounded-2xl p-4 space-y-4 border border-white/[0.08] bg-[#0b0f19]/90 backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3">
+              <div className="flex items-center gap-2 min-w-0">
                 <Type className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Шрифт и эффект • Слот {activeSlot}</span>
-              </label>
-              <span className="text-[11px] font-mono text-amber-300/85">
-                3840×2160 Canvas
-              </span>
-            </div>
-
-            <CompactFontSelector
-              selectedFontId={activeConfig.fontEntry.id}
-              onSelectFont={entry => {
-                updateSlotConfig(activeSlot, prev => ({
-                  ...prev,
-                  fontEntry: entry,
-                  applyFontToBadges: entry.source === 'custom' ? true : prev.applyFontToBadges
-                }));
-              }}
-              onFontLoaded={() => setFontsReadyTick(t => t + 1)}
-              onNotify={onNotify}
-              accentTone="amber"
-            />
-
-            <label className="flex items-center gap-2 text-[11px] text-white/75 cursor-pointer select-none pt-0.5">
-              <input
-                type="checkbox"
-                checked={activeConfig.applyFontToBadges}
-                onChange={e => {
-                  const checked = e.target.checked;
-                  updateSlotConfig(activeSlot, prev => ({
-                    ...prev,
-                    applyFontToBadges: checked
-                  }));
+                <div className="min-w-0">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] block truncate">
+                    Documentary Impact + Grunge Splash
+                  </span>
+                  <span className="text-[10px] font-mono text-white/50 block">
+                    Anton / Montserrat 900 • 3840×2160 Canvas • Слот {activeSlot}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const split = splitProjectTitleIntoTwoLines(youtubeMockTitle || thumbTitle || '');
+                  updateSlotLines(activeSlot, split.line1, split.line2);
+                  onNotify(`Заголовок слота ${activeSlot} обновлён из названия проекта.`, 'info');
                 }}
-                className="accent-amber-400 rounded cursor-pointer"
-              />
-              <span>Применять выбранный шрифт также к верхним бейджам ({activeSlot})</span>
-            </label>
-
-            <select
-              id="thumb-font-style-select"
-              value={activeConfig.fontStyle}
-              onChange={e => {
-                const nextStyle = e.target.value as ThumbnailFontStyleId;
-                updateSlotConfig(activeSlot, prev => ({ ...prev, fontStyle: nextStyle }));
-              }}
-              className="sr-only"
-              aria-label="Эффект и декор заголовка"
-            >
-              {FONT_STYLE_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-
-            <div className="space-y-1.5 pt-1 border-t border-white/[0.07]">
-              <span className="text-[10px] text-white/50 uppercase font-semibold tracking-wider block">
-                Визуальный стиль текста (шейдер / декор):
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {FONT_STYLE_OPTIONS.map(opt => {
-                  const isSelected = activeConfig.fontStyle === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        const defaultFontId = DEFAULT_FONT_ID_BY_STYLE[opt.id];
-                        const defaultEntry = GOOGLE_FONT_PRESETS.find(f => f.id === defaultFontId);
-                        updateSlotConfig(activeSlot, prev => {
-                          const shouldSwapFont =
-                            defaultEntry &&
-                            prev.fontEntry.source === 'google' &&
-                            Object.values(DEFAULT_FONT_ID_BY_STYLE).includes(prev.fontEntry.id);
-                          return {
-                            ...prev,
-                            fontStyle: opt.id,
-                            fontEntry: shouldSwapFont ? defaultEntry : prev.fontEntry
-                          };
-                        });
-                      }}
-                      className={`relative min-h-[34px] px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer overflow-hidden border transition ${
-                        isSelected
-                          ? 'text-slate-950 border-amber-300/60 shadow-[0_6px_18px_-6px_rgba(245,158,11,0.45)]'
-                          : 'bg-[#080c14]/75 border-white/[0.08] text-white/75 hover:text-white hover:border-white/20'
-                      }`}
-                    >
-                      {isSelected && (
-                        <motion.div
-                          layoutId="activeThumbFontPill"
-                          className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 -z-0"
-                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                        />
-                      )}
-                      {opt.id === 'gold_ice_magic' && (
-                        <Sparkles
-                          className={`relative z-10 w-3 h-3 shrink-0 ${
-                            isSelected ? 'text-slate-950' : 'text-amber-400'
-                          }`}
-                        />
-                      )}
-                      <span className="relative z-10 whitespace-nowrap">{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Цвет текста, обводка и тень для активного слота */}
-            <div className="space-y-2.5 pt-2 border-t border-white/[0.07]">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider">
-                  Цвет текста ({activeSlot}):
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {TEXT_COLOR_PRESETS.map(preset => {
-                    const isColorActive = activeConfig.textColor === preset.id;
-                    return (
-                      <button
-                        key={`color-${preset.id || 'auto'}`}
-                        type="button"
-                        onClick={() =>
-                          updateSlotConfig(activeSlot, prev => ({ ...prev, textColor: preset.id }))
-                        }
-                        title={preset.label}
-                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer flex items-center gap-1 transition ${
-                          isColorActive
-                            ? 'border-amber-400 bg-amber-500/15 text-amber-200'
-                            : 'border-white/[0.1] bg-[#080c14]/80 text-white/65 hover:text-white'
-                        }`}
-                      >
-                        {preset.id && (
-                          <span
-                            className="w-2.5 h-2.5 rounded-full border border-white/30 shrink-0"
-                            style={{ backgroundColor: preset.id }}
-                          />
-                        )}
-                        <span>{preset.label}</span>
-                      </button>
-                    );
-                  })}
-                  <label className="min-h-[28px] px-1.5 rounded-lg border border-white/[0.1] bg-[#080c14]/80 flex items-center gap-1 cursor-pointer text-[10px] text-white/70">
-                    <input
-                      type="color"
-                      value={activeConfig.textColor || '#FFFFFF'}
-                      onChange={e =>
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, textColor: e.target.value }))
-                      }
-                      className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
-                      aria-label="Свой цвет заголовка"
-                    />
-                    <span>HEX</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div className="bg-[#080c14]/70 border border-white/[0.06] rounded-xl p-2.5 space-y-1">
-                  <div className="flex items-center justify-between text-[10.5px]">
-                    <span className="text-white/75 font-semibold">Обводка: {activeConfig.strokeWidthPct}%</span>
-                    <input
-                      type="color"
-                      value={activeConfig.strokeColor}
-                      onChange={e =>
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, strokeColor: e.target.value }))
-                      }
-                      aria-label="Цвет обводки"
-                      className="w-5 h-4 bg-transparent border-0 cursor-pointer p-0"
-                    />
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={200}
-                    step={5}
-                    value={activeConfig.strokeWidthPct}
-                    onChange={e =>
-                      updateSlotConfig(activeSlot, prev => ({
-                        ...prev,
-                        strokeWidthPct: Number(e.target.value)
-                      }))
-                    }
-                    className="w-full accent-amber-400 cursor-pointer"
-                  />
-                </div>
-
-                <div className="bg-[#080c14]/70 border border-white/[0.06] rounded-xl p-2.5 space-y-1">
-                  <div className="flex items-center justify-between text-[10.5px]">
-                    <span className="text-white/75 font-semibold">Тень: {activeConfig.shadowBlurPct}%</span>
-                    <input
-                      type="color"
-                      value={activeConfig.shadowColor}
-                      onChange={e =>
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, shadowColor: e.target.value }))
-                      }
-                      aria-label="Цвет тени"
-                      className="w-5 h-4 bg-transparent border-0 cursor-pointer p-0"
-                    />
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={200}
-                    step={5}
-                    value={activeConfig.shadowBlurPct}
-                    onChange={e =>
-                      updateSlotConfig(activeSlot, prev => ({
-                        ...prev,
-                        shadowBlurPct: Number(e.target.value)
-                      }))
-                    }
-                    className="w-full accent-amber-400 cursor-pointer"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {activeConfig.fontStyle === 'gold_ice_magic' && (
-              <button
-                type="button"
-                onClick={() =>
-                  updateSlotConfig(activeSlot, prev => ({
-                    ...prev,
-                    magicDecorEnabled: !prev.magicDecorEnabled
-                  }))
-                }
-                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
-                  activeConfig.magicDecorEnabled
-                    ? 'bg-gradient-to-r from-amber-500/20 via-sky-500/20 to-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]'
-                    : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
-                }`}
+                className="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#111827]/90 hover:bg-white/[0.08] border border-white/[0.08] text-[10.5px] font-semibold text-amber-300 flex items-center gap-1 cursor-pointer transition"
+                title="Разделить текущее название проекта из студии на Строку 1 и Строку 2"
               >
-                <span className="flex items-center gap-2 text-left">
-                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span>Магическое сияние и снежинки (завитки, блики, иней)</span>
-                </span>
-                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
-                  {activeConfig.magicDecorEnabled ? 'ON' : 'OFF'}
-                </span>
+                <RotateCcw className="w-3 h-3 shrink-0" />
+                <span>Из проекта</span>
               </button>
-            )}
-
-            {activeConfig.fontStyle === 'royal_gold_laurels' && (
-              <button
-                type="button"
-                onClick={() =>
-                  updateSlotConfig(activeSlot, prev => ({
-                    ...prev,
-                    royalDecorEnabled: !prev.royalDecorEnabled
-                  }))
-                }
-                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
-                  activeConfig.royalDecorEnabled
-                    ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
-                    : 'bg-[#080c14]/75 border-white/[0.08] text-white/60 hover:text-white'
-                }`}
-              >
-                <span className="flex items-center gap-2 text-left">
-                  <Flame className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Декор: свеча сверху + золотые лавры по бокам</span>
-                </span>
-                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 shrink-0">
-                  {activeConfig.royalDecorEnabled ? 'ON' : 'OFF'}
-                </span>
-              </button>
-            )}
-          </div>
-
-          {/* БИБЛИОТЕКА ИЗ 20 ГОТОВЫХ YOUTUBE-ШАБЛОНОВ (1-Click High-CTR Presets) */}
-          <div className="aether-card rounded-2xl border border-amber-400/20 bg-[#0b0f19]/90 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowPresetLibrary(prev => !prev)}
-              className="w-full min-h-[46px] px-4 py-2.5 flex items-center justify-between gap-2 text-left cursor-pointer hover:bg-white/[0.03]"
-            >
-              <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-2 min-w-0">
-                <LayoutTemplate className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="truncate">🔥 20 шаблонов обложек YouTube</span>
-              </span>
-              <span className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] font-mono text-amber-300/85">1-Click CTR</span>
-                <ChevronDown
-                  className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
-                    showPresetLibrary ? 'rotate-180 text-amber-400' : ''
-                  }`}
-                />
-              </span>
-            </button>
-
-            {showPresetLibrary && (
-              <div className="px-3.5 pb-3.5 pt-2 border-t border-white/[0.07] space-y-2.5">
-                <div className="flex flex-wrap gap-1">
-                  {PRESET_CATEGORIES.map(cat => {
-                    const isCatActive = presetCategory === cat.id;
-                    return (
-                      <button
-                        key={`preset-cat-${cat.id}`}
-                        type="button"
-                        onClick={() => setPresetCategory(cat.id)}
-                        className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[10.5px] font-bold border cursor-pointer whitespace-nowrap transition ${
-                          isCatActive
-                            ? 'bg-amber-500/20 border-amber-400/60 text-[#FDE047]'
-                            : 'bg-[#111827]/80 border-white/[0.08] text-white/65 hover:text-white'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
-                  {YOUTUBE_THUMBNAIL_PRESETS.filter(
-                    p => presetCategory === 'all' || p.category === presetCategory
-                  ).map(preset => {
-                    const isApplied = appliedPresetId === preset.id;
-                    return (
-                      <motion.button
-                        key={preset.id}
-                        type="button"
-                        whileHover={{ y: -1 }}
-                        whileTap={{ scale: 0.98 }}
-                        transition={{ type: 'spring', stiffness: 450, damping: 30 }}
-                        onClick={() => applyYoutubeThumbnailPreset(preset)}
-                        className={`text-left rounded-xl p-2 border cursor-pointer transition space-y-1 ${
-                          isApplied
-                            ? 'bg-amber-500/15 border-amber-400/65 shadow-[0_0_16px_rgba(245,158,11,0.18)]'
-                            : 'bg-[#111827]/75 border-white/[0.08] hover:border-amber-400/40 hover:bg-[#111827]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="text-[10px] font-mono text-white/45 tabular-nums">
-                            #{String(preset.index).padStart(2, '0')}
-                          </span>
-                          <div className="flex items-center gap-1 min-w-0 flex-1">
-                            <span
-                              className="text-[10.5px] font-extrabold truncate"
-                              style={{ color: preset.swatchTop }}
-                            >
-                              {preset.topLine}
-                            </span>
-                            <span className="text-white/35 text-[10px]">+</span>
-                            <span
-                              className="text-[9.5px] font-extrabold px-1.5 py-0.5 rounded truncate"
-                              style={{
-                                backgroundColor: preset.swatchBottomBg,
-                                color: preset.swatchBottomText
-                              }}
-                            >
-                              {preset.bottomLine}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-[9.5px] text-white/50 truncate">
-                          {preset.styleTag}
-                        </div>
-                      </motion.button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Настройки активного слота (фон, 2-уровневый заголовок, плашка, масштаб, бейджи до 3) */}
-          <div className="aether-card rounded-2xl p-4 space-y-3.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    activeSlot === 'A'
-                      ? 'bg-amber-400'
-                      : activeSlot === 'B'
-                        ? 'bg-emerald-400'
-                        : 'bg-cyan-400'
-                  }`}
-                />
-                Вариант {activeSlot} ({activeSlot === 'A' ? 'Основной' : 'Тестовый слот'})
-              </span>
-              <span className="text-[10px] font-mono text-white/55">SLOT {activeSlot}</span>
             </div>
 
+            {/* Загрузка собственного фона слота */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-[11px] text-white/55">
-                  Загрузить свой фон (только для Варианта {activeSlot}):
+                <label className="text-[11px] text-white/60">
+                  Свой фон для Варианта {activeSlot}:
                 </label>
                 {activeSlot !== 'A' && slotImages[activeSlot] && (
                   <button
@@ -4667,199 +3006,262 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 type="file"
                 accept="image/*"
                 onChange={e => handleLoadImageForSlot(e, activeSlot)}
-                className="w-full text-xs text-white/60 file:mr-3 file:min-h-[38px] file:py-1.5 file:px-3.5 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-white/[0.06] file:text-amber-300 hover:file:bg-white/[0.12] cursor-pointer"
+                className="w-full text-xs text-white/60 file:mr-3 file:min-h-[36px] file:py-1.5 file:px-3 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-[#111827] file:text-amber-300 hover:file:bg-white/[0.1] cursor-pointer"
               />
             </div>
 
-            {/* ДВУХУРОВНЕВЫЙ КИНО-ЗАГОЛОВОК (Top Line + 3D Gradient + Bottom Accent Line + Plaque) */}
-            <div className="bg-[#0b0f19]/80 border border-white/[0.08] rounded-xl p-3 space-y-3">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] text-white/75 font-semibold">
-                    Верхняя строка (Top Line • {activeSlot}):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-amber-300 tabular-nums">
-                      {activeLineCountHook} {activeLineCountHook === 1 ? 'строка' : 'строки'}
-                    </span>
-                    {activeConfig.title.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => handleSlotHookChange(activeSlot, '')}
-                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                        title="Очистить верхнюю строку"
-                      >
-                        Очистить
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <textarea
-                  rows={2}
-                  value={activeConfig.title}
-                  onChange={e => handleSlotHookChange(activeSlot, e.target.value)}
-                  placeholder={`Верхняя строка ${activeSlot} (например: BIGGER THAN)`}
-                  className="w-full bg-[#111827]/90 border border-white/[0.1] rounded-xl px-3.5 py-2 text-xs text-[#f8fafc] font-bold outline-none focus:border-amber-400 resize-none leading-snug"
-                />
+            {/* БЛОК «СТРОКА 1 (ВЕРХНЯЯ)» */}
+            <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#f8fafc]">
+                  СТРОКА 1 (ВЕРХНЯЯ)
+                </span>
+                {activeConfig.topText.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => updateSlotLines(activeSlot, '', activeConfig.bottomText)}
+                    className="text-[10px] text-white/50 hover:text-rose-300 underline cursor-pointer"
+                  >
+                    Очистить
+                  </button>
+                )}
               </div>
 
-              <div className="space-y-1.5">
-                <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider block">
-                  3D-градиент верхней строки:
-                </span>
-                <div className="flex flex-wrap gap-1">
-                  {TOP_LINE_GRADIENT_OPTIONS.map(grad => {
-                    const isGradActive = activeConfig.topGradient === grad.id;
+              <input
+                type="text"
+                value={activeConfig.topText}
+                onChange={e =>
+                  updateSlotLines(activeSlot, e.target.value.toUpperCase(), activeConfig.bottomText)
+                }
+                placeholder="ВЕРХНЯЯ СТРОКА (UPPERCASE)"
+                className="w-full min-h-[40px] bg-[#0b0f19] border border-white/[0.08] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide text-[#f8fafc] outline-none"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {LINE_COLOR_SWATCHES.map(swatch => {
+                    const isSelected =
+                      activeConfig.topColor.toUpperCase() === swatch.id.toUpperCase();
                     return (
-                      <button
-                        key={`top-grad-${grad.id}`}
+                      <motion.button
+                        key={`top-swatch-${swatch.id}`}
                         type="button"
+                        whileTap={{ scale: 0.94 }}
                         onClick={() =>
                           updateSlotConfig(activeSlot, prev => ({
                             ...prev,
-                            topGradient: grad.id,
-                            textColor: ''
+                            topColor: swatch.id
                           }))
                         }
-                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer flex items-center gap-1.5 transition ${
-                          isGradActive
-                            ? 'border-amber-400 bg-amber-500/20 text-[#FDE047]'
-                            : 'border-white/[0.09] bg-[#111827]/80 text-white/65 hover:text-white'
+                        title={swatch.label}
+                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
+                          isSelected
+                            ? 'border-amber-400 bg-amber-500/15 text-[#f8fafc]'
+                            : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/65 hover:text-white'
                         }`}
                       >
                         <span
-                          className="w-2.5 h-2.5 rounded-sm border border-white/25 shrink-0"
-                          style={{ background: grad.swatch }}
+                          className="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
+                          style={{ backgroundColor: swatch.id }}
                         />
-                        <span>{grad.label}</span>
-                      </button>
+                        <span>{swatch.label}</span>
+                      </motion.button>
                     );
                   })}
                 </div>
+                <label className="min-h-[28px] px-2 py-0.5 rounded-lg border border-white/[0.08] bg-[#0b0f19]/90 flex items-center gap-1.5 cursor-pointer text-[10px] text-white/75">
+                  <input
+                    type="color"
+                    value={activeConfig.topColor}
+                    onChange={e =>
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        topColor: e.target.value
+                      }))
+                    }
+                    aria-label="Цвет Строки 1"
+                    className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
+                  />
+                  <span className="font-mono">{activeConfig.topColor.toUpperCase()}</span>
+                </label>
               </div>
 
-              <div className="pt-2 border-t border-white/[0.07] space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-[11px] text-white/75 font-semibold">
-                    Нижняя строка (Bottom Accent Line):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {activeConfig.bottomFontEntry &&
-                      activeConfig.bottomFontEntry.id !== activeConfig.fontEntry.id && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateSlotConfig(activeSlot, prev => ({
-                              ...prev,
-                              bottomFontEntry: null
-                            }))
-                          }
-                          className="text-[10px] font-mono text-cyan-300/85 hover:text-cyan-200 underline cursor-pointer"
-                          title="Сбросить парный шрифт нижней строки к основному"
-                        >
-                          {activeConfig.bottomFontEntry.title} ×
-                        </button>
-                      )}
-                    {activeConfig.bottomLine.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateSlotConfig(activeSlot, prev => ({ ...prev, bottomLine: '' }))
-                        }
-                        className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                        title="Убрать нижнюю строку (1-уровневый режим)"
-                      >
-                        Очистить
-                      </button>
-                    )}
-                  </div>
+              <div className="space-y-1 pt-0.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/75 font-semibold">Размер Строки 1</span>
+                  <span className="font-mono font-bold text-amber-300 tabular-nums">
+                    {activeConfig.hookLayout.topScalePct}%
+                  </span>
                 </div>
                 <input
-                  type="text"
-                  value={activeConfig.bottomLine}
-                  onChange={e =>
-                    updateSlotConfig(activeSlot, prev => ({ ...prev, bottomLine: e.target.value }))
-                  }
-                  placeholder="Ударное слово / цифра (например: LONDON, VANISHED, FILE #09)"
-                  className="w-full min-h-[38px] bg-[#111827]/90 border border-white/[0.1] rounded-xl px-3.5 py-1.5 text-xs text-[#FDE047] font-extrabold outline-none focus:border-amber-400"
+                  type="range"
+                  min={40}
+                  max={180}
+                  step={2}
+                  value={activeConfig.hookLayout.topScalePct}
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      hookLayout: { ...prev.hookLayout, topScalePct: val }
+                    }));
+                  }}
+                  className="w-full accent-amber-400 cursor-pointer"
                 />
-
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-white/55 uppercase font-semibold tracking-wider block">
-                    Стиль плашки нижней строки:
-                  </span>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {BOTTOM_PLAQUE_STYLE_OPTIONS.map(plaque => {
-                      const isPlaqueActive = activeConfig.bottomBadgeStyle === plaque.id;
-                      return (
-                        <button
-                          key={`plaque-${plaque.id}`}
-                          type="button"
-                          onClick={() =>
-                            updateSlotConfig(activeSlot, prev => ({
-                              ...prev,
-                              bottomBadgeStyle: plaque.id,
-                              bottomPlaqueOverride: null
-                            }))
-                          }
-                          className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-left cursor-pointer flex items-center gap-2 transition ${
-                            isPlaqueActive
-                              ? 'bg-amber-500/15 border-amber-400/70 text-[#FDE047] shadow-[0_0_12px_rgba(245,158,11,0.18)]'
-                              : 'bg-[#111827]/80 border-white/[0.08] text-white/70 hover:text-white hover:border-white/20'
-                          }`}
-                        >
-                          <span
-                            className="w-5 h-3.5 rounded shrink-0 border flex items-center justify-center text-[7px] font-black"
-                            style={{
-                              background: plaque.previewBg,
-                              borderColor: plaque.previewBorder,
-                              color: plaque.previewText
-                            }}
-                          >
-                            A
-                          </span>
-                          <span className="text-[10.5px] font-bold leading-tight truncate">
-                            {plaque.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             </div>
 
-            {/* Размер шрифта и позиция текста-хука активного слота */}
-            <div className="bg-[#080c14]/75 border border-white/[0.08] rounded-xl p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[#f8fafc] font-semibold">Размер шрифта {activeSlot}:</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono text-white/55 tabular-nums">
-                    X:{Math.round(activeConfig.hookLayout.xPct)}% Y:{Math.round(activeConfig.hookLayout.yPct)}%
-                  </span>
-                  <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
-                    {activeConfig.hookLayout.fontScalePct}%
-                  </span>
-                </div>
+            {/* БЛОК «СТРОКА 2 (НИЖНЯЯ)» */}
+            <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#FFD600]">
+                  СТРОКА 2 (НИЖНЯЯ)
+                </span>
+                {activeConfig.bottomText.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => updateSlotLines(activeSlot, activeConfig.topText, '')}
+                    className="text-[10px] text-white/50 hover:text-rose-300 underline cursor-pointer"
+                  >
+                    Очистить
+                  </button>
+                )}
               </div>
+
               <input
-                type="range"
-                min={60}
-                max={150}
-                step={1}
-                value={activeConfig.hookLayout.fontScalePct}
-                onChange={e => {
-                  const val = Number(e.target.value);
-                  updateSlotConfig(activeSlot, prev => ({
-                    ...prev,
-                    hookLayout: { ...prev.hookLayout, fontScalePct: val }
-                  }));
-                }}
-                className="w-full accent-amber-400 cursor-pointer"
+                type="text"
+                value={activeConfig.bottomText}
+                onChange={e =>
+                  updateSlotLines(activeSlot, activeConfig.topText, e.target.value.toUpperCase())
+                }
+                placeholder="НИЖНЯЯ СТРОКА (UPPERCASE)"
+                className="w-full min-h-[40px] bg-[#0b0f19] border border-white/[0.08] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide text-[#FFD600] outline-none"
               />
+
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[10px] font-mono text-white/55">
-                  60% – 150% • Drag &amp; Drop на превью
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    LINE_COLOR_SWATCHES[1],
+                    LINE_COLOR_SWATCHES[0],
+                    LINE_COLOR_SWATCHES[2],
+                    LINE_COLOR_SWATCHES[3],
+                    LINE_COLOR_SWATCHES[4]
+                  ].map(swatch => {
+                    const isSelected =
+                      activeConfig.bottomColor.toUpperCase() === swatch.id.toUpperCase();
+                    return (
+                      <motion.button
+                        key={`bottom-swatch-${swatch.id}`}
+                        type="button"
+                        whileTap={{ scale: 0.94 }}
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            bottomColor: swatch.id
+                          }))
+                        }
+                        title={swatch.label}
+                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
+                          isSelected
+                            ? 'border-amber-400 bg-amber-500/15 text-[#f8fafc]'
+                            : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/65 hover:text-white'
+                        }`}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
+                          style={{ backgroundColor: swatch.id }}
+                        />
+                        <span>{swatch.label}</span>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+                <label className="min-h-[28px] px-2 py-0.5 rounded-lg border border-white/[0.08] bg-[#0b0f19]/90 flex items-center gap-1.5 cursor-pointer text-[10px] text-white/75">
+                  <input
+                    type="color"
+                    value={activeConfig.bottomColor}
+                    onChange={e =>
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        bottomColor: e.target.value
+                      }))
+                    }
+                    aria-label="Цвет Строки 2"
+                    className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
+                  />
+                  <span className="font-mono">{activeConfig.bottomColor.toUpperCase()}</span>
+                </label>
+              </div>
+
+              <div className="space-y-2 pt-0.5">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/75 font-semibold">
+                      Размер Строки 2{' '}
+                      {activeConfig.hookLayout.autoFitBottomToTop && (
+                        <span className="text-[10px] font-mono text-amber-300/80">(Auto-Fit)</span>
+                      )}
+                    </span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.hookLayout.bottomScalePct}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={40}
+                    max={180}
+                    step={2}
+                    value={activeConfig.hookLayout.bottomScalePct}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        hookLayout: {
+                          ...prev.hookLayout,
+                          bottomScalePct: val,
+                          autoFitBottomToTop: false
+                        }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() =>
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      hookLayout: {
+                        ...prev.hookLayout,
+                        autoFitBottomToTop: !prev.hookLayout.autoFitBottomToTop
+                      }
+                    }))
+                  }
+                  className={`w-full min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer transition ${
+                    activeConfig.hookLayout.autoFitBottomToTop
+                      ? 'bg-amber-500/20 border-amber-400/60 text-[#FDE047]'
+                      : 'bg-[#0b0f19]/90 border-white/[0.08] text-white/70 hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <AlignCenterHorizontal className="w-3.5 h-3.5 shrink-0" />
+                    <span>Выровнять ширину строк (Auto-Fit)</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/40">
+                    {activeConfig.hookLayout.autoFitBottomToTop ? 'ON' : 'OFF'}
+                  </span>
+                </motion.button>
+              </div>
+            </div>
+
+            {/* ПОЗИЦИОНИРОВАНИЕ НА КАДРЕ, НАКЛОН И ЕДИНАЯ ГРАНЖ-ПОДЛОЖКА (SPLASH) */}
+            <div className="rounded-xl p-3.5 space-y-3 bg-[#111827]/80 border border-white/[0.08]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Композиция и Гранж-подложка</span>
                 </span>
                 <button
                   type="button"
@@ -4869,116 +3271,467 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       hookLayout: { ...DEFAULT_HOOK_LAYOUT }
                     }))
                   }
-                  className="min-h-[38px] text-[11px] font-semibold text-amber-300 hover:text-amber-200 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                  className="text-[10.5px] font-semibold text-amber-300 hover:text-amber-200 underline cursor-pointer"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Сбросить позицию текста</span>
+                  Сбросить позицию
                 </button>
+              </div>
+
+              {/* Быстрый переключатель угла размещения заголовка */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase tracking-wider text-white/55 font-semibold block">
+                  Угол размещения заголовка:
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: 'top_left', label: 'Левый верхний угол', x: 25, y: 24 },
+                      { id: 'bottom_left', label: 'Левый нижний угол', x: 25, y: 76 },
+                      { id: 'bottom_right', label: 'Правый нижний угол', x: 75, y: 76 }
+                    ] as Array<{
+                      id: CornerPositionPresetId;
+                      label: string;
+                      x: number;
+                      y: number;
+                    }>
+                  ).map(corner => {
+                    const isActive =
+                      Math.abs(activeConfig.hookLayout.xPct - corner.x) <= 4 &&
+                      Math.abs(activeConfig.hookLayout.yPct - corner.y) <= 4;
+                    return (
+                      <motion.button
+                        key={corner.id}
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            hookLayout: {
+                              ...prev.hookLayout,
+                              xPct: corner.x,
+                              yPct: corner.y
+                            }
+                          }))
+                        }
+                        className={`min-h-[38px] px-2 py-1.5 rounded-xl border text-[10px] font-bold leading-tight text-center cursor-pointer transition ${
+                          isActive
+                            ? 'bg-cyan-500/20 border-cyan-400/65 text-cyan-200'
+                            : 'bg-[#0b0f19]/90 border-white/[0.08] text-white/70 hover:text-white'
+                        }`}
+                      >
+                        {corner.label}
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Слайдеры сдвига X, Y, наклона блока (-6..+6 deg) и межстрочного интервала */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Сдвиг по X</span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {Math.round(activeConfig.hookLayout.xPct)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={6}
+                    max={94}
+                    step={0.5}
+                    value={activeConfig.hookLayout.xPct}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        hookLayout: { ...prev.hookLayout, xPct: val }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Сдвиг по Y</span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {Math.round(activeConfig.hookLayout.yPct)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={8}
+                    max={92}
+                    step={0.5}
+                    value={activeConfig.hookLayout.yPct}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        hookLayout: { ...prev.hookLayout, yPct: val }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Угол наклона блока</span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.hookLayout.blockTiltDeg > 0 ? '+' : ''}
+                      {activeConfig.hookLayout.blockTiltDeg}°
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-6}
+                    max={6}
+                    step={0.5}
+                    value={activeConfig.hookLayout.blockTiltDeg}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        hookLayout: { ...prev.hookLayout, blockTiltDeg: val }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-white/75 font-semibold">Межстрочный интервал</span>
+                    <span className="font-mono font-bold text-amber-300 tabular-nums">
+                      {activeConfig.hookLayout.lineSpacingPct}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={70}
+                    max={160}
+                    step={2}
+                    value={activeConfig.hookLayout.lineSpacingPct}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        hookLayout: { ...prev.hookLayout, lineSpacingPct: val }
+                      }));
+                    }}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* НАСТРОЙКИ ПОДЛОЖКИ КИСТИ (SPLASH / BRUSH BACKGROUND) */}
+              <div className="pt-3 border-t border-white/[0.08] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
+                    <Paintbrush className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>Подложка под заголовком (Brush / Splash):</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-white/55">
+                    {SPLASH_SHAPE_OPTIONS.find(s => s.id === activeConfig.splashShape)?.subtitle || 'Monolith Bristle'}
+                  </span>
+                </div>
+
+                {/* Визуальный селектор из 6 форм гранж-подложки + Без подложки */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {SPLASH_SHAPE_OPTIONS.map(opt => {
+                    const isSelected = activeConfig.splashShape === opt.id;
+                    const resolvedPal = resolveSplashColorPalette(activeConfig.splashColor);
+                    const strokeFill = opt.id === 'none' ? '#334155' : resolvedPal.mainColor;
+                    const strokeEdge = opt.id === 'none' ? '#1E293B' : resolvedPal.edgeColor;
+                    const isWideSpan = opt.id === 'none';
+
+                    return (
+                      <motion.button
+                        key={`splash-shape-${opt.id}`}
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            splashShape: opt.id
+                          }))
+                        }
+                        className={`min-h-[64px] p-2 rounded-xl border text-left flex flex-col justify-between gap-1.5 cursor-pointer transition ${
+                          isWideSpan ? 'col-span-2 sm:col-span-3 flex-row items-center min-h-[40px]' : ''
+                        } ${
+                          isSelected
+                            ? 'border-amber-400 bg-amber-500/15 text-[#FDE047] shadow-[0_0_16px_rgba(245,158,11,0.16)]'
+                            : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/75 hover:text-white hover:border-white/20'
+                        }`}
+                      >
+                        <div
+                          className={`${
+                            isWideSpan ? 'w-14 h-5 shrink-0' : 'w-full h-7'
+                          } rounded-lg bg-[#070a12] border border-white/[0.06] flex items-center justify-center overflow-hidden px-1.5`}
+                        >
+                          <svg
+                            viewBox="0 0 120 36"
+                            className="w-full h-full"
+                            aria-hidden="true"
+                          >
+                            <defs>
+                              <linearGradient id={`grad-${activeSlot}-${opt.id}`} x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor={strokeFill} />
+                                <stop offset="100%" stopColor={strokeEdge} />
+                              </linearGradient>
+                            </defs>
+                            {opt.id === 'monolith_bristle' && (
+                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
+                                <path d="M12,7 Q60,5 108,8 L116,11 L107,14 L115,18 L106,22 L114,26 L108,29 Q60,31 12,28 L5,25 L13,21 L4,17 L13,13 L6,10 Z" />
+                                <rect x="3" y="12" width="12" height="2" rx="1" opacity="0.85" />
+                                <rect x="105" y="21" width="12" height="2" rx="1" opacity="0.85" />
+                              </g>
+                            )}
+                            {opt.id === 'jagged_splash' && (
+                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
+                                <path d="M14,9 L32,4 L45,9 L68,3 L86,8 L108,5 L117,12 L103,16 L118,22 L101,27 L111,31 L84,28 L66,33 L42,27 L20,31 L6,25 L16,20 L3,14 L17,11 Z" />
+                                <ellipse cx="114" cy="7" rx="3.5" ry="1.2" transform="rotate(-14 114 7)" />
+                                <ellipse cx="7" cy="30" rx="4" ry="1.3" transform="rotate(-10 7 30)" />
+                              </g>
+                            )}
+                            {opt.id === 'bottom_slash' && (
+                              <g>
+                                <rect x="24" y="6" width="72" height="6" rx="3" fill="rgba(255,255,255,0.22)" />
+                                <path
+                                  d="M14,22 Q60,18 112,17 L104,23 L114,27 Q62,31 16,30 L7,26 Z"
+                                  fill={`url(#grad-${activeSlot}-${opt.id})`}
+                                />
+                              </g>
+                            )}
+                            {opt.id === 'double_strokes' && (
+                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
+                                <path d="M10,6 Q52,4 94,7 L101,10 L93,13 L99,15 Q52,17 10,15 L5,12 L11,9 Z" />
+                                <path d="M22,20 Q64,18 109,21 L116,24 L108,27 L114,30 Q64,32 22,30 L16,27 L23,23 Z" />
+                              </g>
+                            )}
+                            {opt.id === 'distressed_grunge' && (
+                              <g>
+                                <path
+                                  d="M11,8 Q60,4 109,9 L115,13 L106,18 L114,24 L106,29 Q60,32 12,28 L5,23 L13,18 L6,12 Z"
+                                  fill={`url(#grad-${activeSlot}-${opt.id})`}
+                                />
+                                <path d="M24,13 Q52,11 76,14" stroke="#070a12" strokeWidth="2.4" strokeLinecap="round" />
+                                <path d="M46,24 Q78,22 96,25" stroke="#070a12" strokeWidth="2.2" strokeLinecap="round" />
+                              </g>
+                            )}
+                            {opt.id === 'tapered_speed' && (
+                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
+                                <path d="M7,5 Q56,6 106,13 L118,16 L104,18 L116,21 L100,23 Q54,29 8,31 L3,25 L10,18 L3,11 Z" />
+                                <rect x="98" y="12" width="19" height="1.5" rx="0.75" opacity="0.8" />
+                                <rect x="101" y="22" width="16" height="1.5" rx="0.75" opacity="0.8" />
+                              </g>
+                            )}
+                            {opt.id === 'none' && (
+                              <g stroke="#64748b" strokeWidth="1.6" strokeDasharray="3 3" fill="none">
+                                <rect x="14" y="8" width="92" height="20" rx="4" />
+                                <line x1="18" y1="26" x2="102" y2="10" stroke="#94a3b8" strokeDasharray="none" />
+                              </g>
+                            )}
+                          </svg>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10.5px] font-bold leading-tight block truncate">
+                            {opt.label}
+                          </span>
+                          <span className="text-[9px] font-mono opacity-65 block truncate">
+                            {opt.subtitle}
+                          </span>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+
+                {/* Палитра цветов + HTML5 Color Picker с авто-расчётом объёмного градиента */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
+                      Цвет и градиент подложки:
+                    </span>
+                    <label className="min-h-[28px] px-2.5 py-0.5 rounded-lg border border-white/[0.08] bg-[#0b0f19]/90 flex items-center gap-1.5 cursor-pointer text-[10px] text-white/80 hover:border-amber-400/50 transition">
+                      <input
+                        type="color"
+                        value={activeConfig.splashColor}
+                        onChange={e => {
+                          const hex = e.target.value.toUpperCase();
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            splashShape:
+                              prev.splashShape === 'none' ? 'monolith_bristle' : prev.splashShape,
+                            splashColor: hex
+                          }));
+                        }}
+                        aria-label="Свой цвет подложки"
+                        className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
+                      />
+                      <span className="font-mono font-semibold">{activeConfig.splashColor}</span>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {SPLASH_COLOR_SWATCHES.map(swatch => {
+                      const isSelected =
+                        activeConfig.splashColor.toUpperCase() === swatch.mainColor.toUpperCase();
+                      return (
+                        <motion.button
+                          key={`splash-swatch-${swatch.id}`}
+                          type="button"
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() =>
+                            updateSlotConfig(activeSlot, prev => ({
+                              ...prev,
+                              splashShape:
+                                prev.splashShape === 'none' ? 'monolith_bristle' : prev.splashShape,
+                              splashColor: swatch.mainColor
+                            }))
+                          }
+                          className={`min-h-[30px] px-2.5 py-1 rounded-xl border text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                            isSelected
+                              ? 'border-amber-400 bg-amber-500/20 text-[#FDE047]'
+                              : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/75 hover:text-white'
+                          }`}
+                        >
+                          <span
+                            className="w-3 h-3 rounded-sm border border-white/25 shrink-0"
+                            style={{
+                              background: `linear-gradient(135deg, ${swatch.mainColor}, ${swatch.edgeColor})`
+                            }}
+                          />
+                          <span>{swatch.label}</span>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Слайдеры отступа мазка и интенсивности тёмной тени подложки */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-white/75 font-semibold">Отступ / Ширина мазка</span>
+                      <span className="font-mono font-bold text-amber-300 tabular-nums">
+                        {activeConfig.splashPaddingPct}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={50}
+                      max={160}
+                      step={2}
+                      value={activeConfig.splashPaddingPct}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, splashPaddingPct: val }));
+                      }}
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-white/75 font-semibold">Тёмная тень подложки</span>
+                      <span className="font-mono font-bold text-amber-300 tabular-nums">
+                        {activeConfig.splashShadowPct}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={160}
+                      step={2}
+                      value={activeConfig.splashShadowPct}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, splashShadowPct: val }));
+                      }}
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Бейджи активного слота (до 3) + размер бейджей */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] text-white/55">
-                  Кинематографичные бейджи {activeSlot} (верхний правый угол, до 3):
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono text-amber-300 tabular-nums">
-                    {activeConfig.badges.length}/3
-                  </span>
-                  {activeConfig.badges.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (activeSlot === 'A') {
-                          onThumbBadgeChange('none');
-                        } else {
-                          updateSlotConfig(activeSlot, prev => ({ ...prev, badges: [] }));
-                        }
+            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (ПРАВЫЙ ВЕРХНИЙ УГОЛ) */}
+            <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Верхние капсулы-бейджи ({activeSlot})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      badgesEnabled: !prev.badgesEnabled
+                    }))
+                  }
+                  className={`min-h-[30px] px-3 py-1 rounded-lg border text-[10.5px] font-bold cursor-pointer transition ${
+                    activeConfig.badgesEnabled
+                      ? 'bg-[#090D16] border-[#F59E0B] text-[#FACC15]'
+                      : 'bg-[#0b0f19] border-white/[0.08] text-white/55 hover:text-white'
+                  }`}
+                >
+                  {activeConfig.badgesEnabled ? 'Вкл' : 'Выкл'}
+                </button>
+              </div>
+
+              {activeConfig.badgesEnabled && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[0, 1, 2].map(badgeIdx => (
+                      <input
+                        key={`badge-input-${activeSlot}-${badgeIdx}`}
+                        type="text"
+                        value={activeConfig.badgeTexts[badgeIdx]}
+                        onChange={e => {
+                          const val = e.target.value.toUpperCase();
+                          updateSlotConfig(activeSlot, prev => {
+                            const nextTexts: [string, string, string] = [...prev.badgeTexts] as [
+                              string,
+                              string,
+                              string
+                            ];
+                            nextTexts[badgeIdx] = val;
+                            return { ...prev, badgeTexts: nextTexts };
+                          });
+                        }}
+                        placeholder={`Бейдж #${badgeIdx + 1}`}
+                        className="w-full min-h-[36px] bg-[#0b0f19] border border-amber-400/35 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
+                      />
+                    ))}
+                  </div>
+
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-white/70 font-semibold">Размер бейджей</span>
+                      <span className="font-mono font-bold text-[#FACC15] tabular-nums">
+                        {activeConfig.badgeScalePct}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={60}
+                      max={150}
+                      step={2}
+                      value={activeConfig.badgeScalePct}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
                       }}
-                      className="text-[10px] text-white/55 hover:text-rose-300 underline cursor-pointer"
-                    >
-                      Сброс
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-[#080c14]/70 border border-white/[0.07] rounded-xl p-2.5 space-y-1">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-white/75 font-semibold">Размер бейджей {activeSlot}:</span>
-                  <span className="font-mono font-bold text-[#FDE047] tabular-nums">
-                    {activeConfig.badgeScalePct}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={60}
-                  max={150}
-                  step={2}
-                  value={activeConfig.badgeScalePct}
-                  onChange={e => {
-                    const val = Number(e.target.value);
-                    updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
-                  }}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              {/* Категория 1: Документальные / Исторические (@Histoviva) */}
-              <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300/90 block">
-                  🏛️ Документальные / Исторические (@Histoviva)
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {HISTOVIVA_BADGE_OPTIONS.map(badge => {
-                    const isActive = activeConfig.badges.includes(badge.id);
-                    return (
-                      <button
-                        key={`badge-${activeSlot}-${badge.id}`}
-                        type="button"
-                        aria-pressed={isActive}
-                        onClick={() => toggleBadgeForSlot(activeSlot, badge.id)}
-                        className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
-                          isActive
-                            ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
-                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                        }`}
-                      >
-                        {badge.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Категория 2: Эмбиент / Многочасовой Луп */}
-              <div className="space-y-1.5 bg-[#080c14]/60 border border-white/[0.06] rounded-xl p-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300/90 block">
-                  🌙 Эмбиент / Многочасовой Луп
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {AMBIENT_BADGE_OPTIONS.map(badge => {
-                    const isActive = activeConfig.badges.includes(badge.id);
-                    return (
-                      <button
-                        key={`badge-${activeSlot}-${badge.id}`}
-                        type="button"
-                        aria-pressed={isActive}
-                        onClick={() => toggleBadgeForSlot(activeSlot, badge.id)}
-                        className={`min-h-[40px] px-2.5 py-1.5 rounded-xl text-[10.5px] font-extrabold tracking-wider uppercase border cursor-pointer whitespace-nowrap flex items-center justify-center transition ${
-                          isActive
-                            ? 'bg-[#090D16] border-2 border-[#FACC15] text-[#FDE047] shadow-[0_0_16px_rgba(250,204,21,0.28)]'
-                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/65 hover:text-white hover:border-white/20'
-                        }`}
-                      >
-                        {badge.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -5179,39 +3932,75 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
 
-          {/* Экспорт: активный слот (4K PNG / YouTube < 2 МБ) + Пакетная выгрузка A/B/C (< 2 МБ) */}
-          <div className="space-y-2.5 pt-1">
+          {/* Мультиформатный экспорт для слота A/B/C: 4K (3840x2160) & 720p (1280x720) в JPEG и PNG */}
+          <div className="aether-card rounded-2xl p-3.5 space-y-2.5 border border-white/[0.08] bg-[#0b0f19]/90 backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc]">
+                📥 Экспорт обложки • Слот {activeSlot}
+              </span>
+              {lastExportReport[activeSlot] && (
+                <span
+                  title={lastExportReport[activeSlot]?.filename}
+                  className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-400/35 px-2 py-0.5 rounded-md tabular-nums"
+                >
+                  {lastExportReport[activeSlot]?.formatLabel}: {lastExportReport[activeSlot]?.sizeText}
+                </span>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => downloadCover4K(activeSlot)}
-                className="w-full min-h-[46px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                disabled={Boolean(isExportingFormat)}
+                onClick={() => void exportSlotInFormat(activeSlot, '4k_jpg')}
+                title={`Скачать thumbnail_4k_3840x2160_${activeSlot}.jpg (JPEG 95%)`}
+                className="w-full min-h-[44px] btn-primary-action py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
-                <Download className="w-4 h-4 shrink-0" />
-                <span>📥 4K PNG Вариант {activeSlot}</span>
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span>4K JPEG (3840×2160)</span>
               </button>
+
               <button
                 type="button"
-                disabled={isOptimizingYtThumb}
-                onClick={() => void downloadCoverYouTube2Mb(activeSlot)}
-                className="w-full min-h-[46px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-amber-400/50 text-[#FDE047] font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+                disabled={Boolean(isExportingFormat)}
+                onClick={() => void exportSlotInFormat(activeSlot, '4k_png')}
+                title={`Скачать thumbnail_4k_3840x2160_${activeSlot}.png (PNG без потерь)`}
+                className="w-full min-h-[44px] bg-[#111827] hover:bg-white/[0.08] border border-amber-400/45 text-[#FDE047] font-bold py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
               >
-                <Download className="w-4 h-4 text-amber-300 shrink-0" />
-                <span>
-                  {isOptimizingYtThumb && !batchExportStatus
-                    ? 'Сжатие...'
-                    : `📦 YouTube ${activeSlot} (< 2 МБ)`}
-                </span>
+                <Download className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>4K PNG (3840×2160)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(isExportingFormat)}
+                onClick={() => void exportSlotInFormat(activeSlot, '720p_jpg')}
+                title={`Скачать thumbnail_720p_1280x720_${activeSlot}.jpg (< 1.95 МБ для YouTube)`}
+                className="w-full min-h-[44px] bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:brightness-110 border border-emerald-400/45 text-emerald-200 font-bold py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span>720p JPEG (1280×720)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(isExportingFormat)}
+                onClick={() => void exportSlotInFormat(activeSlot, '720p_png')}
+                title={`Скачать thumbnail_720p_1280x720_${activeSlot}.png (компактный HD PNG)`}
+                className="w-full min-h-[44px] bg-[#111827] hover:bg-white/[0.08] border border-cyan-400/40 text-cyan-200 font-bold py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+                <span>720p PNG (1280×720)</span>
               </button>
             </div>
 
             <button
               type="button"
-              disabled={isOptimizingYtThumb}
+              disabled={Boolean(isExportingFormat)}
               onClick={() => void downloadAll3CoversYouTube2Mb()}
-              className="w-full min-h-[48px] bg-gradient-to-r from-amber-400/25 via-emerald-500/20 to-cyan-500/25 hover:brightness-110 border border-amber-400/60 text-[#FDE047] font-extrabold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-[0_8px_24px_-8px_rgba(245,158,11,0.35)] disabled:opacity-60"
+              className="w-full min-h-[44px] bg-gradient-to-r from-amber-400/20 via-emerald-500/15 to-cyan-500/20 hover:brightness-110 border border-amber-400/55 text-[#FDE047] font-extrabold py-2 px-4 rounded-xl text-[11.5px] flex items-center justify-center gap-2 cursor-pointer transition disabled:opacity-60"
             >
-              {isOptimizingYtThumb && batchExportStatus ? (
+              {isExportingFormat === 'batch_all' && batchExportStatus ? (
                 <RefreshCw className="w-4 h-4 animate-spin text-amber-300 shrink-0" />
               ) : (
                 <Download className="w-4 h-4 text-amber-300 shrink-0" />
@@ -5225,7 +4014,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleOpenSlotInArtEditor(activeSlot)}
-                className="w-full min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-cyan-400/40 text-cyan-200 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                className="w-full min-h-[42px] bg-white/[0.05] hover:bg-white/[0.1] border border-cyan-400/40 text-cyan-200 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
               >
                 <ImageIcon className="w-4 h-4 text-cyan-400 shrink-0" />
                 <span>Открыть Вариант {activeSlot} в Арт-Редакторе</span>
@@ -5383,8 +4172,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     </span>
                     <span className="font-mono text-amber-300/90 tabular-nums">
                       X:{Math.round(activeConfig.hookLayout.xPct)}% • Y:
-                      {Math.round(activeConfig.hookLayout.yPct)}% •{' '}
-                      {activeConfig.hookLayout.fontScalePct}%
+                      {Math.round(activeConfig.hookLayout.yPct)}% • S1:{activeConfig.hookLayout.topScalePct}% / S2:{activeConfig.hookLayout.bottomScalePct}%
                     </span>
                   </div>
                 )}
@@ -5582,15 +4370,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <span className="text-[10.5px] font-mono font-bold text-amber-300 block">
-                            {item.tag} • {slotConfigs[item.slot].badges.length} бейдж(а)
+                            {item.tag} •{' '}
+                            {slotConfigs[item.slot].badgesEnabled
+                              ? slotConfigs[item.slot].badgeTexts.filter(b => b.trim()).length
+                              : 0}{' '}
+                            бейдж(а)
                           </span>
                           <p className="text-[11px] font-semibold text-[#f8fafc] line-clamp-2 leading-tight">
                             {youtubeVideoHeading}
                           </p>
                           <p className="text-[10px] text-white/45 truncate">
-                            {slotConfigs[item.slot].title || '(Без текста)'}
-                            {slotConfigs[item.slot].bottomLine
-                              ? ` + ${slotConfigs[item.slot].bottomLine}`
+                            {slotConfigs[item.slot].topText || '(Без текста)'}
+                            {slotConfigs[item.slot].bottomText
+                              ? ` + ${slotConfigs[item.slot].bottomText}`
                               : ''}
                           </p>
                         </div>
