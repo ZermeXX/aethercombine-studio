@@ -53,6 +53,8 @@ export interface VerbaScenePromptCard {
   promptEn: string;
   promptRu: string;
   sfx: string;
+  historical_date?: string;
+  historical_location?: string;
 }
 
 export interface FlaggedSegment {
@@ -1709,6 +1711,109 @@ function inferVisualAtmosphere(line: string, index: number): {
   return fallbacks[index % fallbacks.length];
 }
 
+function truncateCleanText(value: string, maxLen: number): string {
+  const clean = value.replace(/\s+/g, ' ').replace(/^[,\s.;:]+|[,\s.;:]+$/g, '').trim();
+  if (clean.length <= maxLen) return clean;
+  const sliced = clean.slice(0, maxLen).trim();
+  const lastSpace = sliced.lastIndexOf(' ');
+  return (lastSpace >= Math.floor(maxLen * 0.6) ? sliced.slice(0, lastSpace) : sliced).trim();
+}
+
+const NON_LOCATION_STOPWORDS = new Set([
+  'современном', 'настоящее', 'начале', 'конце', 'итоге', 'ходе', 'целом',
+  'этом', 'том', 'нём', 'ней', 'них', 'мире', 'архивах', 'документах',
+  'реальности', 'действительности', 'январе', 'феврале', 'марте', 'апреле',
+  'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре',
+  'today', 'conclusion', 'fact', 'reality', 'paper', 'archives', 'general',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december', 'the', 'this', 'that'
+]);
+
+function extractHistoricalMarkersFromLine(
+  line: string,
+  language: VerbaLanguage
+): { date: string; location: string } {
+  let date = '';
+  let location = '';
+
+  if (language === 'ru') {
+    const ruDatePatterns = [
+      /\b(\d{1,4}\s*(?:г\.|гг\.|года|году|год)?\s*(?:до\s*н\.?\s*э\.?|н\.?\s*э\.?))/i,
+      /\b([IVXLCDM]{1,6}\s*(?:век[аеу]?|в\.|столети[еяи])(?:\s*(?:до\s*н\.?\s*э\.?|н\.?\s*э\.?))?)/i,
+      /\b(\d{1,2}-?[йемх]\s*(?:век[аеу]?|в\.)(?:\s*(?:до\s*н\.?\s*э\.?|н\.?\s*э\.?))?)/i,
+      /\b((?:около|ок\.|к)\s*\d{3,4}\s*(?:г\.|года|году|год)?(?:\s*(?:до\s*н\.?\s*э\.?|н\.?\s*э\.?))?)/i,
+      /\b((?:1[0-9]{3}|20[0-2][0-9])\s*(?:г\.|гг\.|года|году|год)?)/i,
+      /\b(Древн(?:ий|яя|ее|ем|его|ей)\s+(?:Рим|Египет|Вавилон|Греция|Греции|Восток|Китай|Русь)|Античност[ьи]|Средневековь[ея]|Эпох[аеуи]\s+[А-ЯЁ][а-яё\-]+|Ренессанс)/i
+    ];
+    for (const rx of ruDatePatterns) {
+      const m = line.match(rx);
+      if (m?.[1]) {
+        date = truncateCleanText(m[1], 26);
+        break;
+      }
+    }
+
+    const ruLocRegex =
+      /(?:^|[\s,(])(?:в|во|на|под|около|близ|у|из|через)\s+([А-ЯЁ][а-яё\-]{2,}(?:\s+[А-ЯЁ][а-яё\-]{2,})?(?:,\s*[А-ЯЁ][а-яё\-]{2,})?)/g;
+    let match: RegExpExecArray | null;
+    while ((match = ruLocRegex.exec(line)) !== null) {
+      const candidate = (match[1] || '').trim();
+      const firstWord = candidate.split(/[\s,]+/)[0]?.toLowerCase() || '';
+      if (candidate && !NON_LOCATION_STOPWORDS.has(firstWord)) {
+        location = truncateCleanText(candidate, 36);
+        break;
+      }
+    }
+
+    if (!location) {
+      const famousRuLoc = line.match(
+        /\b(Вавилон[аеу]?|Месопотами[ияю]|Александри[ияю]|Константинопол[яеь]|Карфаген[аеу]?|Иерусалим[аеу]?|Помпе[иях]|Перси[ияю]|Спарт[аеуы]|Афин[ахы]?|Рим[аеу]?|Егип[ета]+|Греци[ияю]|Византи[ияю]|Альп(?:ах|ы)|Сибир[иь])\b/
+      );
+      if (famousRuLoc?.[1]) {
+        location = truncateCleanText(famousRuLoc[1], 36);
+      }
+    }
+  } else {
+    const enDatePatterns = [
+      /\b(\d{1,4}\s*(?:BC|BCE|AD|CE))\b/i,
+      /\b(\d{1,2}(?:st|nd|rd|th)\s+century(?:\s*(?:BC|BCE|AD|CE))?)/i,
+      /\b(?:circa|c\.)\s*(\d{3,4}(?:\s*(?:BC|BCE|AD|CE))?)/i,
+      /\b(1[0-9]{3}|20[0-2][0-9])\b/,
+      /\b(Ancient\s+(?:Rome|Egypt|Babylon|Greece|China)|Middle\s+Ages|Renaissance)\b/i
+    ];
+    for (const rx of enDatePatterns) {
+      const m = line.match(rx);
+      if (m?.[1]) {
+        date = truncateCleanText(m[1], 26);
+        break;
+      }
+    }
+
+    const enLocRegex =
+      /\b(?:in|at|near|across|from|inside)\s+(?:the\s+)?([A-Z][a-zA-Z\-]{2,}(?:\s+[A-Z][a-zA-Z\-]{2,})?(?:,\s*[A-Z][a-zA-Z\-]{2,})?)/g;
+    let match: RegExpExecArray | null;
+    while ((match = enLocRegex.exec(line)) !== null) {
+      const candidate = (match[1] || '').trim();
+      const firstWord = candidate.split(/[\s,]+/)[0]?.toLowerCase() || '';
+      if (candidate && !NON_LOCATION_STOPWORDS.has(firstWord)) {
+        location = truncateCleanText(candidate, 36);
+        break;
+      }
+    }
+
+    if (!location) {
+      const famousEnLoc = line.match(
+        /\b(Babylon|Mesopotamia|Alexandria|Constantinople|Carthage|Jerusalem|Pompeii|Persia|Sparta|Athens|Rome|Egypt|Greece|Byzantium|Alpine\s+(?:station|outpost|ridge)|Siberia)\b/
+      );
+      if (famousEnLoc?.[1]) {
+        location = truncateCleanText(famousEnLoc[1], 36);
+      }
+    }
+  }
+
+  return { date, location };
+}
+
 export function localSliceToScenes(
   text: string,
   tone: VerbaTone,
@@ -1784,6 +1889,9 @@ export function localSliceToScenes(
   };
 
   let cursor = 0;
+  let lastDate = '';
+  let lastLocation = '';
+
   return segments.map((line, idx) => {
     const wc = Math.max(1, extractWordTokens(line).length);
     const durationSec = calculateSceneDurationFromWords(wc);
@@ -1797,6 +1905,24 @@ export function localSliceToScenes(
     const visStyle = visualStyles[idx % visualStyles.length];
     const light = toneLighting[tone];
 
+    const extracted = extractHistoricalMarkersFromLine(line, language);
+    let histDate = '';
+    let histLocation = '';
+
+    if (idx === 0) {
+      histDate = extracted.date;
+      histLocation = extracted.location;
+    } else {
+      const dateChanged = Boolean(extracted.date && extracted.date !== lastDate);
+      const locationChanged = Boolean(extracted.location && extracted.location !== lastLocation);
+      if (dateChanged || locationChanged) {
+        histDate = dateChanged ? extracted.date : '';
+        histLocation = locationChanged ? extracted.location : '';
+      }
+    }
+    if (histDate) lastDate = histDate;
+    if (histLocation) lastLocation = histLocation;
+
     return {
       sceneIndex: idx + 1,
       timecodeRange: `${startStr}–${endStr}`,
@@ -1808,7 +1934,9 @@ export function localSliceToScenes(
       scriptLine: line,
       promptEn: `Cinematic 4K shot (${visStyle}): ${atm.subjectEn}, ${camDesc.en} [${camVec}], ${light}, photorealistic, 8k, --ar 16:9`,
       promptRu: `${atm.subjectRu}. Стиль: ${visStyle}. Камера: ${camDesc.ru}.`,
-      sfx: atm.sfx
+      sfx: atm.sfx,
+      historical_date: histDate,
+      historical_location: histLocation
     };
   });
 }

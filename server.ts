@@ -145,6 +145,7 @@ Requirements:
             ? `You are a veteran US documentary and YouTube script editor. Rewrite the input text into natural, compelling US English ready for voiceover.
 Eliminate all AI clichés ("in today's world", "it is no secret that", "plays a crucial role", "it is worth noting", "in conclusion") and filler words ("as is well known", "basically", "at the end of the day").
 Vary sentence length for high human burstiness.
+HISTORICAL LOWER THIRDS RULE: If the script covers historical periods, preserve exact historical dates, centuries, rulers, key events, and geographic locations cleanly at the opening and at every shift of time or place so scene breakdown can generate Lower Thirds captions.
 
 Parameters:
 - Tone: ${tone || 'doc'}
@@ -156,6 +157,7 @@ Source text:
 ${cleanText}`
             : `Ты опытный шеф-редактор документальных и YouTube-сценариев. Переработай исходный текст на естественном русском языке, полностью убирая ИИ-штампы («в современном мире», «не секрет, что», «играет ключевую роль», «стоит отметить», «важно понимать», «таким образом») и вводный балласт («на сегодняшний день», «как известно», «безусловно», «на самом деле»).
 Чередуй длину предложений для высокой ритмики (Burstiness). Восстанови букву «ё».
+ПРАВИЛО ИСТОРИЧЕСКИХ ТИТРОВ (LOWER THIRDS): Если текст касается исторических событий или эпох, обязательно сохраняй чёткие привязки ко времени (год/век/эпоха), правителям и географическим локациям во вступлении и при каждой смене периода или места, чтобы при разборе на сцены корректно заполнились титры дат и локаций.
 
 Параметры:
 - Тональность: ${tone || 'doc'}
@@ -191,13 +193,13 @@ ${cleanText}`;
           targetLang === 'en'
             ? `You are a YouTube retention scriptwriter. Based on the input text, generate STRICTLY IN NATURAL US ENGLISH:
 1) A pack of 5 high-retention 12-15 second hooks following these exact archetypes: paradox, in_media_res, clue, question, contrast. No greetings or dry openings.
-2) A rewritten main script body in natural US English with tone "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), ready to attach right after the hook.
+2) A rewritten main script body in natural US English with tone "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), ready to attach right after the hook. Preserve historical eras, dates, and geographic locations whenever the scene transitions to a new period or place.
 
 Input text:
 ${cleanText}`
             : `Ты сценарист удержания внимания для YouTube. На основе текста создай:
 1) Пак из 5 цепляющих 12-15 секундных хуков на русском языке строго по архетипам: paradox (парадокс), in_media_res (In Media Res), clue (улика), question (вопрос), contrast (контраст). Без приветствий и скучных дат.
-2) Переделанный основной сценарий в тональности "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), готовый для присоединения к хуку.
+2) Переделанный основной сценарий в тональности "${tone || 'doc'}" (${hookStyle || '15sec_rewrite'}), готовый для присоединения к хуку. Сохраняй точные исторические даты, эпохи и географические места при смене периодов или локаций.
 
 Текст:
 ${cleanText}`;
@@ -242,6 +244,12 @@ Script narration language for "scriptLine": ${targetLang === 'en' ? 'Natural US 
 Calculate each scene's "durationSec" proportional to the word count of "scriptLine" (words / 2.2 seconds, minimum 2.5 seconds).
 Alternate camera movements ("cameraMove") across "zoom_in", "zoom_out", "pan_left", "pan_right" so two consecutive scenes NEVER share the same camera movement.
 
+MANDATORY HISTORICAL LOWER THIRDS RULE (for historical / documentary scripts or scenes referencing historical dates, eras, rulers, or geographic places):
+- Write "historical_date" and "historical_location" strictly in the narration language (${targetLang === 'en' ? 'US English' : 'Russian'}).
+- For KEY scenes (Scene #1 at introduction, and every scene where the historical period, century, ruler, major event, or geographic location changes): automatically populate "historical_date" (concise year or era, max 26 characters, e.g. ${targetLang === 'en' ? '"575 BC" or "11th Century AD"' : '"575 г. до н. э." или "XI век н. э."'}) and "historical_location" (city, region, or specific landmark/site, max 36 characters, e.g. ${targetLang === 'en' ? '"Babylon, Mesopotamia"' : '"Вавилон, Месопотамия"'}).
+- For INTERMEDIATE scenes continuing the same thought in the same time period and location: MUST leave both "historical_date" and "historical_location" as empty strings "" so Lower Thirds titles do not flicker on every frame.
+- If the script has no historical time/place context, return "" for both fields.
+
 Tone: ${tone || 'doc'}
 Script:
 ${cleanText}`;
@@ -267,7 +275,9 @@ ${cleanText}`;
                       scriptLine: { type: Type.STRING },
                       promptEn: { type: Type.STRING },
                       promptRu: { type: Type.STRING },
-                      sfx: { type: Type.STRING }
+                      sfx: { type: Type.STRING },
+                      historical_date: { type: Type.STRING },
+                      historical_location: { type: Type.STRING }
                     },
                     required: [
                       'sceneIndex',
@@ -277,7 +287,9 @@ ${cleanText}`;
                       'scriptLine',
                       'promptEn',
                       'promptRu',
-                      'sfx'
+                      'sfx',
+                      'historical_date',
+                      'historical_location'
                     ]
                   }
                 }

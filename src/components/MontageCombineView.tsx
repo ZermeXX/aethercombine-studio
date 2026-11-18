@@ -62,8 +62,10 @@ export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right'
 export type CinematicOverlayId =
   | 'ambient_particles'
   | 'cinematic_film_grain'
-  | 'historical_lower_thirds'
+  | 'lower_thirds'
   | 'warm_glow';
+
+export type LowerThirdStyleId = 'rossiya24' | 'ictv' | 'sky_news';
 
 export interface ShortsExportSegment {
   segment_index: number;
@@ -164,6 +166,8 @@ export interface NarrativeSceneItem {
   video_ambient_gain_db?: number;
   sfx_gain_db?: number;
   subtitles?: Record<string, string>;
+  historical_date?: string;
+  historical_location?: string;
 }
 
 export interface ExportedNarrativeSceneItem {
@@ -218,6 +222,8 @@ export interface ExportedNarrativeSceneItem {
   ai_video_prompt?: string;
   prompt_ru?: string;
   sfx?: string;
+  historical_date?: string;
+  historical_location?: string;
 }
 
 export interface MasterAudioConfig {
@@ -306,6 +312,14 @@ export interface NarrativeMontageManifest {
   rhythm_profile?: string;
   rhythm_map?: Record<string, unknown> | string;
   overlays: CinematicOverlayId[];
+  lower_third_style?: LowerThirdStyleId;
+  studio_ui_presets?: {
+    tab_1_montage?: {
+      lower_third_style?: LowerThirdStyleId;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
   total_scenes: number;
   total_duration_sec: number;
   cloud_export: {
@@ -452,8 +466,8 @@ const formatMmSsTenths = (sec: number): string => {
 };
 
 // Параметры виртуализации компактной строчной сетки (для 100–200+ сцен без перегрузки DOM)
-const ROW_HEIGHT = 60;
-const VIEWPORT_HEIGHT = 540;
+const ROW_HEIGHT = 92;
+const VIEWPORT_HEIGHT = 552;
 const OVERSCAN_ROWS = 8;
 
 const CAMERA_VECTORS_ORDER: CameraVectorType[] = ['zoom_in', 'pan_right', 'zoom_out', 'pan_left'];
@@ -477,9 +491,9 @@ const CINEMATIC_OVERLAY_PRESETS: Array<{
     desc: 'Аналоговая текстура киноплёнки 35mm + мягкое затемнение углов'
   },
   {
-    id: 'historical_lower_thirds',
+    id: 'lower_thirds',
     label: '📍 Исторические титры дат и локаций (Lower Thirds)',
-    badge: 'historical_lower_thirds',
+    badge: 'lower_thirds',
     desc: 'Документальные плашки с печатным трекингом для дат и архивных мест'
   },
   {
@@ -487,6 +501,28 @@ const CINEMATIC_OVERLAY_PRESETS: Array<{
     label: '🕯️ Мягкое пульсирующее свечение (Warm Glow)',
     badge: 'warm_glow',
     desc: 'Тёплое анаморфное свечение свечей и ламп (Halation & Bloom)'
+  }
+];
+
+const LOWER_THIRD_STYLE_PRESETS: Array<{
+  id: LowerThirdStyleId;
+  label: string;
+  desc: string;
+}> = [
+  {
+    id: 'rossiya24',
+    label: 'Россия 24',
+    desc: 'Красный тег даты слева + синяя плашка локации справа'
+  },
+  {
+    id: 'ictv',
+    label: 'Факти ICTV',
+    desc: 'Оранжевый верхний тег даты + тёмно-синяя плашка локации'
+  },
+  {
+    id: 'sky_news',
+    label: 'Sky News',
+    desc: 'Матовая стеклянная плашка с красным квадратным акцентом слева'
   }
 ];
 
@@ -549,16 +585,17 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   const sfxDbLabel = typeof sc.sfx_gain_db === 'number' ? sc.sfx_gain_db.toFixed(1) : '-6.0';
   const voiceSpanLabel = `${formatMmSsTenths(voiceStartSec)} → ${formatMmSsTenths(voiceEndSec)}`;
 
-  const rowClassName = `grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition-colors ${
+  const rowClassName = `px-3 py-2 flex flex-col justify-center gap-1.5 border-b border-[rgba(255,255,255,0.08)] text-xs transition-colors ${
     isFlagged
       ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-2 border-l-rose-500'
       : hasFile
       ? 'bg-indigo-950/15 hover:bg-indigo-950/30'
-      : 'bg-[#0d1320] hover:bg-slate-900/80'
+      : 'bg-[#0b0f19]/90 hover:bg-[#111827]/90'
   }`;
 
   const rowCells = (
     <>
+      <div className="grid grid-cols-12 gap-2 items-center w-full">
       {/* 1. Drag Handle (⋮⋮), индекс, scene_id и вектор камеры */}
       <div className="col-span-2 flex items-center gap-1 min-w-0">
         <button
@@ -787,6 +824,35 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
+      </div>
+
+      {/* Компактная строка документальных титров дат и локаций (Lower Thirds) */}
+      <div className="grid grid-cols-12 gap-2 items-center w-full pl-6">
+        <label className="col-span-6 flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-semibold text-amber-300/85 shrink-0">
+            Дата / Эпоха:
+          </span>
+          <input
+            type="text"
+            value={sc.historical_date || ''}
+            placeholder="Напр.: 575 г. до н. э. или XI век н. э."
+            onChange={e => updateScene(idx, { historical_date: e.target.value })}
+            className="w-full min-w-0 bg-[#111827]/85 border border-[rgba(255,255,255,0.08)] rounded px-2 py-0.5 text-[11px] text-amber-200 placeholder:text-slate-600 outline-none focus:border-amber-400/60"
+          />
+        </label>
+        <label className="col-span-6 flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-semibold text-cyan-300/85 shrink-0">
+            Локация / Место:
+          </span>
+          <input
+            type="text"
+            value={sc.historical_location || ''}
+            placeholder="Напр.: Вавилон, Месопотамия"
+            onChange={e => updateScene(idx, { historical_location: e.target.value })}
+            className="w-full min-w-0 bg-[#111827]/85 border border-[rgba(255,255,255,0.08)] rounded px-2 py-0.5 text-[11px] text-cyan-200 placeholder:text-slate-600 outline-none focus:border-cyan-400/60"
+          />
+        </label>
+      </div>
     </>
   );
 
@@ -897,6 +963,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     'ambient_particles',
     'cinematic_film_grain'
   ]);
+  const [lowerThirdStyle, setLowerThirdStyle] = useState<LowerThirdStyleId>('rossiya24');
 
   const toggleOverlayPreset = (overlayId: CinematicOverlayId) => {
     setSelectedOverlays(prev =>
@@ -947,7 +1014,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           }))
         )
       );
-      setSelectedOverlays(['cinematic_film_grain', 'historical_lower_thirds']);
+      setSelectedOverlays(['cinematic_film_grain', 'lower_thirds']);
       setLastAppliedDnaSummary(
         'Historical Storytelling • Динамичное чередование 2.5–8 сек • Живопись / Графический роман'
       );
@@ -1099,6 +1166,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     if (externalScenes && externalScenes.length > 0) {
       setNarrativeScenes(externalScenes);
       setCustomScenesCountInput(externalScenes.length);
+      const hasHistoricalTitles = externalScenes.some(sc =>
+        Boolean(sc.historical_date?.trim() || sc.historical_location?.trim())
+      );
+      if (hasHistoricalTitles) {
+        setSelectedOverlays(prev =>
+          prev.includes('lower_thirds') ? prev : [...prev, 'lower_thirds']
+        );
+      }
       onConsumeExternalScenes?.();
     }
   }, [externalScenes, onConsumeExternalScenes]);
@@ -1612,6 +1687,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             sc.scene_id || sc.slot_id || sc.id || `scene_${String(idx + 1).padStart(2, '0')}`
           );
 
+          const rawHistDate = String(sc.historical_date || '').trim();
+          const rawHistLocation = String(sc.historical_location || '').trim();
+
           return {
             scene_index: idx + 1,
             scene_id: sceneIdNorm,
@@ -1667,7 +1745,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               ? { video_ambient_gain_db: rawAmbientGainDb }
               : {}),
             ...(rawSfxGain !== undefined ? { sfx_gain_db: rawSfxGain } : {}),
-            ...(subtitlesMap ? { subtitles: subtitlesMap } : {})
+            ...(subtitlesMap ? { subtitles: subtitlesMap } : {}),
+            ...(rawHistDate ? { historical_date: rawHistDate } : {}),
+            ...(rawHistLocation ? { historical_location: rawHistLocation } : {})
           };
         });
 
@@ -1678,6 +1758,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           scrollContainerRef.current.scrollTop = 0;
           setScrollTop(0);
         }
+      }
+
+      if (
+        parsedScenes.some(sc =>
+          Boolean(sc.historical_date?.trim() || sc.historical_location?.trim())
+        )
+      ) {
+        setSelectedOverlays(prev =>
+          prev.includes('lower_thirds') ? prev : [...prev, 'lower_thirds']
+        );
       }
     }
 
@@ -1694,9 +1784,24 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     const validOverlaySet = new Set<CinematicOverlayId>([
       'ambient_particles',
       'cinematic_film_grain',
-      'historical_lower_thirds',
+      'lower_thirds',
       'warm_glow'
     ]);
+    const normalizeOverlayArray = (arr: unknown[]): CinematicOverlayId[] => {
+      const result: CinematicOverlayId[] = [];
+      for (const item of arr) {
+        if (typeof item !== 'string') continue;
+        const normalizedId =
+          item === 'historical_lower_thirds' ? 'lower_thirds' : item;
+        if (
+          validOverlaySet.has(normalizedId as CinematicOverlayId) &&
+          !result.includes(normalizedId as CinematicOverlayId)
+        ) {
+          result.push(normalizedId as CinematicOverlayId);
+        }
+      }
+      return result;
+    };
 
     if (typeof rawRhythmMap === 'string' && rawRhythmMap.trim()) {
       const rmStr = rawRhythmMap.trim();
@@ -1746,10 +1851,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         }
       }
       if (Array.isArray(rmObj.overlays)) {
-        const filtered = rmObj.overlays.filter(
-          (o): o is CinematicOverlayId =>
-            typeof o === 'string' && validOverlaySet.has(o as CinematicOverlayId)
-        );
+        const filtered = normalizeOverlayArray(rmObj.overlays);
         if (filtered.length > 0) {
           setSelectedOverlays(filtered);
         }
@@ -1762,13 +1864,45 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
 
     if (Array.isArray(raw.overlays)) {
-      const filtered = raw.overlays.filter(
-        (o): o is CinematicOverlayId =>
-          typeof o === 'string' && validOverlaySet.has(o as CinematicOverlayId)
-      );
+      const filtered = normalizeOverlayArray(raw.overlays);
       if (filtered.length > 0) {
         setSelectedOverlays(filtered);
       }
+    }
+
+    const parsedLowerThirdsDetected =
+      Array.isArray(rawScenesArray) &&
+      rawScenesArray.some(
+        s =>
+          Boolean(
+            s &&
+              typeof s === 'object' &&
+              (String((s as Record<string, unknown>).historical_date || '').trim() ||
+                String((s as Record<string, unknown>).historical_location || '').trim())
+          )
+      );
+    if (parsedLowerThirdsDetected) {
+      setSelectedOverlays(prev =>
+        prev.includes('lower_thirds') ? prev : [...prev, 'lower_thirds']
+      );
+    }
+
+    const rawTab1Root =
+      raw.tab_1_montage && typeof raw.tab_1_montage === 'object'
+        ? (raw.tab_1_montage as Record<string, unknown>)
+        : undefined;
+    const rawLowerThirdStyleVal = String(
+      raw.lower_third_style ??
+        tab1Presets?.lower_third_style ??
+        rawTab1Root?.lower_third_style ??
+        ''
+    ).trim();
+    if (
+      rawLowerThirdStyleVal === 'rossiya24' ||
+      rawLowerThirdStyleVal === 'ictv' ||
+      rawLowerThirdStyleVal === 'sky_news'
+    ) {
+      setLowerThirdStyle(rawLowerThirdStyleVal);
     }
 
     // Парсинг v2.1 / 2.2-FINAL пресетов для Таб 1
@@ -2662,7 +2796,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         : {}),
       ...(sc.ai_video_prompt ? { ai_video_prompt: sc.ai_video_prompt } : {}),
       ...(sc.prompt_ru ? { prompt_ru: sc.prompt_ru } : {}),
-      ...(sc.sfx ? { sfx: sc.sfx } : {})
+      ...(sc.sfx ? { sfx: sc.sfx } : {}),
+      ...(sc.historical_date && sc.historical_date.trim()
+        ? { historical_date: sc.historical_date.trim() }
+        : {}),
+      ...(sc.historical_location && sc.historical_location.trim()
+        ? { historical_location: sc.historical_location.trim() }
+        : {})
     };
   };
 
@@ -2694,6 +2834,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       rhythm_profile: rhythmProfile,
       rhythm_map: rhythmMapPayload,
       overlays: selectedOverlays,
+      lower_third_style: lowerThirdStyle,
+      studio_ui_presets: {
+        tab_1_montage: {
+          lower_third_style: lowerThirdStyle
+        }
+      },
       total_scenes: exportedScenes.length,
       total_duration_sec: computedDuration,
       cloud_export: {
@@ -2870,6 +3016,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       lastAppliedDnaSummary,
       importedRhythmMap,
       selectedOverlays,
+      lowerThirdStyle,
       narrativeScenes,
       totalNarrativeDurationSec,
       gdriveFolderId,
@@ -2921,6 +3068,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       project_name: projectName.trim() || 'Narrative Movie 4K',
       rhythm_profile: rhythmProfile,
       overlays: selectedOverlays,
+      lower_third_style: lowerThirdStyle,
       total_project_scenes: narrativeScenes.length,
       total_patch_scenes: flaggedRevisionScenes.length,
       generated_at: new Date().toISOString(),
@@ -3025,6 +3173,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: sc.duration,
         ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
         ...(sc.voice_end !== undefined ? { voice_end: sc.voice_end } : {}),
+        ...(sc.historical_date ? { historical_date: sc.historical_date } : {}),
+        ...(sc.historical_location ? { historical_location: sc.historical_location } : {}),
         assets: compactAssets,
         video_processing: compactVideoProc,
         audio_processing: compactAudioProc,
@@ -3065,6 +3215,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       gdrive_folder_id: fullManifest.gdrive_folder_id,
       rhythm_profile: fullManifest.rhythm_profile,
       overlays: fullManifest.overlays,
+      lower_third_style: lowerThirdStyle,
+      studio_ui_presets: {
+        tab_1_montage: {
+          lower_third_style: lowerThirdStyle
+        }
+      },
       total_scenes: compactTimeline.length,
       total_duration_sec: fullManifest.total_duration_sec,
       render_settings: {
@@ -3628,7 +3784,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           String(originalIndex + 1).includes(q) ||
           scene.scene_id.toLowerCase().includes(q) ||
           scene.file_name.toLowerCase().includes(q) ||
-          scene.text_overlay.toLowerCase().includes(q)
+          scene.text_overlay.toLowerCase().includes(q) ||
+          (scene.historical_date || '').toLowerCase().includes(q) ||
+          (scene.historical_location || '').toLowerCase().includes(q)
       );
   }, [narrativeScenes, searchQuery]);
 
@@ -4758,31 +4916,110 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           <div className="space-y-2">
             {CINEMATIC_OVERLAY_PRESETS.map(layer => {
               const active = selectedOverlays.includes(layer.id);
+              const isLowerThirds = layer.id === 'lower_thirds';
               return (
-                <button
+                <div
                   key={layer.id}
-                  type="button"
-                  onClick={() => toggleOverlayPreset(layer.id)}
-                  className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                  className={`w-full rounded-xl border transition-all overflow-hidden ${
                     active
                       ? 'bg-amber-500/15 border-amber-400/70 text-slate-100 shadow-sm'
-                      : 'bg-[#111827]/80 border-slate-800 text-slate-400 hover:border-slate-700'
+                      : 'bg-[#111827]/80 border-[rgba(255,255,255,0.08)] text-slate-400 hover:border-slate-700'
                   }`}
                 >
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-bold text-slate-100">{layer.label}</div>
-                    <div className="text-[10px] text-slate-400">{layer.desc}</div>
-                  </div>
-                  <span
-                    className={`shrink-0 text-[10px] font-mono px-2 py-0.5 rounded border ${
-                      active
-                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300 font-bold'
-                        : 'bg-slate-900 border-slate-700 text-slate-500'
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => toggleOverlayPreset(layer.id)}
+                    className="w-full p-2.5 text-left flex items-start justify-between gap-2 cursor-pointer"
                   >
-                    {active ? 'ON' : 'OFF'}
-                  </span>
-                </button>
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-bold text-slate-100">{layer.label}</div>
+                      <div className="text-[10px] text-slate-400">{layer.desc}</div>
+                    </div>
+                    <span
+                      className={`shrink-0 text-[10px] font-mono px-2 py-0.5 rounded border ${
+                        active
+                          ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300 font-bold'
+                          : 'bg-slate-900 border-slate-700 text-slate-500'
+                      }`}
+                    >
+                      {active ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  {isLowerThirds && active && (
+                    <div className="px-2.5 pb-2.5 pt-2 border-t border-[rgba(255,255,255,0.08)] bg-[#0b0f19]/80 backdrop-blur-md space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/90">
+                          Стиль новостной плашки (Lower Third):
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400 bg-[#111827] border border-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded">
+                          {lowerThirdStyle}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        {LOWER_THIRD_STYLE_PRESETS.map(styleOpt => {
+                          const isSelected = lowerThirdStyle === styleOpt.id;
+                          return (
+                            <button
+                              key={styleOpt.id}
+                              type="button"
+                              onClick={() => setLowerThirdStyle(styleOpt.id)}
+                              title={styleOpt.desc}
+                              className={`p-2 rounded-lg border text-left transition-all cursor-pointer space-y-1.5 ${
+                                isSelected
+                                  ? 'bg-[#111827] border-amber-400/80 text-slate-100 shadow-sm shadow-amber-500/10'
+                                  : 'bg-[#0b0f19]/90 border-[rgba(255,255,255,0.08)] text-slate-400 hover:border-white/20 hover:text-slate-200'
+                              }`}
+                            >
+                              {/* Мини-превью стиля плашки */}
+                              <div className="h-5 flex items-center">
+                                {styleOpt.id === 'rossiya24' && (
+                                  <div className="inline-flex items-stretch h-3.5 rounded-sm overflow-hidden border border-white/15 w-full">
+                                    <span className="bg-red-600 w-[34%] flex items-center justify-center text-[7px] font-bold text-white tracking-tight">
+                                      575 BC
+                                    </span>
+                                    <span className="bg-blue-700 flex-1 flex items-center px-1 text-[7px] font-semibold text-white truncate">
+                                      BABYLON
+                                    </span>
+                                  </div>
+                                )}
+                                {styleOpt.id === 'ictv' && (
+                                  <div className="inline-flex flex-col w-full rounded-sm overflow-hidden border border-white/15">
+                                    <span className="bg-orange-500 h-1.5 w-[55%] block" />
+                                    <span className="bg-[#0d1f4b] h-2.5 w-full flex items-center px-1 text-[7px] font-semibold text-white truncate">
+                                      575 BC • BABYLON
+                                    </span>
+                                  </div>
+                                )}
+                                {styleOpt.id === 'sky_news' && (
+                                  <div className="inline-flex items-stretch h-3.5 rounded-sm overflow-hidden bg-white/10 backdrop-blur-md border border-white/25 w-full">
+                                    <span className="bg-red-600 w-3.5 shrink-0 block" />
+                                    <span className="flex-1 flex items-center px-1.5 text-[7px] font-semibold text-slate-100 truncate">
+                                      575 BC • BABYLON
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[11px] font-bold text-slate-100 leading-tight">
+                                  {styleOpt.label}
+                                </span>
+                                {isSelected && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                                )}
+                              </div>
+                              <p className="text-[9.5px] leading-snug text-slate-400">
+                                {styleOpt.desc}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

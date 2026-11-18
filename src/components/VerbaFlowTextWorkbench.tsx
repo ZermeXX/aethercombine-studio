@@ -352,6 +352,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
 
       onSourceTextChange(extracted);
       setWorkingText(extracted);
+      setSceneCards(localSliceToScenes(extracted, tone, outputLanguage));
       setLoadedDocumentMeta({ name: file.name, pages: pagesCount });
       setDocumentChapters([]);
       setChaptersSummary(null);
@@ -700,6 +701,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
           };
 
+          let prevHistDate = '';
+          let prevHistLoc = '';
           const normalized: VerbaScenePromptCard[] = rawScenes.map((sc, idx) => {
             const line = String(sc.scriptLine || '').trim();
             const wc = Math.max(1, extractWordTokens(line).length);
@@ -708,6 +711,18 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             const endStr = formatMMSS(cursor + dur);
             cursor += dur;
             const cam = camVectors[idx];
+            const rawDate = String(sc.historical_date || '').trim().slice(0, 26);
+            const rawLoc = String(sc.historical_location || '').trim().slice(0, 36);
+            const isRepeat =
+              idx > 0 &&
+              rawDate.toLowerCase() === prevHistDate.toLowerCase() &&
+              rawLoc.toLowerCase() === prevHistLoc.toLowerCase();
+            const finalDate = isRepeat ? '' : rawDate;
+            const finalLoc = isRepeat ? '' : rawLoc;
+            if (rawDate || rawLoc) {
+              prevHistDate = rawDate;
+              prevHistLoc = rawLoc;
+            }
             return {
               sceneIndex: idx + 1,
               startTime: startStr,
@@ -719,7 +734,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
               scriptLine: line,
               promptEn: String(sc.promptEn || ''),
               promptRu: String(sc.promptRu || ''),
-              sfx: String(sc.sfx || '')
+              sfx: String(sc.sfx || ''),
+              historical_date: finalDate,
+              historical_location: finalLoc
             };
           });
 
@@ -853,6 +870,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           ? antiRepeatVectors[idx]
           : sc.cameraMove || antiRepeatVectors[idx];
 
+      const histDate = String(sc.historical_date || '').trim().slice(0, 26);
+      const histLoc = String(sc.historical_location || '').trim().slice(0, 36);
+
       return {
         scene_index: idx + 1,
         scene_id: `SCENE_${String(idx + 1).padStart(3, '0')}`,
@@ -871,7 +891,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           ? sc.promptEn
           : `${sc.promptEn} [camera: ${camMove}]`,
         prompt_ru: sc.promptRu,
-        sfx: sc.sfx
+        sfx: sc.sfx,
+        ...(histDate ? { historical_date: histDate } : {}),
+        ...(histLoc ? { historical_location: histLoc } : {})
       };
     });
   };
@@ -2008,6 +2030,33 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                                 className="w-full bg-[#090D16] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-amber-100 outline-none focus:border-amber-400/50"
                               />
                             </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-xs">
+                          <div>
+                            <span className="text-[10px] font-semibold text-amber-300/90 block mb-1">
+                              Дата / Эпоха (historical_date)
+                            </span>
+                            <input
+                              type="text"
+                              value={sc.historical_date || ''}
+                              placeholder="Напр.: 575 г. до н. э. или XI век н. э."
+                              onChange={e => updateSceneCard(idx, { historical_date: e.target.value })}
+                              className="w-full bg-[#090D16] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-amber-200 placeholder:text-slate-600 outline-none focus:border-amber-400/50"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-semibold text-cyan-300/90 block mb-1">
+                              Локация / Место (historical_location)
+                            </span>
+                            <input
+                              type="text"
+                              value={sc.historical_location || ''}
+                              placeholder="Напр.: Вавилон, Месопотамия"
+                              onChange={e => updateSceneCard(idx, { historical_location: e.target.value })}
+                              className="w-full bg-[#090D16] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-cyan-200 placeholder:text-slate-600 outline-none focus:border-cyan-400/50"
+                            />
                           </div>
                         </div>
                       </div>
