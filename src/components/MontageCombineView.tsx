@@ -259,9 +259,12 @@ export interface BurnInSrtConfig {
 export interface ShortsAutoSliceConfig {
   enabled: boolean;
   count: 2 | 3;
+  shorts_count: 2 | 3;
   aspect_ratio: '9:16';
   resolution: '1080x1920';
   crop_mode: 'center';
+  hook_texts: string[];
+  hook_text: string;
   hook_text_en: string;
   output_dir: './output/shorts/';
   upload_to_gdrive: boolean;
@@ -326,6 +329,12 @@ export interface NarrativeMontageManifest {
   };
   subtitles_burn_in?: BurnInSrtConfig;
   shorts_config?: ShortsAutoSliceConfig;
+  shorts_factory?: {
+    enabled: boolean;
+    shorts_count: 2 | 3;
+    hook_texts: string[];
+    hook_text: string;
+  };
   shorts_export?: ShortsExportManifestBlock;
   telegram_notifications?: {
     enabled: boolean;
@@ -1114,10 +1123,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [srtTextContent, setSrtTextContent] = useState<string>('');
   const srtFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Авто-нарезка вирусных Shorts (9:16, 1080x1920, центрированный кроп + текстовый хук на английском)
+  // Авто-нарезка вирусных Shorts (9:16, 1080x1920, центрированный кроп + 2–3 индивидуальных хука)
+  const DEFAULT_SHORTS_HOOKS: [string, string, string] = [
+    'WAIT FOR THE 14TH SECOND...',
+    'NOBODY COULD EXPLAIN THIS...',
+    'THE TRUTH WAS BURIED HERE...'
+  ];
   const [shortsAutoSliceEnabled, setShortsAutoSliceEnabled] = useState<boolean>(false);
   const [shortsSliceCount, setShortsSliceCount] = useState<2 | 3>(3);
-  const [shortsHookTextEn, setShortsHookTextEn] = useState<string>('WAIT FOR THE 14TH SECOND...');
+  const [shortsHookTexts, setShortsHookTexts] = useState<[string, string, string]>(DEFAULT_SHORTS_HOOKS);
 
   // Параметры кодирования для N-сцен (по умолчанию H.264 libx264 High profile CRF 18 yuv420p 24fps CFR)
   const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
@@ -1789,6 +1803,37 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       }
       if (typeof rawSubs.srt_filename === 'string' && rawSubs.srt_filename.trim()) {
         setSrtFilename(rawSubs.srt_filename.trim());
+      }
+    }
+
+    // Маппинг shorts_config / shorts_factory / tab_1_montage
+    const rawShortsObj =
+      (raw.shorts_factory && typeof raw.shorts_factory === 'object'
+        ? (raw.shorts_factory as Record<string, unknown>)
+        : undefined) ||
+      (raw.shorts_config && typeof raw.shorts_config === 'object'
+        ? (raw.shorts_config as Record<string, unknown>)
+        : undefined);
+    if (rawShortsObj) {
+      if (typeof rawShortsObj.enabled === 'boolean') {
+        setShortsAutoSliceEnabled(rawShortsObj.enabled);
+      }
+      const rawCount = Number(rawShortsObj.shorts_count ?? rawShortsObj.count);
+      if (rawCount === 2 || rawCount === 3) {
+        setShortsSliceCount(rawCount);
+      }
+      const importedHooks = Array.isArray(rawShortsObj.hook_texts)
+        ? rawShortsObj.hook_texts.map(item => String(item ?? '').trim())
+        : [];
+      const fallbackSingleHook = String(
+        rawShortsObj.hook_text || rawShortsObj.hook_text_en || ''
+      ).trim();
+      if (importedHooks.length > 0 || fallbackSingleHook) {
+        setShortsHookTexts(prev => [
+          importedHooks[0] || fallbackSingleHook || prev[0],
+          importedHooks[1] || prev[1],
+          importedHooks[2] || prev[2]
+        ]);
       }
     }
 
@@ -2555,16 +2600,36 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             : '',
         ffmpeg_filter: burnInSrtEnabled ? burnInFfmpegFilter : ''
       },
-      shorts_config: {
-        enabled: shortsAutoSliceEnabled,
-        count: shortsSliceCount,
-        aspect_ratio: '9:16',
-        resolution: '1080x1920',
-        crop_mode: 'center',
-        hook_text_en: shortsHookTextEn.trim() || 'WAIT FOR THE 14TH SECOND...',
-        output_dir: './output/shorts/',
-        upload_to_gdrive: true
-      },
+      shorts_config: (() => {
+        const activeHookTexts = shortsHookTexts
+          .slice(0, shortsSliceCount)
+          .map((txt, i) => txt.trim() || DEFAULT_SHORTS_HOOKS[i]);
+        const primaryHook = activeHookTexts[0] || DEFAULT_SHORTS_HOOKS[0];
+        return {
+          enabled: shortsAutoSliceEnabled,
+          count: shortsSliceCount,
+          shorts_count: shortsSliceCount,
+          aspect_ratio: '9:16',
+          resolution: '1080x1920',
+          crop_mode: 'center',
+          hook_texts: activeHookTexts,
+          hook_text: primaryHook,
+          hook_text_en: primaryHook,
+          output_dir: './output/shorts/',
+          upload_to_gdrive: true
+        };
+      })(),
+      shorts_factory: (() => {
+        const activeHookTexts = shortsHookTexts
+          .slice(0, shortsSliceCount)
+          .map((txt, i) => txt.trim() || DEFAULT_SHORTS_HOOKS[i]);
+        return {
+          enabled: shortsAutoSliceEnabled,
+          shorts_count: shortsSliceCount,
+          hook_texts: activeHookTexts,
+          hook_text: activeHookTexts[0] || DEFAULT_SHORTS_HOOKS[0]
+        };
+      })(),
       ...(shortsExportConfig ? { shorts_export: shortsExportConfig } : {}),
       ...(telegramBotToken && telegramChatId
         ? {
@@ -2650,7 +2715,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       burnInFfmpegFilter,
       shortsAutoSliceEnabled,
       shortsSliceCount,
-      shortsHookTextEn,
+      shortsHookTexts,
       shortsExportConfig,
       telegramBotToken,
       telegramChatId,
@@ -2847,7 +2912,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       ...(masterAudio.file_name.trim() ? { master_audio: fullManifest.master_audio } : {}),
       subtitles: compactSubtitles,
       ...(fullManifest.subtitles_export ? { subtitles_export: fullManifest.subtitles_export } : {}),
-      ...(shortsAutoSliceEnabled ? { shorts_config: fullManifest.shorts_config } : {}),
+      ...(shortsAutoSliceEnabled
+        ? {
+            shorts_config: fullManifest.shorts_config,
+            shorts_factory: fullManifest.shorts_factory
+          }
+        : {}),
       ...(fullManifest.telegram_notifications
         ? { telegram_notifications: fullManifest.telegram_notifications }
         : {}),
@@ -4089,12 +4159,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           {/* 2. АВТО-НАРЕЗКА SHORTS (9:16 • 1080x1920 • ./output/shorts/) */}
-          <div className="bg-[#0b0f17] border border-amber-500/35 rounded-2xl p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+          <div className="bg-[#0b0f19]/90 backdrop-blur-md border border-[rgba(255,255,255,0.08)] rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(255,255,255,0.08)] pb-2.5">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                  Авто-нарезка Shorts (9:16 • 1080×1920 • Центрированный кроп)
+                  ✨ Авто-нарезка Shorts (9:16 • 1080×1920 • Центрированный кроп)
                 </h3>
               </div>
               <span className="text-[10px] font-mono bg-amber-500/15 border border-amber-400/30 text-amber-300 px-2 py-0.5 rounded">
@@ -4102,7 +4172,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </span>
             </div>
 
-            <label className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-800 hover:border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-amber-200 cursor-pointer select-none transition">
+            <label className="flex items-center gap-2.5 bg-[#111827]/85 border border-[rgba(255,255,255,0.08)] hover:border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-amber-200 cursor-pointer select-none transition">
               <input
                 type="checkbox"
                 checked={shortsAutoSliceEnabled}
@@ -4112,7 +4182,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               <span>Сгенерировать 2–3 вирусных Shorts (9:16) из лучших сцен</span>
             </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <div className="space-y-2.5 text-xs">
               <div>
                 <label className="text-[10px] text-slate-400 uppercase block mb-1">
                   Количество Shorts:
@@ -4120,29 +4190,60 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <select
                   value={shortsSliceCount}
                   onChange={e => setShortsSliceCount(Number(e.target.value) as 2 | 3)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
+                  className="w-full sm:w-64 bg-[#111827] border border-[rgba(255,255,255,0.08)] focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 outline-none"
                 >
                   <option value={2}>2 вирусных клипа (9:16)</option>
                   <option value={3}>3 вирусных клипа (9:16)</option>
                 </select>
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="text-[10px] text-slate-400 uppercase block mb-1">
-                  Текстовый хук на английском (Hook Text Overlay):
-                </label>
-                <input
-                  type="text"
-                  value={shortsHookTextEn}
-                  onChange={e => setShortsHookTextEn(e.target.value)}
-                  placeholder="WAIT FOR THE 14TH SECOND..."
-                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none"
-                />
+              <div className="space-y-2">
+                {(
+                  [
+                    {
+                      idx: 0,
+                      label: 'ХУК #1 (SHORT 01 — НАЧАЛО / ИНТРИГА):',
+                      placeholder: 'WAIT FOR THE 14TH SECOND...'
+                    },
+                    {
+                      idx: 1,
+                      label: 'ХУК #2 (SHORT 02 — КУЛЬМИНАЦИЯ):',
+                      placeholder: 'NOBODY COULD EXPLAIN THIS...'
+                    },
+                    {
+                      idx: 2,
+                      label: 'ХУК #3 (SHORT 03 — РАЗГАДКА / ФИНАЛ):',
+                      placeholder: 'THE TRUTH WAS BURIED HERE...'
+                    }
+                  ] as const
+                )
+                  .slice(0, shortsSliceCount)
+                  .map(hookMeta => (
+                    <div key={hookMeta.idx}>
+                      <label className="text-[10px] text-slate-400 uppercase block mb-1">
+                        {hookMeta.label}
+                      </label>
+                      <input
+                        type="text"
+                        value={shortsHookTexts[hookMeta.idx]}
+                        onChange={e => {
+                          const nextVal = e.target.value;
+                          setShortsHookTexts(prev => {
+                            const updated: [string, string, string] = [prev[0], prev[1], prev[2]];
+                            updated[hookMeta.idx] = nextVal;
+                            return updated;
+                          });
+                        }}
+                        placeholder={hookMeta.placeholder}
+                        className="w-full bg-[#111827] border border-[rgba(255,255,255,0.08)] focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 outline-none"
+                      />
+                    </div>
+                  ))}
               </div>
             </div>
 
-            <div className="text-[11px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5">
-              FFmpeg: <code className="text-amber-300">crop=ih*9/16:ih,scale=1080:1920</code> + английский хук-титр → сохранение в <code className="text-emerald-300">./output/shorts/</code> и выгрузка в Google Drive.
+            <div className="text-[11px] font-mono text-slate-400 bg-[#0b0f19] border border-[rgba(255,255,255,0.08)] rounded-lg px-2.5 py-1.5">
+              FFmpeg: <code className="text-amber-300">crop=ih*9/16:ih,scale=1080:1920</code> + {shortsSliceCount} индивидуальных хук-титра → сохранение в <code className="text-emerald-300">./output/shorts/</code> и выгрузка в Google Drive.
             </div>
           </div>
         </div>
