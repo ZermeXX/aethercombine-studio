@@ -53,15 +53,101 @@ export const V21_XFADE_OPTIONS: Array<{ value: V21TransitionType; label: string 
   { value: 'cut', label: 'cut (0s)' }
 ];
 
+export const VOICEOVER_LEAD_IN_SEC = 0.2;
+export const VOICEOVER_SENTENCE_PAD_SEC = 0.35;
+
 export interface V21PipelineLocks {
   hardFrameLock: boolean;
   apadAtrimLock: boolean;
+  continuousVoiceMaster: boolean;
+  zeroSpeechOverlap: boolean;
   dynamicXfadeTransitions: boolean;
-  acrossfadeOffsetSync: boolean;
+  decoupledVideoXfadeOnly: boolean;
   autoMuteFlaggedClips: boolean;
   youtubeLoudnorm: boolean;
   integratedLufs: number;
   truePeakDbtp: number;
+  voiceoverLeadInSec: number;
+  voiceoverSentencePadSec: number;
+}
+
+export interface ContinuousSceneTiming {
+  index: number;
+  segStart: number;
+  voiceStart: number;
+  voiceEnd: number;
+  segEnd: number;
+  speechDuration: number;
+  pauseAfterSec: number;
+}
+
+export interface ContinuousTimingSceneInput {
+  duration?: number;
+  duration_sec?: number;
+  voiceover_duration_sec?: number;
+  voice_start?: number;
+  voice_end?: number;
+}
+
+/**
+ * Computes continuous cumulative voiceover timings [voiceStart, voiceEnd] with
+ * 200ms lead-in before Scene 01 and 350ms breathing pause after every sentence.
+ * Zero speech overlap, zero acrossfade.
+ */
+export function computeContinuousSceneTimings(
+  scenes: ContinuousTimingSceneInput[],
+  leadInSec = VOICEOVER_LEAD_IN_SEC,
+  padSec = VOICEOVER_SENTENCE_PAD_SEC
+): ContinuousSceneTiming[] {
+  const result: ContinuousSceneTiming[] = [];
+  let cursor = 0;
+
+  scenes.forEach((sc, idx) => {
+    const rawSceneDur = Math.max(0.5, Number(sc.duration_sec ?? sc.duration ?? 6) || 6);
+    const hasExplicitBounds =
+      typeof sc.voice_start === 'number' &&
+      typeof sc.voice_end === 'number' &&
+      sc.voice_end > sc.voice_start &&
+      sc.voice_start >= cursor - 0.001;
+
+    let segStart = cursor;
+    let voiceStart: number;
+    let voiceEnd: number;
+
+    if (hasExplicitBounds) {
+      voiceStart = Number(sc.voice_start);
+      voiceEnd = Number(sc.voice_end);
+      segStart = idx === 0 ? Math.max(0, voiceStart - leadInSec) : cursor;
+    } else {
+      const lead = idx === 0 ? leadInSec : 0;
+      const explicitVoiceDur =
+        typeof sc.voiceover_duration_sec === 'number' && sc.voiceover_duration_sec > 0
+          ? sc.voiceover_duration_sec
+          : undefined;
+      const speechDur =
+        explicitVoiceDur !== undefined
+          ? Math.max(0.4, explicitVoiceDur)
+          : Math.max(0.4, rawSceneDur - lead - padSec);
+
+      voiceStart = segStart + lead;
+      voiceEnd = voiceStart + speechDur;
+    }
+
+    const segEnd = Math.max(segStart + rawSceneDur, voiceEnd + padSec);
+    result.push({
+      index: idx,
+      segStart: Number(segStart.toFixed(3)),
+      voiceStart: Number(voiceStart.toFixed(3)),
+      voiceEnd: Number(voiceEnd.toFixed(3)),
+      segEnd: Number(segEnd.toFixed(3)),
+      speechDuration: Number((voiceEnd - voiceStart).toFixed(3)),
+      pauseAfterSec: padSec
+    });
+
+    cursor = segEnd;
+  });
+
+  return result;
 }
 
 export interface V21ArtPreviewConfig {
@@ -227,6 +313,9 @@ export interface SrtSceneLike {
   scene_index?: number;
   scene_id: string;
   duration: number;
+  voiceover_duration_sec?: number;
+  voice_start?: number;
+  voice_end?: number;
   text_overlay?: string;
   transition?: {
     type?: string;
@@ -239,26 +328,19 @@ export function buildSidecarSrtForLanguage(
   scenes: SrtSceneLike[],
   lang: V21SubtitleLang
 ): string {
+  const timings = computeContinuousSceneTimings(scenes);
   const blocks: string[] = [];
-  let cursor = 0;
   let cueNumber = 1;
 
   scenes.forEach((sc, idx) => {
-    const dur = Math.max(0.5, Number(sc.duration) || 6);
-    const transType = String(sc.transition?.type || 'cut').toLowerCase();
-    const isLast = idx === scenes.length - 1;
-    const overlap =
-      !isLast && transType !== 'cut' && transType !== 'none'
-        ? Math.min(dur * 0.45, Math.max(0, Number(sc.transition?.duration_sec) || 0))
-        : 0;
-
+    const t = timings[idx];
     const line =
       sc.subtitles?.[lang] ||
       sc.subtitles?.[lang.toLowerCase()] ||
       (lang === 'EN' ? sc.text_overlay || '' : '');
 
-    const startSec = cursor;
-    const endSec = Math.max(startSec + 0.5, cursor + dur - (isLast ? 0 : overlap * 0.5));
+    const startSec = t ? t.voiceStart : 0;
+    const endSec = t ? Math.max(startSec + 0.4, t.voiceEnd) : startSec + 4;
 
     if (line && line.trim()) {
       blocks.push(
@@ -266,12 +348,10 @@ export function buildSidecarSrtForLanguage(
       );
       cueNumber += 1;
     }
-
-    cursor += dur - overlap;
   });
 
   if (blocks.length === 0) {
-    return `1\n00:00:00,000 --> 00:00:04,500\n[${lang}] Subtitle track placeholder`;
+    return `1\n00:00:00,200 --> 00:00:04,500\n[${lang}] Subtitle track placeholder`;
   }
   return blocks.join('\n\n') + '\n';
 }
@@ -377,45 +457,30 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
       ''
   ).trim();
 
-  // Compute total duration from timeline[] or scenes[] (including 2.2-FINAL video_processing.transition_in)
-  let totalSec = 0;
-  timelineArr.forEach((scRaw, idx) => {
-    if (!scRaw || typeof scRaw !== 'object') return;
-    const sc = scRaw as Record<string, unknown>;
-    const dur = Number(sc.duration_sec ?? sc.duration ?? 6);
-    const safeDur = !isNaN(dur) && dur > 0 ? dur : 6;
-    const videoProc =
-      sc.video_processing && typeof sc.video_processing === 'object'
-        ? (sc.video_processing as Record<string, unknown>)
-        : undefined;
-    const rawTrans = videoProc?.transition_in ?? sc.transition ?? sc.slot_transition_out;
-    const tObj =
-      rawTrans && typeof rawTrans === 'object'
-        ? (rawTrans as Record<string, unknown>)
-        : undefined;
-    const tType = normalizeV21TransitionType(
-      typeof rawTrans === 'string' ? rawTrans : tObj?.type ?? tObj?.effect
-    );
-    const overlap =
-      idx < timelineArr.length - 1 && tType !== 'cut' && tType !== 'none'
-        ? Math.max(
-            0,
-            Number(
-              tObj?.duration_sec ??
-                tObj?.duration ??
-                sc.transition_duration ??
-                0.6
-            )
-          )
-        : 0;
-    totalSec += Math.max(0.5, safeDur - overlap * 0.5);
-  });
+  // Compute exact continuous voice-first timeline duration (zero overlap, 200ms lead-in + 350ms pause)
+  const continuousTimings = computeContinuousSceneTimings(
+    timelineArr
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+      .map(sc => ({
+        duration_sec: Number(sc.duration_sec ?? sc.duration ?? 6),
+        voiceover_duration_sec:
+          typeof sc.voiceover_duration_sec === 'number' ? sc.voiceover_duration_sec : undefined,
+        voice_start: typeof sc.voice_start === 'number' ? sc.voice_start : undefined,
+        voice_end: typeof sc.voice_end === 'number' ? sc.voice_end : undefined
+      }))
+  );
+  const totalSec =
+    continuousTimings.length > 0 ? continuousTimings[continuousTimings.length - 1].segEnd : 0;
 
-  // Tab 2 Ambient Loop enabled flag: false when explicitly disabled OR when narrative v2.1 timeline[] is loaded without timeline_slots
+  const isNarrativeProjectType =
+    String(raw.project_type || '').toLowerCase() === 'narrative_scenes_montage';
+  const hasLoopSlots = Array.isArray(raw.timeline_slots) && raw.timeline_slots.length > 0;
+
+  // Tab 2 Ambient Loop enabled flag: false when explicitly disabled OR when narrative montage manifest is loaded without timeline_slots
   let ambientLoopEnabled = true;
   if (typeof tab2Obj.enabled === 'boolean') {
     ambientLoopEnabled = tab2Obj.enabled;
-  } else if (hasTimelineArray && !Array.isArray(raw.timeline_slots)) {
+  } else if ((hasTimelineArray || isNarrativeProjectType) && !hasLoopSlots) {
     ambientLoopEnabled = false;
   }
 
@@ -449,6 +514,11 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
     (raw.audio_mastering && typeof raw.audio_mastering === 'object'
       ? (raw.audio_mastering as Record<string, unknown>)
       : {});
+
+  const antiDesyncObj =
+    raw.anti_desync_locks && typeof raw.anti_desync_locks === 'object'
+      ? (raw.anti_desync_locks as Record<string, unknown>)
+      : {};
 
   const integratedLufs =
     typeof loudnormObj.integrated_lufs === 'number'
@@ -533,21 +603,59 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
     ambientLoopEnabled,
     tab1Locks: {
       hardFrameLock:
-        typeof tab1Obj.hard_frame_lock === 'boolean' ? tab1Obj.hard_frame_lock : true,
+        typeof tab1Obj.hard_frame_lock === 'boolean'
+          ? tab1Obj.hard_frame_lock
+          : typeof antiDesyncObj.hard_frame_lock === 'boolean'
+          ? antiDesyncObj.hard_frame_lock
+          : true,
       apadAtrimLock:
-        typeof tab1Obj.apad_atrim_lock === 'boolean' ? tab1Obj.apad_atrim_lock : true,
+        typeof tab1Obj.apad_atrim_lock === 'boolean'
+          ? tab1Obj.apad_atrim_lock
+          : typeof antiDesyncObj.apad_atrim_padding === 'boolean'
+          ? antiDesyncObj.apad_atrim_padding
+          : true,
+      continuousVoiceMaster:
+        typeof tab1Obj.continuous_voice_master === 'boolean'
+          ? tab1Obj.continuous_voice_master
+          : typeof antiDesyncObj.continuous_voice_master === 'boolean'
+          ? antiDesyncObj.continuous_voice_master
+          : true,
+      zeroSpeechOverlap:
+        typeof tab1Obj.zero_speech_overlap === 'boolean'
+          ? tab1Obj.zero_speech_overlap
+          : typeof antiDesyncObj.zero_speech_overlap === 'boolean'
+          ? antiDesyncObj.zero_speech_overlap
+          : true,
       dynamicXfadeTransitions:
-        typeof tab1Obj.dynamic_xfade === 'boolean' ? tab1Obj.dynamic_xfade : true,
-      acrossfadeOffsetSync:
-        typeof tab1Obj.acrossfade_sync === 'boolean' ? tab1Obj.acrossfade_sync : true,
+        typeof tab1Obj.dynamic_xfade === 'boolean'
+          ? tab1Obj.dynamic_xfade
+          : typeof antiDesyncObj.dynamic_xfade_transitions === 'boolean'
+          ? antiDesyncObj.dynamic_xfade_transitions
+          : true,
+      decoupledVideoXfadeOnly:
+        typeof tab1Obj.decoupled_video_xfade_only === 'boolean'
+          ? tab1Obj.decoupled_video_xfade_only
+          : typeof antiDesyncObj.decoupled_video_xfade_only === 'boolean'
+          ? antiDesyncObj.decoupled_video_xfade_only
+          : true,
       autoMuteFlaggedClips:
         typeof tab1Obj.auto_mute_flagged_clips === 'boolean'
           ? tab1Obj.auto_mute_flagged_clips
+          : typeof antiDesyncObj.auto_mute_flagged_video_clips === 'boolean'
+          ? antiDesyncObj.auto_mute_flagged_video_clips
           : true,
       youtubeLoudnorm:
         typeof loudnormObj.enabled === 'boolean' ? loudnormObj.enabled : true,
       integratedLufs,
-      truePeakDbtp
+      truePeakDbtp,
+      voiceoverLeadInSec:
+        typeof tab1Obj.voiceover_lead_in_sec === 'number'
+          ? tab1Obj.voiceover_lead_in_sec
+          : VOICEOVER_LEAD_IN_SEC,
+      voiceoverSentencePadSec:
+        typeof tab1Obj.voiceover_sentence_pad_sec === 'number'
+          ? tab1Obj.voiceover_sentence_pad_sec
+          : VOICEOVER_SENTENCE_PAD_SEC
     },
     tab1Export: {
       videoCodec,
@@ -666,9 +774,10 @@ export function buildEnglishReleaseCardMarkdown(input: ReleaseCardExportInput): 
     ``,
     `## 3. RENDER SPECS & AUDIO PIPELINE`,
     `- **Master Encoding:** \`${input.renderSpecsSummary}\``,
-    `- **Anti-Desync Lock:** \`hard_frame_lock: true\` (\`apad\` / \`atrim\` exact duration padding, voiceover never time-stretched)`,
-    `- **Transitions:** Dynamic per-scene FFmpeg \`xfade\` with synchronized \`acrossfade\` offset compensation`,
-    `- **Loudness Mastering:** YouTube Normalized (\`-14.0 LUFS\`, \`-1.0 dBTP\`)`,
+    `- **Continuous Master Voiceover (Zero Overlap):** 48kHz stereo PCM, 200ms Scene 01 lead-in (\`adelay=200|200\`), 350ms post-sentence pause (\`apad=pad_dur=0.35\`), sequential \`concat\` (no voice crossfade)`,
+    `- **Decoupled Video Transitions:** Per-scene FFmpeg \`xfade\` applied strictly to video stream inside 350ms speech pauses with \`tpad=stop_mode=clone\``,
+    `- **Multi-Track Audio Mix:** 0.0 dB untouched voice + Ambient SFX (-22.0 dB default / -96 dB muted / -6.0 dB \`scene_33\`) + Music Bed (-26.0 dB, -6.0 dB / -12.0 dB sidechain ducking)`,
+    `- **Loudness Mastering:** YouTube Normalized (\`-14.0 LUFS\`, \`-1.0 dBTP\`, stereo AAC 320k 48kHz)`,
     `- **Sidecar Subtitles (\`burn_in_video: false\`):** ${srtFilesList}`,
     ...(input.endScreenSafeZone
       ? [`- **End Screen Safe-Zone Guide:** \`${input.endScreenSafeZone}\``]
@@ -696,14 +805,14 @@ export function buildEnglishReleaseCardMarkdown(input: ReleaseCardExportInput): 
     `- **Visual Aesthetic:** ${input.dominantStyle}`,
     `- **Camera Movement Vectors:** \`${input.cameraVectors || 'zoom_in, pan_right'}\``,
     `- **Average Scene Pacing:** \`${input.averageSceneSec} sec/scene\``,
-    `- **9:16 Auto-Shorts Config:** \`${input.shortsEnabled ? 'ENABLED' : 'DISABLED'}\` (${input.shortsSegmentsCount} segments)`,
+    `- **9:16 Auto-Shorts Config:** \`${input.shortsEnabled ? 'ENABLED' : 'DISABLED'}\` (${input.shortsSegmentsCount} voice-boundary-locked segments in \`./output/shorts/\`)`,
     ``,
     `## 8. PRE-UPLOAD PRODUCTION CHECKLIST`,
-    `- [x] Primary release title verified and populated from manifest`,
+    `- [x] Primary release title verified and populated from manifest \`video_title\``,
     `- [x] Chapter timestamps exported to \`output_chapters.txt\` (\`00:00\` start verified)`,
     `- [x] Separate multi-language \`.srt\` sidecar files generated (${langsDisplay})`,
-    `- [x] Strict frame & audio lock enabled (\`hard_frame_lock\` + \`apad/atrim\`)`,
-    `- [x] 4K A/B/C thumbnails verified against End Screen safe zone`,
+    `- [x] Continuous Voice Master (Zero Overlap) + Decoupled Video-Only \`xfade\` enabled`,
+    `- [x] 4K A/B/C thumbnails verified against End Screen safe zone (\`${input.endScreenSafeZone || '05:14-05:24'}\`)`,
     ``
   ].join('\n');
 }

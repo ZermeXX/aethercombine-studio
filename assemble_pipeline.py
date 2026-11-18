@@ -33,10 +33,56 @@ def is_valid_cached_slot(slot_path: str) -> bool:
     return os.path.exists(slot_path) and os.path.getsize(slot_path) > 1024
 
 
-def generate_shorts_factory(cfg: dict, source_video: str) -> None:
-    shorts_factory = cfg.get("shorts_factory") or {}
+def _snap_range_to_voice_bounds(start_sec: float, target_dur: float, timeline_map: list[dict]) -> tuple[float, float]:
+    """Snap [start_sec, start_sec + target_dur] to continuous scene pause boundaries so speech is never clipped."""
+    if not timeline_map:
+        return round(max(0.0, start_sec), 3), round(max(5.0, target_dur), 3)
+
+    best_idx = 0
+    best_dist = float("inf")
+    for idx, entry in enumerate(timeline_map):
+        vs = float(entry.get("voice_start", entry.get("seg_start", 0.0)))
+        dist = abs(vs - start_sec)
+        if dist < best_dist:
+            best_dist = dist
+            best_idx = idx
+
+    first = timeline_map[best_idx]
+    seg_start = float(first.get("seg_start", first.get("voice_start", 0.0)))
+    voice_end = float(first.get("voice_end", seg_start + float(first.get("clip_dur", target_dur))))
+    seg_end = float(first.get("seg_end", voice_end + 0.35))
+    if best_idx < len(timeline_map) - 1:
+        cut_end = (voice_end + seg_end) * 0.5
+    else:
+        cut_end = seg_end
+
+    end_idx = best_idx
+    while (cut_end - seg_start) < max(12.0, target_dur * 0.8) and end_idx + 1 < len(timeline_map):
+        end_idx += 1
+        nxt = timeline_map[end_idx]
+        nxt_ve = float(nxt.get("voice_end", cut_end))
+        nxt_se = float(nxt.get("seg_end", nxt_ve + 0.35))
+        cand_end = ((nxt_ve + nxt_se) * 0.5) if end_idx < len(timeline_map) - 1 else nxt_se
+        if (cand_end - seg_start) > 58.0 and (cut_end - seg_start) >= 15.0:
+            break
+        cut_end = cand_end
+
+    return round(max(0.0, seg_start), 3), round(max(5.0, cut_end - seg_start), 3)
+
+
+def generate_shorts_factory(cfg: dict, source_video: str, timeline_map: list[dict] | None = None) -> None:
+    shorts_factory = cfg.get("shorts_factory") or cfg.get("shorts_config") or {}
     if not shorts_factory.get("enabled") or not os.path.exists(source_video):
         return
+
+    if timeline_map is None and os.path.exists("./output/voice_timeline_map.json"):
+        try:
+            with open("./output/voice_timeline_map.json", "r", encoding="utf-8") as mf:
+                loaded_map = json.load(mf)
+            if isinstance(loaded_map, list):
+                timeline_map = loaded_map
+        except Exception:
+            timeline_map = None
 
     clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
     slots = cfg.get("timeline_slots") or cfg.get("slots") or []
@@ -48,30 +94,39 @@ def generate_shorts_factory(cfg: dict, source_video: str) -> None:
     if not insert_timestamps:
         insert_timestamps = [0.0, 60.0, 120.0, 180.0]
 
-    os.makedirs("./output/Shorts", exist_ok=True)
-    for idx, start_sec in enumerate(insert_timestamps[:4]):
-        out_short = f"./output/Shorts/short_{idx + 1:02d}_1080x1920.mp4"
+    os.makedirs("./output/shorts", exist_ok=True)
+    for idx, raw_start_sec in enumerate(insert_timestamps[:4]):
+        start_sec, safe_dur = _snap_range_to_voice_bounds(raw_start_sec, float(clip_dur), timeline_map or [])
+        out_short = f"./output/shorts/short_{idx + 1:02d}_1080x1920.mp4"
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(start_sec),
             "-i", source_video,
-            "-t", str(clip_dur),
+            "-t", str(safe_dur),
             "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-movflags", "+faststart",
             out_short,
         ]
-        print(f"[SHORTS FACTORY] Generating 9:16 Short #{idx + 1} @ {start_sec}s ({clip_dur}s)...")
+        print(f"[SHORTS FACTORY] Generating voice-locked 9:16 Short #{idx + 1} @ {start_sec}s ({safe_dur}s)...")
         subprocess.run(cmd, check=True)
 
     subprocess.run(
-        ["rclone", "copy", "./output/Shorts", "gdrive:AetherFlow_Output/Shorts/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
+        ["rclone", "copy", "./output/shorts", "gdrive:AetherFlow_Output/shorts/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
         check=True,
     )
 
 
 def run_pipeline(cfg: dict) -> None:
+    # Delegate narrative scenes montage manifests (v2.2-FINAL) to assemble_scenes.py
+    narrative_list = cfg.get("timeline") or cfg.get("scenes") or []
+    if narrative_list and not (cfg.get("timeline_slots") or cfg.get("slots")):
+        import assemble_scenes
+        print("[PIPELINE] Narrative montage manifest detected -> delegating to assemble_scenes.run_narrative_pipeline()...")
+        assemble_scenes.run_narrative_pipeline(cfg)
+        return
+
     exp = cfg.get("export_settings") or {}
     res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
     draft_mode = bool(exp.get("draft_mode") or res == "720p")
@@ -81,7 +136,7 @@ def run_pipeline(cfg: dict) -> None:
         or ("ultrafast" if draft_mode else ("veryfast" if v_codec == "libx264" else "medium"))
     )
     fps = int(exp.get("fps") or cfg.get("fps") or 24)
-    crf = str(exp.get("crf") or cfg.get("crf") or ("20" if v_codec == "libx264" else "22"))
+    crf = str(exp.get("crf") or cfg.get("crf") or ("18" if v_codec == "libx264" else "22"))
     a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps') or 320)}k"
     folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 

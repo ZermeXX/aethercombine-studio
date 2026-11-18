@@ -2197,16 +2197,16 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         </div>
       </div>
 
-      {/* v2.1 MULTI-LANGUAGE SIDECAR SRT GENERATOR & STRICT SCENE DURATION LOCK */}
+      {/* v2.2-FINAL MULTI-LANGUAGE SIDECAR SRT GENERATOR & STRICT SCENE SYNC */}
       <div className="rounded-2xl bg-[#0b0f19]/95 border border-white/[0.08] backdrop-blur-md p-4 sm:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
           <div>
             <h3 className="text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
               <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>Multi-Language Sidecar SRT Generator &amp; Strict Scene Duration Lock (v2.1)</span>
+              <span>Multi-Language Sidecar SRT Export &amp; Strict Scene Sync (v2.2-FINAL)</span>
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Раздельный экспорт субтитров <code className="text-cyan-300">&lt;project_name&gt;_&lt;LANG&gt;.srt</code> из <code className="text-amber-300">timeline[].subtitles</code> (без вшивания в кадр)
+              Раздельный экспорт субтитров <code className="text-cyan-300">&lt;project_name&gt;_&lt;LANG&gt;.srt</code> строго по <code className="text-emerald-300">[voice_start → voice_end]</code> (Zero Overlap, без вшивания в кадр)
             </p>
           </div>
           <span className="text-[10.5px] font-mono bg-cyan-500/15 border border-cyan-400/35 text-cyan-200 px-2.5 py-1 rounded-lg">

@@ -193,40 +193,24 @@ export const SEO_PRESETS_BY_TONE: Record<
   }
 > = {
   'Dark Mystery': {
-    titles: [
-      'The 1974 Alpine Tape They Hid for 50 Years',
-      'Evacuated in 24 Hours, Yet It Broadcast for 21 Days',
-      'Why the Night Shift Signed a 50-Year Silence Pact'
-    ],
-    desc: `In 1974, a remote high-altitude Alpine weather station was abruptly evacuated in under twenty-four hours after recording an unexplained low-frequency acoustic signal. While declassified official reports blamed a sudden mountain avalanche, every telemetry sensor inside the sealed, unpowered bunker continued broadcasting a structured pulse for three straight weeks.\n\nIn this 4K investigative documentary, we examine the original magnetic tape logs, the missing forty-minute communication window, and the fifty-year non-disclosure agreement signed by the surviving night shift engineers. Using forensic audio analysis and archival blueprints, we reconstruct what actually happened behind the welded steel doors of Outpost 7.\n\nWhether you enjoy dark historical mysteries, unsolved Cold War anomalies, or deep-dive investigative storytelling, this documentary uncovers the evidence that authorities tried to erase from history. Watch until the final act to hear the unfiltered fourteen-second recording that started it all.`,
-    tags: 'dark mystery, classified files, 1974 alpine tape, unexplained signal, abandoned station, cold war mystery, documentary 4k, investigative doc, unsolved history, audio anomaly, ghost broadcast, secret bunker, reel to reel tape, declassified archive, true mystery story, snowbound outpost, acoustic phenomenon, mystery documentary, deep dive history, lost recording, 50 year nda, vanished crew, forensic investigation, cinematic doc, eerie history, numbers station, arctic anomaly, dark history, mysterious broadcast, aether studio'
+    titles: ['', '', ''],
+    desc: `In this 4K investigative documentary, we examine the primary source logs, the missing communication window, and the non-disclosure agreements surrounding the event. Using forensic audio analysis and archival blueprints, we trace every verified clue step by step.\n\nWhether you enjoy dark historical mysteries, unexplained anomalies, or deep-dive investigative storytelling, this film reconstructs the timeline in crisp 4K Ultra HD with continuous unbroken narration.`,
+    tags: 'dark mystery, documentary 4k, investigative doc, unsolved history, audio anomaly, declassified archive, true mystery story, forensic investigation, cinematic doc, eerie history, unexplained signal, aether studio'
   },
   'Cozy Ambient': {
-    titles: [
-      'Heavy Arctic Blizzard Outside Warm Cabin (4K Loop)',
-      'Frozen Storm Outside, Yet 100% Warm Peace Inside',
-      '3 Hours of Deep Winter Wind & Crackling Fireplace'
-    ],
-    desc: `Immerse yourself in an ultra-detailed 4K ambient soundscape where a relentless high-altitude snowstorm meets the warm, comforting glow of a secluded mountain cabin. Mastered at -16 LUFS with seamless 90-second act transitions, this multi-hour audiovisual experience is engineered for deep sleep, uninterrupted study sessions, reading, and stress relief.\n\nEvery visual act blends organic snowfall physics with natural low-frequency wind resonance and soft hearth embers—free from jarring cuts or sudden volume spikes. Put on your headphones, dim the room lights, and let the peaceful contrast between the freezing arctic blizzard outside and the safe shelter inside calm your mind.\n\nSubscribe for weekly 4K Ultra HD ambient loops, dark screen sleep soundscapes, and cinematic atmospheric environments designed to help you focus, relax, and recharge every single night.`,
-    tags: 'cozy ambient 4k, snowstorm ambience, winter blizzard sounds, howling wind 4k, deep sleep ambience, study ambience, cozy cabin storm, crackling fireplace, arctic wind soundscape, seamless loop 4k, relaxation video, white noise sleep, atmospheric soundscape, heavy snowstorm, insomnia relief, meditation nature, binaural wind, ultra hd 4k loop, ambient drone, deep focus audio, storm outside window, night blizzard 4k, peaceful winter, sleep aid 4k, ambient study, nature soundscape, cozy rain snow, dark screen sleep, cabin ambience, 4k ambience'
+    titles: ['', '', ''],
+    desc: `Immerse yourself in an ultra-detailed 4K atmospheric experience engineered for deep sleep, uninterrupted study sessions, reading, and stress relief.\n\nEvery visual transition flows cleanly in 4K 24fps Ultra HD with normalized broadcast audio and zero sudden volume spikes.`,
+    tags: 'cozy ambient 4k, deep sleep ambience, study ambience, atmospheric soundscape, 4k loop, relaxation video, deep focus audio, peaceful winter, sleep aid 4k, ultra hd 4k'
   },
   'Historical Doc': {
-    titles: [
-      'Inside the Classified 1974 Alpine Station Dossier',
-      'Official Logs Said Avalanche, Telemetry Proved Otherwise',
-      'The Forgotten Engineers Who Locked Outpost 7 Forever'
-    ],
-    desc: `Declassified after fifty years, the archival records of the 1974 high-altitude weather station incident reveal one of the most compelling technological mysteries of the twentieth century. Within twenty-four hours of logging a persistent sub-audible frequency, the entire research facility was shuttered and placed under strict military quarantine.\n\nIn this historical documentary, we cross-reference primary source duty rosters, analog oscilloscope transcripts, and geopolitical records to understand why an ordinary meteorological outpost required a half-century secrecy mandate. Step by step, we trace the timeline from the first anomalous signal at 03:17 AM to the final automated transmission twenty-one days later.\n\nIdeal for viewers who appreciate rigorous historical documentaries, archival history, Cold War engineering, and fact-based investigative journalism in crisp 4K Ultra HD resolution.`,
-    tags: 'historical documentary, cold war history, declassified history, 1974 archive, history documentary 4k, engineering mystery, archival footage doc, military history, scientific expedition, forgotten history, twentieth century history, investigative history, historical enigma, radar station history, alpine expedition, secret research facility, documentary film, historical analysis, primary sources, cold war bunker, analog telemetry, history channel style, deep history dive, unsolved historical event, meteorological station, classified dossier, history buff, true history, geopolitical history, 4k doc'
+    titles: ['', '', ''],
+    desc: `Drawing on primary archival records, duty rosters, and historical schematics, this 4K documentary traces the complete chronological timeline from the initial log entry to the final verified transmission.\n\nIdeal for viewers who appreciate rigorous historical documentaries, engineering history, and fact-based investigative journalism in crisp 4K Ultra HD resolution.`,
+    tags: 'historical documentary, declassified history, archive, history documentary 4k, engineering mystery, archival footage doc, scientific expedition, documentary film, historical analysis, primary sources, 4k doc'
   },
   'Cinematic Drama': {
-    titles: [
-      '14 Seconds on Tape That Changed Everything',
-      'The Power Was Cut, But the Microphone Stayed Live',
-      'They Had 24 Hours to Vanish & Never Speak Again'
-    ],
-    desc: `At 03:17 AM, during the worst mountain blizzard of the decade, a single red indicator lamp began blinking inside a locked communications room. What the duty officer recorded on that magnetic reel forced an immediate evacuation at dawn—and bound every witness to fifty years of silence.\n\nShot and edited with cinematic 4K pacing, dramatic sound design, and frame-by-frame tension, this film reconstructs the final hours inside the station before the steel doors were welded shut. Every clue leads closer to the forty-minute gap that investigators were ordered never to mention.\n\nExperience gripping cinematic storytelling, atmospheric visuals, and relentless suspense as we uncover the human drama behind the sealed tape that refused to stay buried.`,
-    tags: 'cinematic drama, suspense documentary, thriller storytelling, 4k short film, dramatic true story, mystery thriller, atmospheric cinema, dark storytelling, gripping documentary, untold story, 24 hours to evacuate, classified tape drama, night shift story, bunker mystery, cinematic investigation, high tension doc, true suspense, emotional documentary, film look 4k, dramatic reconstruction, voiceover story, immersive documentary, mystery cinema, cold war drama, survival story, locked room mystery, investigative drama, plot twist doc, deep storytelling, aether cinema'
+    titles: ['', '', ''],
+    desc: `Edited with cinematic 4K 24fps pacing, layered sound design, and continuous unbroken voiceover narration, this short film reconstructs the pivotal hours behind the story.\n\nExperience atmospheric visuals and immersive storytelling from the opening frame to the closing end screen.`,
+    tags: 'cinematic drama, suspense documentary, thriller storytelling, 4k short film, dramatic true story, atmospheric cinema, gripping documentary, cinematic investigation, voiceover story, 4k film'
   }
 };
 
@@ -304,17 +288,17 @@ export function buildEnglishYoutubeSeoBlock(
     if (!trimmed) return fallbackText;
     if (!CYRILLIC_RE.test(trimmed)) return trimmed;
     const stripped = trimmed.replace(/[а-яёА-ЯЁ]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return stripped.length >= 12 ? stripped : fallbackText;
+    return stripped.length >= 6 ? stripped : fallbackText;
   };
 
   const englishProjectHint =
     fallbackProjectName && !CYRILLIC_RE.test(fallbackProjectName.trim())
       ? fallbackProjectName.trim()
-      : '';
+      : 'Aether Documentary 4K';
 
   const title = sanitizeEnglish(
     selectedVariant?.title || englishProjectHint,
-    preset.titles[0]
+    englishProjectHint
   ).slice(0, 100);
 
   const description = sanitizeEnglish(seo.description, preset.desc);

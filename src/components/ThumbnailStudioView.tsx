@@ -991,6 +991,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   onNotify
 }) => {
   const [showEndScreenSafeZone, setShowEndScreenSafeZone] = useState<boolean>(true);
+  useEffect(() => {
+    setShowEndScreenSafeZone(true);
+  }, [manifestThumbnailSlots?.A, manifestThumbnailSlots?.B, manifestThumbnailSlots?.C, endScreenSafeZone]);
   const slotFilenames: Record<ThumbnailSlotId, string> = {
     A: manifestThumbnailSlots?.A || 'thumbnail_4k_3840x2160_A.jpg',
     B: manifestThumbnailSlots?.B || 'thumbnail_4k_3840x2160_B.jpg',

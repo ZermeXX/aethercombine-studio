@@ -48,6 +48,9 @@ import {
 import {
   V21PipelineLocks,
   V21_XFADE_OPTIONS,
+  VOICEOVER_LEAD_IN_SEC,
+  VOICEOVER_SENTENCE_PAD_SEC,
+  computeContinuousSceneTimings,
   normalizeV21TransitionType,
   normalizeSceneSubtitlesMap,
   parseV21ManifestObject
@@ -108,6 +111,9 @@ export interface NarrativeSceneItem {
   };
   start_time: string | number;
   duration: number;
+  voiceover_duration_sec?: number;
+  voice_start?: number;
+  voice_end?: number;
   camera_movement?: CameraVectorType;
   visual_style?: string;
   needs_revision?: boolean;
@@ -171,6 +177,9 @@ export interface ExportedNarrativeSceneItem {
   image_reference?: string;
   start_time: string | number;
   duration: number;
+  voiceover_duration_sec?: number;
+  voice_start?: number;
+  voice_end?: number;
   camera_movement?: CameraVectorType;
   visual_style?: string;
   transition: string;
@@ -310,9 +319,14 @@ export interface NarrativeMontageManifest {
     hard_frame_lock: boolean;
     apad_atrim_padding: boolean;
     never_stretch_voiceover: boolean;
+    continuous_voice_master: boolean;
+    zero_speech_overlap: boolean;
+    decoupled_video_xfade_only: boolean;
     dynamic_xfade_transitions: boolean;
     acrossfade_offset_compensation: boolean;
     auto_mute_flagged_video_clips: boolean;
+    voiceover_lead_in_sec: number;
+    voiceover_sentence_pad_sec: number;
     loudnorm: {
       enabled: boolean;
       integrated_lufs: number;
@@ -430,9 +444,16 @@ const parseTimecodeToSec = (val: unknown, fallbackSec: number): number => {
   return fallbackSec;
 };
 
+const formatMmSsTenths = (sec: number): string => {
+  const safe = Math.max(0, Number(sec) || 0);
+  const mins = Math.floor(safe / 60);
+  const secs = (safe % 60).toFixed(1).padStart(4, '0');
+  return `${String(mins).padStart(2, '0')}:${secs}`;
+};
+
 // Параметры виртуализации компактной строчной сетки (для 100–200+ сцен без перегрузки DOM)
-const ROW_HEIGHT = 50;
-const VIEWPORT_HEIGHT = 500;
+const ROW_HEIGHT = 60;
+const VIEWPORT_HEIGHT = 540;
 const OVERSCAN_ROWS = 8;
 
 const CAMERA_VECTORS_ORDER: CameraVectorType[] = ['zoom_in', 'pan_right', 'zoom_out', 'pan_left'];
@@ -495,6 +516,9 @@ interface DraggableSceneRowProps {
   sc: NarrativeSceneItem;
   idx: number;
   fps: number;
+  voiceStartSec: number;
+  voiceEndSec: number;
+  zeroSpeechOverlap: boolean;
   canDrag: boolean;
   updateScene: (idx: number, patch: Partial<NarrativeSceneItem>) => void;
   removeScene: (idx: number) => void;
@@ -507,6 +531,9 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   sc,
   idx,
   fps,
+  voiceStartSec,
+  voiceEndSec,
+  zeroSpeechOverlap,
   canDrag,
   updateScene,
   removeScene,
@@ -520,6 +547,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   const isMuted = Boolean(sc.video_ambient_mute);
   const hasSfx = Boolean(sc.sfx || sc.sfx_gain_db !== undefined);
   const sfxDbLabel = typeof sc.sfx_gain_db === 'number' ? sc.sfx_gain_db.toFixed(1) : '-6.0';
+  const voiceSpanLabel = `${formatMmSsTenths(voiceStartSec)} → ${formatMmSsTenths(voiceEndSec)}`;
 
   const rowClassName = `grid grid-cols-12 gap-2 items-center px-3 border-b border-slate-800/70 text-xs transition-colors ${
     isFlagged
@@ -617,35 +645,53 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         )}
       </div>
 
-      {/* 3. Старт (start_time), длительность (duration) и точный кадр-бэйдж (frames) */}
-      <div className="col-span-2 flex items-center gap-1 tabular-nums">
-        <input
-          type="text"
-          value={String(sc.start_time)}
-          onChange={e => updateScene(idx, { start_time: e.target.value })}
-          className="w-[40%] bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10.5px] font-mono text-sky-300 text-center outline-none"
-          title="start_time"
-        />
-        <input
-          type="number"
-          min={0.5}
-          max={600}
-          step={0.5}
-          value={sc.duration}
-          onChange={e =>
-            updateScene(idx, {
-              duration: Math.max(0.5, Number(e.target.value) || 6)
-            })
-          }
-          className="w-[34%] bg-slate-900 border border-slate-700/80 rounded px-1 py-1 text-[10.5px] font-mono text-emerald-400 font-bold text-center outline-none"
-          title="duration (сек)"
-        />
-        <span
-          title={`Точный кадр-лок @ ${fps} fps (${sc.duration}s × ${fps} = ${frameCount}f)`}
-          className="w-[26%] text-center bg-indigo-500/15 border border-indigo-400/35 text-indigo-200 rounded px-1 py-1 text-[9.5px] font-mono font-bold truncate"
-        >
-          {frameCount}f
-        </span>
+      {/* 3. Голосовой интервал (voice_start -> voice_end), длительность (duration), frames и Zero Speech Overlap */}
+      <div className="col-span-2 flex flex-col justify-center gap-0.5 tabular-nums min-w-0">
+        <div className="flex items-center gap-1">
+          <input
+            type="text"
+            value={String(sc.start_time)}
+            onChange={e => updateScene(idx, { start_time: e.target.value })}
+            className="w-[38%] bg-slate-900 border border-slate-700/80 rounded px-1 py-0.5 text-[10px] font-mono text-sky-300 text-center outline-none"
+            title="start_time"
+          />
+          <input
+            type="number"
+            min={0.5}
+            max={600}
+            step={0.5}
+            value={sc.duration}
+            onChange={e =>
+              updateScene(idx, {
+                duration: Math.max(0.5, Number(e.target.value) || 6)
+              })
+            }
+            className="w-[34%] bg-slate-900 border border-slate-700/80 rounded px-1 py-0.5 text-[10px] font-mono text-emerald-400 font-bold text-center outline-none"
+            title="duration (сек)"
+          />
+          <span
+            title={`Точный кадр-лок @ ${fps} fps (${sc.duration}s × ${fps} = ${frameCount}f)`}
+            className="w-[28%] text-center bg-indigo-500/15 border border-indigo-400/35 text-indigo-200 rounded px-1 py-0.5 text-[9px] font-mono font-bold truncate"
+          >
+            {frameCount}f
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-1 text-[9px] font-mono leading-none">
+          <span
+            className="text-cyan-300/90 truncate"
+            title={`Continuous voice_start → voice_end: ${voiceSpanLabel}`}
+          >
+            🎙 {voiceSpanLabel}
+          </span>
+          {zeroSpeechOverlap && (
+            <span
+              className="shrink-0 px-1 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 font-semibold"
+              title="Voiceover concatenated sequentially with 350ms pause and zero overlap"
+            >
+              Zero Speech Overlap
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 4. Динамический переход FFmpeg (xfade) + Статус Mute / SFX + Титр */}
@@ -1149,16 +1195,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     audio_bitrate_kbps: 320
   });
 
-  // Авто-блокировки анти-рассинхрона и аудио-нормализации v2.1
+  // Авто-блокировки непрерывного голоса, декупленного FFmpeg xfade и аудио-нормализации v2.2-FINAL
   const [v21Locks, setV21Locks] = useState<V21PipelineLocks>({
     hardFrameLock: true,
     apadAtrimLock: true,
+    continuousVoiceMaster: true,
+    zeroSpeechOverlap: true,
     dynamicXfadeTransitions: true,
-    acrossfadeOffsetSync: true,
+    decoupledVideoXfadeOnly: true,
     autoMuteFlaggedClips: true,
     youtubeLoudnorm: true,
     integratedLufs: -14.0,
-    truePeakDbtp: -1.0
+    truePeakDbtp: -1.0,
+    voiceoverLeadInSec: VOICEOVER_LEAD_IN_SEC,
+    voiceoverSentencePadSec: VOICEOVER_SENTENCE_PAD_SEC
   });
 
   const [importedScenarioName, setImportedScenarioName] = useState<string>('');
@@ -1167,16 +1217,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const scenarioJsonInputRef = useRef<HTMLInputElement | null>(null);
   const masterAudioInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Пересчет start_time по цепочке длительностей сцен (с сохранением стабильного WeakMap-ключа строки)
+  // Пересчет start_time по непрерывной голосовой шкале (без Speech Overlap)
   const recalculateStartTimes = (
     list: NarrativeSceneItem[],
     renumberSequentialIds = false
   ): NarrativeSceneItem[] => {
-    let cursorSec = 0;
+    const timings = computeContinuousSceneTimings(list);
     return list.map((item, idx) => {
-      const startStr = formatTimecode(cursorSec);
-      const dur = Math.max(0.5, Number(item.duration) || 6);
-      cursorSec += dur;
+      const t = timings[idx];
+      const startStr = formatTimecode(t ? t.segStart : 0);
       const shouldRenumberId =
         renumberSequentialIds &&
         (!item.scene_id.trim() || /^(?:scene|sc)_?\d+$/i.test(item.scene_id.trim()));
@@ -1186,27 +1235,30 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         ...(shouldRenumberId
           ? { scene_id: `scene_${String(idx + 1).padStart(3, '0')}` }
           : {}),
-        start_time: startStr
+        start_time: startStr,
+        ...(t ? { voice_start: t.voiceStart, voice_end: t.voiceEnd } : {})
       };
       return transferSceneKey(item, nextItem);
     });
   };
 
-  // Расчет полного хронометража всех сцен (8–16+ минут / любое число сцен)
+  // Расчет полного хронометража всех сцен по непрерывной голосовой шкале (zero speech overlap)
   const calcTotalDurationSec = (scenesList: NarrativeSceneItem[]): number => {
-    return scenesList.reduce((acc, sc, idx) => {
-      const isLast = idx === scenesList.length - 1;
-      const overlap =
-        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-          : 0;
-      return acc + Math.max(0.5, Number(sc.duration) || 0) - overlap;
-    }, 0);
+    const timings = computeContinuousSceneTimings(scenesList);
+    return timings.length > 0 ? timings[timings.length - 1].segEnd : 0;
   };
 
-  const totalNarrativeDurationSec = useMemo(
-    () => calcTotalDurationSec(narrativeScenes),
+  const continuousSceneTimings = useMemo(
+    () => computeContinuousSceneTimings(narrativeScenes),
     [narrativeScenes]
+  );
+
+  const totalNarrativeDurationSec = useMemo(
+    () =>
+      continuousSceneTimings.length > 0
+        ? continuousSceneTimings[continuousSceneTimings.length - 1].segEnd
+        : 0,
+    [continuousSceneTimings]
   );
 
   const calcTotalDuration = (scenesList: NarrativeSceneItem[]): string => {
@@ -1518,6 +1570,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 ? sc.start_time.trim()
                 : formatTimecode(startSec),
             duration,
+            ...(typeof sc.voiceover_duration_sec === 'number'
+              ? { voiceover_duration_sec: sc.voiceover_duration_sec }
+              : {}),
+            ...(typeof sc.voice_start === 'number' ? { voice_start: sc.voice_start } : {}),
+            ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : {}),
             ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
             ...(typeof sc.visual_style === 'string' && sc.visual_style.trim()
               ? { visual_style: sc.visual_style.trim() }
@@ -1726,7 +1783,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       onGdriveFolderIdChange(folderId);
     }
 
-    // Маппинг export_settings (если заданы напрямую в JSON)
+    // Маппинг export_settings (сохраняем profile High, pix_fmt yuv420p, cfr true и 720p)
     const exp =
       raw.export_settings && typeof raw.export_settings === 'object'
         ? (raw.export_settings as Record<string, unknown>)
@@ -1734,8 +1791,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     if (exp || raw.resolution || raw.fps || raw.crf) {
       setExportSettings(prev => {
         const rawRes = String(exp?.resolution ?? raw.resolution ?? prev.resolution).toLowerCase();
-        const resolution: '4k' | '1080p' =
-          rawRes.includes('1080') || rawRes.includes('1920') ? '1080p' : '4k';
+        const resolution: '4k' | '1080p' | '720p' =
+          rawRes.includes('720') || rawRes.includes('1280')
+            ? '720p'
+            : rawRes.includes('1080') || rawRes.includes('1920')
+            ? '1080p'
+            : '4k';
 
         const rawAspect = String(exp?.aspect_ratio ?? raw.aspect_ratio ?? prev.aspect_ratio);
         const aspect_ratio: '16:9' | '9:16' = rawAspect === '9:16' ? '9:16' : '16:9';
@@ -1744,6 +1805,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         const video_codec: 'libx265' | 'libx264' = rawCodec.includes('265')
           ? 'libx265'
           : 'libx264';
+
+        const rawProfile = String(exp?.profile ?? raw.profile ?? prev.profile ?? 'high').toLowerCase();
+        const profile: 'high' | 'main' = rawProfile === 'main' ? 'main' : 'high';
 
         const rawFps = Number(exp?.fps ?? raw.fps ?? prev.fps);
         const fps: 24 | 30 | 60 = rawFps === 30 || rawFps === 60 ? rawFps : 24;
@@ -1760,6 +1824,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           resolution,
           aspect_ratio,
           video_codec,
+          profile,
+          pix_fmt: 'yuv420p',
+          cfr: typeof exp?.cfr === 'boolean' ? exp.cfr : prev.cfr ?? true,
           fps,
           crf,
           bitrate_mbps
@@ -2053,20 +2120,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     e.target.value = '';
   };
 
-  // Авто-синхронизация длительности всех сцен под хронометраж мастер-аудиодорожки (устранение рассинхрона)
+  // Авто-синхронизация длительности всех сцен по непрерывной голосовой шкале (без Speech Overlap)
   const syncScenesDurationToMasterAudio = () => {
     if (narrativeScenes.length === 0 || masterAudioDurationSec <= 0) return;
-    const totalOverlap = narrativeScenes.reduce((acc, sc, idx) => {
-      const isLast = idx === narrativeScenes.length - 1;
-      return (
-        acc +
-        (!isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-          : 0)
-      );
-    }, 0);
-    const neededRawSum = masterAudioDurationSec + totalOverlap;
-    const perScene = Math.max(1, Math.round((neededRawSum / narrativeScenes.length) * 10) / 10);
+    const perScene = Math.max(
+      1,
+      Math.round((masterAudioDurationSec / narrativeScenes.length) * 10) / 10
+    );
 
     setNarrativeScenes(prev =>
       recalculateStartTimes(
@@ -2077,7 +2137,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       )
     );
     onNotify(
-      `Длительность ${narrativeScenes.length} сцен синхронизирована под мастер-аудио (${masterAudioDurationSec} сек)!`,
+      `Длительность ${narrativeScenes.length} сцен синхронизирована по непрерывной голосовой шкале (${masterAudioDurationSec} сек)!`,
       'success'
     );
   };
@@ -2201,9 +2261,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     return map[lang] || 'en';
   };
 
-  // Построение полного текста .SRT таймкодов из текущих сцен
+  // Построение полного текста .SRT таймкодов по непрерывным голосовым границам [voiceStart, voiceEnd]
   const buildSrtStringFromScenes = (targetLang: SubtitleTargetLanguage = subtitleLanguage): string => {
-    let cursor = 0;
+    const timings = computeContinuousSceneTimings(narrativeScenes);
     const blocks: string[] = [];
     const scriptLines = transferredScript
       ? transferredScript
@@ -2213,16 +2273,15 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       : [];
 
     narrativeScenes.forEach((sc, idx) => {
-      const dur = Math.max(1, Number(sc.duration) || 5);
-      const start = cursor;
-      const end = cursor + dur - 0.15;
-      cursor += dur;
+      const t = timings[idx];
+      const start = t ? t.voiceStart : 0;
+      const end = t ? Math.max(start + 0.4, t.voiceEnd) : start + 4;
 
       const rawCandidate = sc.text_overlay.trim() || scriptLines[idx] || '';
       const localizedLine = translateSubtitleLine(rawCandidate, idx + 1, targetLang);
 
       blocks.push(
-        `${idx + 1}\n${formatSrtTimestamp(start)} --> ${formatSrtTimestamp(Math.max(start + 0.5, end))}\n${localizedLine}`
+        `${idx + 1}\n${formatSrtTimestamp(start)} --> ${formatSrtTimestamp(end)}\n${localizedLine}`
       );
     });
 
@@ -2435,20 +2494,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       typeof sc.video_ambient_mute === 'boolean'
         ? sc.video_ambient_mute
         : Boolean(sc.audio_processing?.video_ambient_mute);
+    const sceneIdStr = sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`;
+    const isScene33 = sceneIdStr.toLowerCase().includes('scene_33');
     const resolvedAmbientGainDb =
-      typeof sc.video_ambient_gain_db === 'number'
+      resolvedMute
+        ? -96.0
+        : typeof sc.video_ambient_gain_db === 'number' && sc.video_ambient_gain_db !== 0
         ? sc.video_ambient_gain_db
-        : typeof sc.audio_processing?.video_ambient_gain_db === 'number'
+        : typeof sc.audio_processing?.video_ambient_gain_db === 'number' &&
+          sc.audio_processing.video_ambient_gain_db !== 0
         ? sc.audio_processing.video_ambient_gain_db
-        : 0;
+        : isScene33
+        ? -6.0
+        : -22.0;
     const resolvedCamera =
       sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length];
     const resolvedSubtitles: Record<string, string> =
       sc.subtitles || (sc.text_overlay && sc.text_overlay.trim() ? { EN: sc.text_overlay.trim() } : {});
+    const timing = continuousSceneTimings[idx];
 
     return {
       scene_index: idx + 1,
-      scene_id: sc.scene_id.trim() || `SCENE_${String(idx + 1).padStart(3, '0')}`,
+      scene_id: sceneIdStr,
       title: toEnglishSceneTitle(sc, idx),
       file_name: resolvedVideoFile,
       video_file: resolvedVideoFile,
@@ -2457,6 +2524,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       ...(resolvedImageRef ? { image_reference: resolvedImageRef } : {}),
       start_time: sc.start_time,
       duration: Number(sc.duration) || 6,
+      ...(timing
+        ? {
+            voice_start: timing.voiceStart,
+            voice_end: timing.voiceEnd
+          }
+        : {}),
       camera_movement: resolvedCamera,
       ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
       transition: resolvedTransType,
@@ -2562,9 +2635,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         hard_frame_lock: v21Locks.hardFrameLock,
         apad_atrim_padding: v21Locks.apadAtrimLock,
         never_stretch_voiceover: v21Locks.hardFrameLock,
+        continuous_voice_master: v21Locks.continuousVoiceMaster,
+        zero_speech_overlap: v21Locks.zeroSpeechOverlap,
+        decoupled_video_xfade_only: v21Locks.decoupledVideoXfadeOnly,
         dynamic_xfade_transitions: v21Locks.dynamicXfadeTransitions,
-        acrossfade_offset_compensation: v21Locks.acrossfadeOffsetSync,
+        acrossfade_offset_compensation: false,
         auto_mute_flagged_video_clips: v21Locks.autoMuteFlaggedClips,
+        voiceover_lead_in_sec: v21Locks.voiceoverLeadInSec,
+        voiceover_sentence_pad_sec: v21Locks.voiceoverSentencePadSec,
         loudnorm: {
           enabled: v21Locks.youtubeLoudnorm,
           integrated_lufs: v21Locks.integratedLufs,
@@ -2851,6 +2929,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         scene_id: sc.scene_id,
         chapter: sc.title,
         duration_sec: sc.duration,
+        ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
+        ...(sc.voice_end !== undefined ? { voice_end: sc.voice_end } : {}),
         assets: compactAssets,
         video_processing: compactVideoProc,
         audio_processing: compactAudioProc,
@@ -2955,16 +3035,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       endFmt: string;
     }> = [];
 
-    let cursorSec = 0;
+    const storyboardTimings = computeContinuousSceneTimings(narrativeScenes);
     narrativeScenes.forEach((sc, idx) => {
-      const dur = Math.max(0.5, Number(sc.duration) || 6);
-      const isLast = idx === narrativeScenes.length - 1;
-      const overlap =
-        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-          : 0;
-      const startSec = cursorSec;
-      const endSec = startSec + dur;
+      const t = storyboardTimings[idx];
+      const startSec = t ? t.segStart : 0;
+      const endSec = t ? t.segEnd : startSec + 6;
       sceneTimingMeta.push({
         sc,
         idx,
@@ -2973,7 +3048,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         startFmt: formatTimecode(startSec),
         endFmt: formatTimecode(endSec)
       });
-      cursorSec = Math.max(0, endSec - overlap);
     });
 
     const totalScenes = narrativeScenes.length;
@@ -3977,11 +4051,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </select>
             </div>
 
-            {/* Авто-блокировки анти-рассинхрона и FFmpeg xfade v2.1 */}
+            {/* Авто-блокировки непрерывного голоса, декупленного FFmpeg xfade и LUFS v2.2-FINAL */}
             <div className="bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[10.5px] font-bold uppercase tracking-wider text-cyan-300">
-                  v2.1 Pipeline Locks • Anti-Desync &amp; FFmpeg
+                  v2.2-FINAL Pipeline Locks • Continuous Voice &amp; Decoupled FFmpeg xfade
                 </span>
                 <span className="text-[10px] font-mono text-white/55">
                   {exportSettings.video_codec} • {(exportSettings.profile || 'high').toUpperCase()} • CRF {exportSettings.crf} • {exportSettings.pix_fmt || 'yuv420p'} • {exportSettings.fps}fps CFR
@@ -3992,36 +4066,43 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={v21Locks.hardFrameLock && v21Locks.apadAtrimLock}
+                    checked={
+                      v21Locks.continuousVoiceMaster &&
+                      v21Locks.zeroSpeechOverlap &&
+                      v21Locks.hardFrameLock
+                    }
                     onChange={e =>
                       setV21Locks(prev => ({
                         ...prev,
                         hardFrameLock: e.target.checked,
-                        apadAtrimLock: e.target.checked
+                        apadAtrimLock: e.target.checked,
+                        continuousVoiceMaster: e.target.checked,
+                        zeroSpeechOverlap: e.target.checked
                       }))
                     }
                     className="accent-cyan-400 w-3.5 h-3.5 shrink-0"
                   />
                   <span className="text-slate-200 leading-tight">
-                    Strict Anti-Desync Frame &amp; Audio Lock (<code className="text-cyan-300">hard_frame_lock + apad/atrim</code>)
+                    Continuous Voice Master (Zero Overlap) •{' '}
+                    <code className="text-cyan-300">200ms adelay + 350ms apad</code>
                   </span>
                 </label>
 
                 <label className="flex items-center gap-2 bg-[#111827]/85 border border-white/[0.08] rounded-lg px-2.5 py-1.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={v21Locks.dynamicXfadeTransitions && v21Locks.acrossfadeOffsetSync}
+                    checked={v21Locks.dynamicXfadeTransitions && v21Locks.decoupledVideoXfadeOnly}
                     onChange={e =>
                       setV21Locks(prev => ({
                         ...prev,
                         dynamicXfadeTransitions: e.target.checked,
-                        acrossfadeOffsetSync: e.target.checked
+                        decoupledVideoXfadeOnly: e.target.checked
                       }))
                     }
                     className="accent-indigo-400 w-3.5 h-3.5 shrink-0"
                   />
                   <span className="text-slate-200 leading-tight">
-                    Dynamic Per-Scene <code className="text-indigo-300">xfade</code> + Audio <code className="text-indigo-300">acrossfade</code>
+                    Dynamic <code className="text-indigo-300">xfade</code> Transitions (Video-Only • Decoupled in 350ms Pause)
                   </span>
                 </label>
 
@@ -4038,7 +4119,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     className="accent-rose-400 w-3.5 h-3.5 shrink-0"
                   />
                   <span className="text-slate-200 leading-tight">
-                    Auto-Mute Flagged Clips (<code className="text-rose-300">video_ambient_mute</code> / SFX -6.0 dB)
+                    Auto-Mute Flagged Clips (<code className="text-rose-300">-96 dB</code> mute / <code className="text-amber-300">-22 dB</code> amb / <code className="text-emerald-300">-6 dB</code> SFX)
                   </span>
                 </label>
 
@@ -4055,7 +4136,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                     className="accent-emerald-400 w-3.5 h-3.5 shrink-0"
                   />
                   <span className="text-slate-200 leading-tight">
-                    YouTube Loudnorm (<code className="text-emerald-300">{v21Locks.integratedLufs.toFixed(1)} LUFS • {v21Locks.truePeakDbtp.toFixed(1)} dBTP</code>)
+                    -14.0 LUFS Normalization (<code className="text-emerald-300">{v21Locks.integratedLufs.toFixed(1)} LUFS • {v21Locks.truePeakDbtp.toFixed(1)} dBTP</code>)
                   </span>
                 </label>
               </div>
@@ -4770,8 +4851,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               <div className="col-span-2">⋮⋮ № / ID / Камера</div>
               <div className="col-span-3">Видеофайл (file_name)</div>
-              <div className="col-span-2 text-center">Старт / Длит. (с)</div>
-              <div className="col-span-2">Переход / Титр</div>
+              <div className="col-span-2 text-center">Voice Bounds &amp; Длит.</div>
+              <div className="col-span-2">Переход (Video) / Титр</div>
               <div className="col-span-3">🔄 На пересборку &amp; Заметка</div>
             </div>
 
@@ -4792,6 +4873,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 >
                   {narrativeScenes.map((sc, idx) => {
                     const rowKey = getSceneRowKey(sc);
+                    const t = continuousSceneTimings[idx];
                     return (
                       <DraggableSceneRow
                         key={rowKey}
@@ -4799,6 +4881,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                         sc={sc}
                         idx={idx}
                         fps={exportSettings.fps}
+                        voiceStartSec={t ? t.voiceStart : 0}
+                        voiceEndSec={t ? t.voiceEnd : Number(sc.duration) || 6}
+                        zeroSpeechOverlap={
+                          v21Locks.continuousVoiceMaster && v21Locks.zeroSpeechOverlap
+                        }
                         canDrag={true}
                         updateScene={updateScene}
                         removeScene={removeScene}
@@ -4815,6 +4902,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
                   {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
                     const rowKey = getSceneRowKey(sc);
+                    const t = continuousSceneTimings[idx];
                     return (
                       <DraggableSceneRow
                         key={rowKey}
@@ -4822,6 +4910,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                         sc={sc}
                         idx={idx}
                         fps={exportSettings.fps}
+                        voiceStartSec={t ? t.voiceStart : 0}
+                        voiceEndSec={t ? t.voiceEnd : Number(sc.duration) || 6}
+                        zeroSpeechOverlap={
+                          v21Locks.continuousVoiceMaster && v21Locks.zeroSpeechOverlap
+                        }
                         canDrag={false}
                         updateScene={updateScene}
                         removeScene={removeScene}

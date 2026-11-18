@@ -39,7 +39,8 @@ import {
 } from '../utils/englishExport';
 import {
   V21SubtitleLang,
-  buildEnglishReleaseCardMarkdown
+  buildEnglishReleaseCardMarkdown,
+  computeContinuousSceneTimings
 } from '../utils/manifestV21';
 
 export type { SeoToneStyle, SeoTitleVariant };
@@ -233,22 +234,21 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         .join('\n');
     }
 
-    // По сценам повествовательного манифеста
+    // По сценам повествовательного манифеста (непрерывная голосовая шкала, без Speech Overlap)
     if (narrativeScenes.length > 0) {
+      const timings = computeContinuousSceneTimings(narrativeScenes);
       const step = Math.max(1, Math.floor(narrativeScenes.length / 6));
       const lines: string[] = [];
-      let cursorSec = 0;
 
       narrativeScenes.forEach((sc, idx) => {
         if (idx === 0 || idx % step === 0) {
           const chapterIdx = lines.length;
           if (chapterIdx < 8) {
-            const ts = formatSecToTimestamp(cursorSec);
+            const ts = formatSecToTimestamp(idx === 0 ? 0 : timings[idx]?.segStart ?? 0);
             const label = toEnglishSceneTitle(sc, chapterIdx);
             lines.push(`${ts} - ${label}`);
           }
         }
-        cursorSec += Math.max(1, Number(sc.duration) || 6);
       });
 
       if (lines.length > 0) {
@@ -303,38 +303,47 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     setTimeout(() => setCopiedKey(''), 2000);
   };
 
-  // Генерация по тональности (локальный мгновенный пресет + Gemini API)
+  // Генерация по тональности (сохраняем загруженный video_title из манифеста, никогда не перезаписываем захардкоженными заголовками)
   const applyTonePresetsLocally = useCallback(
     (selectedTone: SeoToneStyle) => {
       const selected = SEO_PRESETS_BY_TONE[selectedTone];
-      updateSeoState(prev => ({
-        ...prev,
-        tone: selectedTone,
-        titles: [
-          {
-            id: 'A',
-            category: 'Intrigue',
-            categoryRu: 'Интрига (Intrigue)',
-            title: selected.titles[0].slice(0, 60)
-          },
-          {
-            id: 'B',
-            category: 'Contradiction',
-            categoryRu: 'Противоречие (Contradiction)',
-            title: selected.titles[1].slice(0, 60)
-          },
-          {
-            id: 'C',
-            category: 'Drama',
-            categoryRu: 'Драма (Cinematic Drama)',
-            title: selected.titles[2].slice(0, 60)
-          }
-        ],
-        description: selected.desc,
-        tagsString: selected.tags.slice(0, 495)
-      }));
+      updateSeoState(prev => {
+        const cleanProj = (projectName || '').trim();
+        const fallbackBase =
+          cleanProj && !/[а-яёА-ЯЁ]/.test(cleanProj) ? cleanProj : 'Documentary Film (4K)';
+        return {
+          ...prev,
+          tone: selectedTone,
+          titles: [
+            {
+              id: 'A',
+              category: 'Intrigue',
+              categoryRu: 'Интрига (Intrigue)',
+              title: prev.titles[0]?.title?.trim() || fallbackBase.slice(0, 100)
+            },
+            {
+              id: 'B',
+              category: 'Contradiction',
+              categoryRu: 'Противоречие (Contradiction)',
+              title:
+                prev.titles[1]?.title?.trim() ||
+                `${fallbackBase}: What Really Happened`.slice(0, 100)
+            },
+            {
+              id: 'C',
+              category: 'Drama',
+              categoryRu: 'Драма (Cinematic Drama)',
+              title:
+                prev.titles[2]?.title?.trim() ||
+                `Inside ${fallbackBase} (${selectedTone})`.slice(0, 100)
+            }
+          ],
+          description: selected.desc,
+          tagsString: selected.tags.slice(0, 495)
+        };
+      });
     },
-    [updateSeoState]
+    [updateSeoState, projectName]
   );
 
   // Генерация через Gemini API (с гарантированным мгновенным результатом)
@@ -554,31 +563,25 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
 
   const hasVerbaFlowChapters = Boolean(externalChaptersTxt && externalChaptersTxt.trim());
 
-  // 4. Точный расчёт глав output_chapters.txt (приоритет: импортированные из VerbaFlow 130 сл./мин, либо расчёт по duration Ритм-карты)
+  // 4. Точный расчёт глав output_chapters.txt по непрерывной голосовой шкале (zero speech overlap)
   const exactRhythmMapChaptersTxt = useMemo(() => {
     if (externalChaptersTxt && externalChaptersTxt.trim()) {
       return externalChaptersTxt.trim();
     }
 
     if (narrativeScenes.length > 0) {
+      const timings = computeContinuousSceneTimings(narrativeScenes);
       const totalScenes = narrativeScenes.length;
       const chapterCount = Math.min(8, Math.max(3, Math.ceil(totalScenes / 3)));
       const step = Math.max(1, Math.floor(totalScenes / chapterCount));
       const lines: string[] = [];
-      let cumulativeSec = 0;
 
       narrativeScenes.forEach((sc, idx) => {
         if (idx === 0 || idx % step === 0) {
-          const ts = formatSecToShortChapter(cumulativeSec);
+          const ts = formatSecToShortChapter(idx === 0 ? 0 : timings[idx]?.segStart ?? 0);
           const chapterTitle = toEnglishSceneTitle(sc, lines.length);
           lines.push(`${ts} ${chapterTitle}`);
         }
-        const isLast = idx === narrativeScenes.length - 1;
-        const overlap =
-          !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-            ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-            : 0;
-        cumulativeSec += Math.max(0.5, Number(sc.duration) || 6) - overlap;
       });
 
       return lines.join('\n');
@@ -591,14 +594,9 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   }, [externalChaptersTxt, narrativeScenes, computedChaptersFromManifest]);
 
   const totalRhythmMapDurationSec = useMemo(() => {
-    return narrativeScenes.reduce((acc, sc, idx) => {
-      const isLast = idx === narrativeScenes.length - 1;
-      const overlap =
-        !isLast && sc.transition.type !== 'cut' && sc.transition.type !== 'none'
-          ? Math.max(0, Number(sc.transition.duration_sec) || 0)
-          : 0;
-      return acc + Math.max(0.5, Number(sc.duration) || 6) - overlap;
-    }, 0);
+    if (narrativeScenes.length === 0) return 0;
+    const timings = computeContinuousSceneTimings(narrativeScenes);
+    return timings.length > 0 ? timings[timings.length - 1].segEnd : 0;
   }, [narrativeScenes]);
 
   // 4. Генерация и скачивание RELEASE_CARD.md (Strictly English-only Release Package)
@@ -778,18 +776,43 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         </div>
       </div>
 
-      {/* а) КЛИКАБЕЛЬНЫЕ ЗАГОЛОВКИ (A/B TITLES): 3 КОНТРАСТНЫХ ВАРИАНТА ДО 60 СИМВОЛОВ */}
+      {/* а) ОСНОВНОЙ ЗАГОЛОВОК ВИДЕО (video_title ИЗ МАНИФЕСТА) + A/B ВАРИАНТЫ */}
       <div className="bg-[#0b0f17] border border-amber-500/30 rounded-2xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              а) Кликабельные заголовки (A/B Titles • 3 контрастных варианта строго до 60 символов)
+              а) Основной Video Title (<code className="text-amber-300">video_title</code>) &amp; A/B Заголовки
             </h3>
           </div>
           <span className="text-[11px] font-mono text-amber-300">
-            Natural US English • Лимит до 60 символов
+            Populated dynamically from manifest video_title • Natural US English
           </span>
+        </div>
+
+        {/* Прямое редактируемое поле Video Title (связано с выбранным вариантом релиза) */}
+        <div className="bg-[#111622] border border-white/[0.08] rounded-xl p-3.5 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs font-bold text-emerald-300">
+              Primary Video Title (<code className="text-amber-300">video_title</code> • Variant {selectedTitleId})
+            </label>
+            <span className="text-[10.5px] font-mono text-slate-400 tabular-nums">
+              {activeReleaseTitle.length}/100 chars
+            </span>
+          </div>
+          <input
+            type="text"
+            maxLength={100}
+            value={activeReleaseTitle}
+            placeholder="Loaded dynamically from manifest video_title (or enter custom release title)..."
+            onChange={e => {
+              const val = e.target.value.slice(0, 100);
+              setTitles(prev =>
+                prev.map(t => (t.id === selectedTitleId ? { ...t, title: val } : t))
+              );
+            }}
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-lg px-3.5 py-2.5 text-sm font-bold text-slate-100 outline-none"
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

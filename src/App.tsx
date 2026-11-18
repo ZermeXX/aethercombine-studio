@@ -3339,11 +3339,12 @@ export default function App() {
 
     // Таб 4: YouTube SEO — редактируемый video_title из манифеста, chapters_youtube, чекбоксы RELEASE_CARD.md / output_chapters.txt
     if (parsed.videoTitle) {
+      const nextTitle = parsed.videoTitle.slice(0, 100);
       setYoutubeSeoState(prev => ({
         ...prev,
         selectedTitleId: 'A',
         titles: prev.titles.map((item, idx) =>
-          idx === 0 ? { ...item, title: parsed.videoTitle.slice(0, 100) } : item
+          idx === 0 || item.id === prev.selectedTitleId ? { ...item, title: nextTitle } : item
         )
       }));
     }
