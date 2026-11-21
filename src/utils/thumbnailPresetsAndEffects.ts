@@ -1,7 +1,7 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+ @license
+ SPDX-License-Identifier: Apache-2.0
+*/
 
 export interface SlotBgAdjustConfig {
   contrastPct: number;
@@ -54,41 +54,13 @@ export interface SplashShapeOption {
 }
 
 export const SPLASH_SHAPE_OPTIONS: SplashShapeOption[] = [
-  {
-    id: 'monolith_bristle',
-    label: 'Широкая сухая кисть',
-    subtitle: 'Monolith Bristle'
-  },
-  {
-    id: 'jagged_splash',
-    label: 'Рваный агрессивный мазок',
-    subtitle: 'Jagged Splash'
-  },
-  {
-    id: 'bottom_slash',
-    label: 'Нижний акцентный росчерк',
-    subtitle: 'Bottom Slash'
-  },
-  {
-    id: 'double_strokes',
-    label: 'Двойной раздельный мазок',
-    subtitle: 'Double Strokes'
-  },
-  {
-    id: 'distressed_grunge',
-    label: 'Фактурная потёртая кисть',
-    subtitle: 'Distressed Grunge'
-  },
-  {
-    id: 'tapered_speed',
-    label: 'Клиновидный росчерк',
-    subtitle: 'Tapered Speed Brush'
-  },
-  {
-    id: 'none',
-    label: 'Без подложки',
-    subtitle: 'None'
-  }
+  { id: 'monolith_bristle', label: 'Широкая сухая кисть', subtitle: 'Monolith Bristle' },
+  { id: 'jagged_splash', label: 'Рваный агрессивный мазок', subtitle: 'Jagged Splash' },
+  { id: 'bottom_slash', label: 'Нижний акцентный росчерк', subtitle: 'Bottom Slash' },
+  { id: 'double_strokes', label: 'Двойной раздельный мазок', subtitle: 'Double Strokes' },
+  { id: 'distressed_grunge', label: 'Фактурная потёртая кисть', subtitle: 'Distressed Grunge' },
+  { id: 'tapered_speed', label: 'Клиновидный росчерк', subtitle: 'Tapered Speed Brush' },
+  { id: 'none', label: 'Без подложки', subtitle: 'None' }
 ];
 
 export interface SplashColorSwatch {
@@ -99,36 +71,11 @@ export interface SplashColorSwatch {
 }
 
 export const SPLASH_COLOR_SWATCHES: SplashColorSwatch[] = [
-  {
-    id: 'crimson_brand',
-    label: 'Фирменный алый',
-    mainColor: '#E10613',
-    edgeColor: '#8A0009'
-  },
-  {
-    id: 'dark_carmine',
-    label: 'Тёмный кармин',
-    mainColor: '#B91C1C',
-    edgeColor: '#580606'
-  },
-  {
-    id: 'coal_black',
-    label: 'Угольно-чёрный',
-    mainColor: '#18181B',
-    edgeColor: '#09090B'
-  },
-  {
-    id: 'amber_gold',
-    label: 'Янтарно-золотой',
-    mainColor: '#D97706',
-    edgeColor: '#78350F'
-  },
-  {
-    id: 'cobalt_blue',
-    label: 'Кобальтово-синий',
-    mainColor: '#1D4ED8',
-    edgeColor: '#1E3A8A'
-  }
+  { id: 'crimson_brand', label: 'Фирменный алый', mainColor: '#E10613', edgeColor: '#8A0009' },
+  { id: 'dark_carmine', label: 'Тёмный кармин', mainColor: '#B91C1C', edgeColor: '#580606' },
+  { id: 'coal_black', label: 'Угольно-чёрный', mainColor: '#18181B', edgeColor: '#09090B' },
+  { id: 'amber_gold', label: 'Янтарно-золотой', mainColor: '#D97706', edgeColor: '#78350F' },
+  { id: 'cobalt_blue', label: 'Кобальтово-синий', mainColor: '#1D4ED8', edgeColor: '#1E3A8A' }
 ];
 
 export const DEFAULT_BADGE_CAPSULES: [string, string, string] = [
@@ -138,9 +85,9 @@ export const DEFAULT_BADGE_CAPSULES: [string, string, string] = [
 ];
 
 /**
- * Динамически разделяет заголовок текущего проекта из состояния студии на две ударные строки
- * (без хардкода конкретных названий видеороликов).
- */
+ Динамически разделяет заголовок текущего проекта из состояния студии на две ударные строки
+ (без хардкода конкретных названий видеороликов).
+*/
 export function splitProjectTitleIntoTwoLines(rawTitle: string): {
   line1: string;
   line2: string;
@@ -154,7 +101,6 @@ export function splitProjectTitleIntoTwoLines(rawTitle: string): {
     return { line1: '', line2: '' };
   }
 
-  // Если есть явный разделитель двоеточие / тире / слэш — берём первую часть для чистого хука
   const colonSplit = cleaned.split(/\s*[:|—]\s*/).filter(Boolean);
   const candidate =
     colonSplit.length > 1 && colonSplit[0].split(/\s+/).length >= 2
@@ -165,10 +111,7 @@ export function splitProjectTitleIntoTwoLines(rawTitle: string): {
   if (words.length === 0) return { line1: '', line2: '' };
   if (words.length === 1) return { line1: words[0].toUpperCase(), line2: '' };
   if (words.length === 2) {
-    return {
-      line1: words[0].toUpperCase(),
-      line2: words[1].toUpperCase()
-    };
+    return { line1: words[0].toUpperCase(), line2: words[1].toUpperCase() };
   }
 
   let bestSplit = 1;
@@ -190,9 +133,9 @@ export function splitProjectTitleIntoTwoLines(rawTitle: string): {
 }
 
 /**
- * Локальная обработка фонового изображения (Контраст, Яркость, Мягкая сочность/Vibrance, Резкость 3x3)
- * строго на HTML5 Canvas без воздействия на заголовки и верхние бейджи.
- */
+ Локальная обработка фонового изображения (Контраст, Яркость, Мягкая сочность/Vibrance, Резкость 3x3)
+ строго на HTML5 Canvas без воздействия на заголовки и верхние бейджи.
+*/
 export function renderAdjustedBackgroundToCanvas(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -219,18 +162,14 @@ export function renderAdjustedBackgroundToCanvas(
     Math.abs(brightnessPct - 100) > 0.1 ||
     Math.abs(vibrancePct - 100) > 0.1;
 
-  if (!hasColorAdjust && baseSharpenPercent <= 0) {
+  const drawDirect = () => {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    drawCoverImageFn(
-      ctx,
-      image,
-      image.naturalWidth || w,
-      image.naturalHeight || h,
-      w,
-      h,
-      1
-    );
+    drawCoverImageFn(ctx, image, image.naturalWidth || w, image.naturalHeight || h, w, h, 1);
+  };
+
+  if (!hasColorAdjust && baseSharpenPercent <= 0) {
+    drawDirect();
     return;
   }
 
@@ -239,31 +178,13 @@ export function renderAdjustedBackgroundToCanvas(
   bgCanvas.height = h;
   const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
   if (!bgCtx) {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    drawCoverImageFn(
-      ctx,
-      image,
-      image.naturalWidth || w,
-      image.naturalHeight || h,
-      w,
-      h,
-      1
-    );
+    drawDirect();
     return;
   }
 
   bgCtx.imageSmoothingEnabled = true;
   bgCtx.imageSmoothingQuality = 'high';
-  drawCoverImageFn(
-    bgCtx,
-    image,
-    image.naturalWidth || w,
-    image.naturalHeight || h,
-    w,
-    h,
-    1
-  );
+  drawCoverImageFn(bgCtx, image, image.naturalWidth || w, image.naturalHeight || h, w, h, 1);
 
   if (w > 2 && h > 2) {
     const imgData = bgCtx.getImageData(0, 0, w, h);
@@ -274,7 +195,6 @@ export function renderAdjustedBackgroundToCanvas(
       const brightness = brightnessPct / 100;
       const vibrance = (vibrancePct - 100) / 100;
       const len = data.length;
-
       for (let i = 0; i < len; i += 4) {
         let r = data[i] * brightness;
         let g = data[i + 1] * brightness;
@@ -292,10 +212,7 @@ export function renderAdjustedBackgroundToCanvas(
           const sat = Math.min(1, Math.max(0, (maxC - minC) / 255));
           const avg = (r + g + b) * 0.333333;
           const warmBias = r > b && vibrance > 0 ? 1.12 : 1.0;
-          const amt =
-            vibrance >= 0
-              ? vibrance * (1 - sat) * 1.45 * warmBias
-              : vibrance;
+          const amt = vibrance >= 0 ? vibrance * (1 - sat) * 1.45 * warmBias : vibrance;
           r = r + (r - avg) * amt;
           g = g + (g - avg) * amt;
           b = b + (b - avg) * amt;
@@ -344,19 +261,13 @@ function deterministicHash(seed: number): number {
 function adjustHexBrightness(hex: string, factor: number, addBias: number = 0): string {
   const clean = hex.replace('#', '').trim();
   if (!/^[0-9a-fA-F]{6}$/.test(clean)) return hex;
-  const r = Math.max(
-    0,
-    Math.min(255, Math.round(parseInt(clean.slice(0, 2), 16) * factor + addBias))
-  );
-  const g = Math.max(
-    0,
-    Math.min(255, Math.round(parseInt(clean.slice(2, 4), 16) * factor + addBias))
-  );
-  const b = Math.max(
-    0,
-    Math.min(255, Math.round(parseInt(clean.slice(4, 6), 16) * factor + addBias))
-  );
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const r = clamp(parseInt(clean.slice(0, 2), 16) * factor + addBias);
+  const g = clamp(parseInt(clean.slice(2, 4), 16) * factor + addBias);
+  const b = clamp(parseInt(clean.slice(4, 6), 16) * factor + addBias);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
+    .toString(16)
+    .padStart(2, '0')}`;
 }
 
 export function buildVertical3DFill(
@@ -390,9 +301,9 @@ export interface ResolvedSplashColorPalette {
 }
 
 /**
- * Автоматически рассчитывает объёмный градиент и внутреннюю глубину
- * от любого выбранного пользователем цвета (основной тон в центре + глубокий оттенок по краям).
- */
+ Автоматически рассчитывает объёмный градиент и внутреннюю глубину
+ от любого выбранного пользователем цвета (основной тон в центре + глубокий оттенок по краям).
+*/
 export function resolveSplashColorPalette(hexColor: string): ResolvedSplashColorPalette {
   const normalized = /^#[0-9a-fA-F]{6}$/.test((hexColor || '').trim())
     ? hexColor.trim().toUpperCase()
@@ -402,15 +313,11 @@ export function resolveSplashColorPalette(hexColor: string): ResolvedSplashColor
   if (preset) {
     return {
       coreColor:
-        normalized === '#18181B'
-          ? '#27272A'
-          : adjustHexBrightness(preset.mainColor, 1.08, 6),
+        normalized === '#18181B' ? '#27272A' : adjustHexBrightness(preset.mainColor, 1.08, 6),
       mainColor: preset.mainColor,
       edgeColor: preset.edgeColor,
       deepColor:
-        normalized === '#18181B'
-          ? '#030305'
-          : adjustHexBrightness(preset.edgeColor, 0.65)
+        normalized === '#18181B' ? '#030305' : adjustHexBrightness(preset.edgeColor, 0.65)
     };
   }
 
@@ -502,8 +409,8 @@ function clearBrushShadow(ctx: CanvasRenderingContext2D): void {
 }
 
 /**
- * Рисует органичный векторный путь мазка через кривые Безье и щетину по торцам.
- */
+ Рисует органичный векторный путь мазка через кривые Безье и щетину по торцам.
+*/
 function traceSmoothBristleRectPath(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -555,7 +462,6 @@ function traceSmoothBristleRectPath(
   }
   ctx.lineTo(topPts[topPts.length - 1].x, topPts[topPts.length - 1].y);
 
-  // Правая сторона с щетинистыми зубцами
   const rTopY = topPts[topPts.length - 1].y;
   const rBotY = botPts[botPts.length - 1].y;
   for (let b = 0; b < opts.bristleCount; b++) {
@@ -563,15 +469,13 @@ function traceSmoothBristleRectPath(
     const t1 = (b + 0.52) / opts.bristleCount;
     const by0 = rTopY + t0 * (rBotY - rTopY);
     const by1 = rTopY + t1 * (rBotY - rTopY);
-    const outX =
-      cx + hw + (0.28 + deterministicHash(seed + b * 19 + 5) * 0.72) * opts.bristleReach;
+    const outX = cx + hw + (0.28 + deterministicHash(seed + b * 19 + 5) * 0.72) * opts.bristleReach;
     const inX = cx + hw - (2 + deterministicHash(seed + b * 31 + 11) * 9) * scale;
     ctx.lineTo(outX, by0 + (by1 - by0) * 0.25);
     ctx.quadraticCurveTo(outX * 0.2 + inX * 0.8, by1, inX, by1);
   }
-  ctx.lineTo(botPts[botPts.length - 1].x, botPts[botPts.length - 1].y);
 
-  // Нижняя кромка справа налево через Bezier
+  ctx.lineTo(botPts[botPts.length - 1].x, botPts[botPts.length - 1].y);
   for (let i = botPts.length - 2; i >= 0; i--) {
     const prev = botPts[i + 1];
     const curr = botPts[i];
@@ -581,7 +485,6 @@ function traceSmoothBristleRectPath(
   }
   ctx.lineTo(botPts[0].x, botPts[0].y);
 
-  // Левая сторона с щетинистыми зубцами
   const lTopY = topPts[0].y;
   const lBotY = botPts[0].y;
   for (let b = opts.bristleCount - 1; b >= 0; b--) {
@@ -589,12 +492,12 @@ function traceSmoothBristleRectPath(
     const t1 = b / opts.bristleCount;
     const by0 = lTopY + t0 * (lBotY - lTopY);
     const by1 = lTopY + t1 * (lBotY - lTopY);
-    const outX =
-      cx - hw - (0.28 + deterministicHash(seed + b * 29 + 13) * 0.72) * opts.bristleReach;
+    const outX = cx - hw - (0.28 + deterministicHash(seed + b * 29 + 13) * 0.72) * opts.bristleReach;
     const inX = cx - hw + (2 + deterministicHash(seed + b * 37 + 19) * 9) * scale;
     ctx.lineTo(outX, by0 - (by0 - by1) * 0.25);
     ctx.quadraticCurveTo(outX * 0.2 + inX * 0.8, by1, inX, by1);
   }
+
   ctx.closePath();
 }
 
@@ -616,14 +519,12 @@ function drawHorizontalBristleFibers(
     const fy = cy + normY * hh * 1.65;
     const side = i % 2 === 0 ? 1 : -1;
 
-    // Тёмные и светлые волокна щетины с правого и левого краёв
     for (const dir of [1, -1]) {
       const reach = (0.35 + deterministicHash(seed + i * 41 + dir * 7) * 0.65) * maxReach;
       const startX = cx + dir * (hw - 12 * scale);
       const tipX = cx + dir * (hw + reach);
       const thick = (1.6 + deterministicHash(seed + i * 53 + dir * 3) * 3.8) * scale;
       const curveY = fy + side * (2 + deterministicHash(seed + i * 17) * 4) * scale;
-
       ctx.fillStyle = i % 3 === 0 ? palette.edgeColor : palette.mainColor;
       ctx.globalAlpha = 0.65 + deterministicHash(seed + i * 29) * 0.3;
       ctx.beginPath();
@@ -638,9 +539,9 @@ function drawHorizontalBristleFibers(
 }
 
 /**
- * Процедурный векторный рендер 6 форм гранж-подложки (или 'none')
- * с детерминированным зерном (нулевое мерцание в 720p и 4K).
- */
+ Процедурный векторный рендер 6 форм гранж-подложки (или 'none')
+ с детерминированным зерном (нулевое мерцание в 720p и 4K).
+*/
 export function drawUnifiedGrungeSplash(
   ctx: CanvasRenderingContext2D,
   params: UnifiedSplashDrawParams
@@ -669,7 +570,7 @@ export function drawUnifiedGrungeSplash(
 
   ctx.save();
 
-  // 1) «Широкая сухая кисть (Monolith Bristle)»
+  // 1) Широкая сухая кисть (Monolith Bristle)
   if (params.shape === 'monolith_bristle') {
     const reach = 34 * scale * padMult;
     applyBrushShadow(ctx, scale, shadowMult);
@@ -682,7 +583,6 @@ export function drawUnifiedGrungeSplash(
     ctx.fill();
     clearBrushShadow(ctx);
 
-    // Внутренний слой плотной краски + выступающие горизонтальные волокна щетины
     ctx.save();
     ctx.globalAlpha = 0.36;
     ctx.fillStyle = palette.edgeColor;
@@ -696,11 +596,11 @@ export function drawUnifiedGrungeSplash(
 
     drawHorizontalBristleFibers(ctx, 0, 0, hw, hh, scale, seedBase + 13, palette, 12, reach * 1.25);
 
-    // Сухие продольные волокна светлого/глубокого тона внутри мазка
     ctx.save();
     ctx.lineCap = 'round';
     for (let s = 0; s < 6; s++) {
-      const sy = -hh * 0.72 + s * (hh * 0.28) + (deterministicHash(seedBase + s * 11) - 0.5) * 5 * scale;
+      const sy =
+        -hh * 0.72 + s * (hh * 0.28) + (deterministicHash(seedBase + s * 11) - 0.5) * 5 * scale;
       ctx.strokeStyle = s % 2 === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.22)';
       ctx.lineWidth = (1.4 + deterministicHash(seedBase + s * 19) * 2.4) * scale;
       ctx.beginPath();
@@ -709,19 +609,18 @@ export function drawUnifiedGrungeSplash(
       ctx.stroke();
     }
     ctx.restore();
-
     ctx.restore();
     return { splashW: (hw + reach) * 2 + 16 * scale, splashH: hh * 2 + 24 * scale };
   }
 
-  // 2) «Рваный агрессивный мазок (Jagged Splash)»
+  // 2) Рваный агрессивный мазок (Jagged Splash)
   if (params.shape === 'jagged_splash') {
     const spikeReach = 44 * scale * padMult;
     const spikeCountTop = 14;
     applyBrushShadow(ctx, scale, shadowMult);
     ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
-
     ctx.beginPath();
+
     for (let i = 0; i <= spikeCountTop; i++) {
       const t = i / spikeCountTop;
       const x = -hw + t * hw * 2;
@@ -735,7 +634,6 @@ export function drawUnifiedGrungeSplash(
       else ctx.lineTo(x, y);
     }
 
-    // Острые диагональные выпады справа
     for (let b = 0; b < 9; b++) {
       const bt = b / 8;
       const by = -hh * 0.92 + bt * hh * 1.84;
@@ -757,7 +655,6 @@ export function drawUnifiedGrungeSplash(
       ctx.lineTo(x, hh + spike + diagPull);
     }
 
-    // Острые диагональные выпады слева
     for (let b = 8; b >= 0; b--) {
       const bt = b / 8;
       const by = -hh * 0.92 + bt * hh * 1.84;
@@ -767,11 +664,11 @@ export function drawUnifiedGrungeSplash(
       ctx.lineTo(outX, tipY);
       ctx.lineTo(inX, by - hh * 0.14);
     }
+
     ctx.closePath();
     ctx.fill();
     clearBrushShadow(ctx);
 
-    // Агрессивные диагональные брызги и капли по краям
     ctx.save();
     for (let f = 0; f < 18; f++) {
       const side = f % 2 === 0 ? 1 : -1;
@@ -782,22 +679,28 @@ export function drawUnifiedGrungeSplash(
       ctx.fillStyle = f % 3 === 0 ? palette.edgeColor : palette.mainColor;
       ctx.globalAlpha = 0.72 + deterministicHash(seedBase + f * 79) * 0.25;
       ctx.beginPath();
-      ctx.ellipse(fx, fy, len, rad, -0.18 + (deterministicHash(seedBase + f * 13) - 0.5) * 0.35, 0, Math.PI * 2);
+      ctx.ellipse(
+        fx,
+        fy,
+        len,
+        rad,
+        -0.18 + (deterministicHash(seedBase + f * 13) - 0.5) * 0.35,
+        0,
+        Math.PI * 2
+      );
       ctx.fill();
     }
     ctx.restore();
-
     ctx.restore();
     return { splashW: (hw + spikeReach + 16 * scale) * 2, splashH: (hh + 18 * scale) * 2 };
   }
 
-  // 3) «Нижний акцентный росчерк (Bottom Slash)»
+  // 3) Нижний акцентный росчерк (Bottom Slash)
   if (params.shape === 'bottom_slash') {
     const activeW = params.hasBottom ? params.bottomW : params.topW;
     const activeH = params.hasBottom ? params.bottomH : params.topH;
     const activeCy = params.hasBottom ? params.bottomYCenter : params.topYCenter;
 
-    // Мягкое тёмное свечение под верхней строкой (если она есть)
     if (params.hasTop && params.hasBottom) {
       const glowW = Math.max(120 * scale, params.topW * 0.68 + 60 * scale);
       const glowH = Math.max(48 * scale, params.topH * 1.15);
@@ -816,7 +719,6 @@ export function drawUnifiedGrungeSplash(
       ctx.restore();
     }
 
-    // Скошенный мазок с заострёнными рваными концами строго под нижней строкой
     const slashHalfW = activeW * 0.5 + Math.max(42 * scale, activeW * 0.12) * padMult;
     const slashHalfH = activeH * 0.5 + Math.max(15 * scale, activeH * 0.22) * padMult;
     const slashTip = 46 * scale * padMult;
@@ -838,7 +740,6 @@ export function drawUnifiedGrungeSplash(
       slashHalfW + slashTip * 1.05,
       activeCy - slantShift * 0.8 - 2 * scale
     );
-    // Правые рваные заострённые концы
     ctx.lineTo(slashHalfW + slashTip * 0.35, activeCy + slashHalfH * 0.28);
     ctx.lineTo(slashHalfW + slashTip * 0.85, activeCy + slashHalfH * 0.62);
     ctx.quadraticCurveTo(
@@ -878,12 +779,11 @@ export function drawUnifiedGrungeSplash(
     };
   }
 
-  // 4) «Двойной раздельный мазок (Double Strokes)»
+  // 4) Двойной раздельный мазок (Double Strokes)
   if (params.shape === 'double_strokes') {
     const reach = 28 * scale * padMult;
     const strokePadX = Math.max(30 * scale, params.contentW * 0.085) * padMult;
     const strokePadY = Math.max(12 * scale, params.totalTextH * 0.09) * padMult;
-
     let maxSpanW = params.contentW + 30 * scale;
 
     if (params.hasTop) {
@@ -891,7 +791,6 @@ export function drawUnifiedGrungeSplash(
       const hh1 = params.topH * 0.5 + strokePadY;
       const offX1 = params.hasBottom ? -12 * scale * padMult : 0;
       maxSpanW = Math.max(maxSpanW, (hw1 + reach + Math.abs(offX1)) * 2);
-
       applyBrushShadow(ctx, scale, shadowMult);
       ctx.fillStyle = createVolumetricBrushFill(ctx, offX1, params.topYCenter, hw1, hh1, palette);
       traceSmoothBristleRectPath(ctx, offX1, params.topYCenter, hw1, hh1, scale, seedBase + 17, {
@@ -921,16 +820,8 @@ export function drawUnifiedGrungeSplash(
       const hh2 = params.bottomH * 0.5 + strokePadY * 1.08;
       const offX2 = params.hasTop ? 14 * scale * padMult : 0;
       maxSpanW = Math.max(maxSpanW, (hw2 + reach + Math.abs(offX2)) * 2);
-
       applyBrushShadow(ctx, scale, shadowMult);
-      ctx.fillStyle = createVolumetricBrushFill(
-        ctx,
-        offX2,
-        params.bottomYCenter,
-        hw2,
-        hh2,
-        palette
-      );
+      ctx.fillStyle = createVolumetricBrushFill(ctx, offX2, params.bottomYCenter, hw2, hh2, palette);
       traceSmoothBristleRectPath(ctx, offX2, params.bottomYCenter, hw2, hh2, scale, seedBase + 83, {
         bristleReach: reach * 1.05,
         edgeRoughness: 5,
@@ -960,14 +851,13 @@ export function drawUnifiedGrungeSplash(
     };
   }
 
-  // 5) «Фактурная потёртая кисть (Distressed Grunge)»
+  // 5) Фактурная потёртая кисть (Distressed Grunge)
   if (params.shape === 'distressed_grunge') {
     const reach = 34 * scale * padMult;
     const offHalfW = Math.ceil(hw + reach + 24 * scale);
     const offHalfH = Math.ceil(hh + 26 * scale);
     const offW = Math.max(8, offHalfW * 2);
     const offH = Math.max(8, offHalfH * 2);
-
     const offCanvas = document.createElement('canvas');
     offCanvas.width = offW;
     offCanvas.height = offH;
@@ -982,26 +872,12 @@ export function drawUnifiedGrungeSplash(
         bristleCount: 11
       });
       octx.fill();
+      drawHorizontalBristleFibers(octx, 0, 0, hw, hh, scale, seedBase + 43, palette, 10, reach * 1.1);
 
-      drawHorizontalBristleFibers(
-        octx,
-        0,
-        0,
-        hw,
-        hh,
-        scale,
-        seedBase + 43,
-        palette,
-        10,
-        reach * 1.1
-      );
-
-      // Прорезаем сухие просветы/царапины щетины только внутри краски (не затрагивая фото фона!)
       octx.globalCompositeOperation = 'destination-out';
       for (let g = 0; g < 15; g++) {
         const edgeSide = g < 8 ? -1 : 1;
-        const gy =
-          edgeSide * (hh * (0.42 + deterministicHash(seedBase + g * 19) * 0.56));
+        const gy = edgeSide * (hh * (0.42 + deterministicHash(seedBase + g * 19) * 0.56));
         const gx1 = (deterministicHash(seedBase + g * 23) - 0.5) * hw * 1.65;
         const gapLen = (48 + deterministicHash(seedBase + g * 31) * 145) * scale;
         const gapThick = (1.6 + deterministicHash(seedBase + g * 37) * 4.4) * scale;
@@ -1014,15 +890,14 @@ export function drawUnifiedGrungeSplash(
         octx.fill();
       }
 
-      // Мелкие потёртые сколы у кромки
       for (let c = 0; c < 18; c++) {
-        const cx = (deterministicHash(seedBase + c * 59) - 0.5) * hw * 1.9;
-        const cy =
+        const ccx = (deterministicHash(seedBase + c * 59) - 0.5) * hw * 1.9;
+        const ccy =
           (c % 2 === 0 ? -1 : 1) * (hh * (0.68 + deterministicHash(seedBase + c * 61) * 0.34));
         const rx = (5 + deterministicHash(seedBase + c * 67) * 14) * scale;
         const ry = (1.8 + deterministicHash(seedBase + c * 71) * 3.8) * scale;
         octx.beginPath();
-        octx.ellipse(cx, cy, rx, ry, (deterministicHash(seedBase + c * 17) - 0.5) * 0.3, 0, Math.PI * 2);
+        octx.ellipse(ccx, ccy, rx, ry, (deterministicHash(seedBase + c * 17) - 0.5) * 0.3, 0, Math.PI * 2);
         octx.fill();
       }
 
@@ -1045,7 +920,7 @@ export function drawUnifiedGrungeSplash(
     return { splashW: offW, splashH: offH };
   }
 
-  // 6) «Клиновидный росчерк (Tapered Speed Brush)»
+  // 6) Клиновидный росчерк (Tapered Speed Brush)
   const leftReach = 24 * scale * padMult;
   const rightTailReach = 74 * scale * padMult;
   const leftHH = hh * 1.14;
@@ -1055,31 +930,24 @@ export function drawUnifiedGrungeSplash(
   ctx.fillStyle = createVolumetricBrushFill(ctx, 0, 0, hw, hh, palette);
   ctx.beginPath();
   ctx.moveTo(-hw - leftReach * 0.65, -leftHH * 0.86);
-  ctx.quadraticCurveTo(
-    -hw * 0.15,
-    -leftHH * 0.94,
-    hw + rightTailReach * 0.72,
-    -rightHH * 0.78
-  );
-  // Длинные острые волокна клиновидного хвоста справа
+  ctx.quadraticCurveTo(-hw * 0.15, -leftHH * 0.94, hw + rightTailReach * 0.72, -rightHH * 0.78);
+
   for (let b = 0; b < 7; b++) {
     const bt = b / 6;
     const by = -rightHH * 0.72 + bt * (rightHH * 1.44);
     const outX =
       hw +
       rightTailReach *
-        (0.45 + (1 - Math.abs(bt - 0.5) * 1.3) * 0.58 + deterministicHash(seedBase + b * 23) * 0.32);
+        (0.45 +
+          (1 - Math.abs(bt - 0.5) * 1.3) * 0.58 +
+          deterministicHash(seedBase + b * 23) * 0.32);
     const inX = hw + rightTailReach * (0.08 + deterministicHash(seedBase + b * 31) * 0.18);
     ctx.lineTo(outX, by);
     ctx.lineTo(inX, by + (rightHH * 1.44) / 10);
   }
-  ctx.quadraticCurveTo(
-    -hw * 0.15,
-    leftHH * 1.02,
-    -hw - leftReach * 0.5,
-    leftHH * 0.88
-  );
-  // Грубые рваные зубцы у широкого левого основания
+
+  ctx.quadraticCurveTo(-hw * 0.15, leftHH * 1.02, -hw - leftReach * 0.5, leftHH * 0.88);
+
   for (let b = 6; b >= 0; b--) {
     const bt = b / 6;
     const by = -leftHH * 0.8 + bt * (leftHH * 1.6);
@@ -1088,15 +956,15 @@ export function drawUnifiedGrungeSplash(
     ctx.lineTo(outX, by);
     ctx.lineTo(inX, by - (leftHH * 1.6) / 11);
   }
+
   ctx.closePath();
   ctx.fill();
   clearBrushShadow(ctx);
 
-  // Тонкие скоростные волокна клина справа
   ctx.save();
   ctx.fillStyle = palette.mainColor;
   for (let s = 0; s < 7; s++) {
-    const sy = ((s / 6) - 0.5) * rightHH * 1.75;
+    const sy = (s / 6 - 0.5) * rightHH * 1.75;
     const sx = hw + rightTailReach * 0.2;
     const tx = hw + rightTailReach * (0.85 + deterministicHash(seedBase + s * 59) * 0.65);
     const th = (1.5 + deterministicHash(seedBase + s * 61) * 3) * scale;
@@ -1109,11 +977,10 @@ export function drawUnifiedGrungeSplash(
     ctx.fill();
   }
   ctx.restore();
-
   ctx.restore();
+
   return {
     splashW: hw * 2 + leftReach + rightTailReach * 1.25,
     splashH: leftHH * 2 + 20 * scale
   };
 }
-
