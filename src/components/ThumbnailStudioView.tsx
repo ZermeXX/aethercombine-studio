@@ -42,7 +42,6 @@ import {
 } from 'lucide-react';
 import {
   CornerPositionPresetId,
-  DEFAULT_BADGE_CAPSULES,
   DEFAULT_BG_ADJUST,
   LINE_COLOR_SWATCHES,
   SPLASH_COLOR_SWATCHES,
@@ -760,12 +759,57 @@ const DEFAULT_HOOK_LAYOUT: HookTextLayout = {
 
 export type ThumbnailSlotId = 'A' | 'B' | 'C';
 export type BadgePosition = 'left' | 'right';
+export type BadgeGroup = 'base' | 'ambience_3h';
 
-const DEFAULT_BADGE_POSITIONS: [BadgePosition, BadgePosition, BadgePosition] = [
-  'left',
-  'left',
-  'left'
+export interface BadgePresetConfig {
+  id: string;
+  text: string;
+  group: BadgeGroup;
+}
+
+export const BADGE_PRESETS_CONFIG: BadgePresetConfig[] = [
+  // Группа «База» (8)
+  { id: '4k_ultra_hd', text: '4K ULTRA HD', group: 'base' },
+  { id: 'documentary', text: 'DOCUMENTARY', group: 'base' },
+  { id: 'true_story', text: 'TRUE STORY', group: 'base' },
+  { id: 'real_events', text: 'REAL EVENTS', group: 'base' },
+  { id: 'based_on_facts', text: 'BASED ON FACTS', group: 'base' },
+  { id: 'history', text: 'HISTORY', group: 'base' },
+  { id: 'archive', text: 'ARCHIVE', group: 'base' },
+  { id: 'full_story', text: 'FULL STORY', group: 'base' },
+  // Группа «Ambience · 3 часа» (12)
+  { id: '3_hours', text: '3 HOURS', group: 'ambience_3h' },
+  { id: 'rain_sounds', text: 'RAIN SOUNDS', group: 'ambience_3h' },
+  { id: 'thunderstorm', text: 'THUNDERSTORM', group: 'ambience_3h' },
+  { id: 'fireplace', text: 'FIREPLACE', group: 'ambience_3h' },
+  { id: 'ocean_waves', text: 'OCEAN WAVES', group: 'ambience_3h' },
+  { id: 'forest_night', text: 'FOREST NIGHT', group: 'ambience_3h' },
+  { id: 'deep_sleep', text: 'DEEP SLEEP', group: 'ambience_3h' },
+  { id: 'study_and_focus', text: 'STUDY & FOCUS', group: 'ambience_3h' },
+  { id: 'relax', text: 'RELAX', group: 'ambience_3h' },
+  { id: 'no_ads', text: 'NO ADS', group: 'ambience_3h' },
+  { id: 'dark_screen', text: 'DARK SCREEN', group: 'ambience_3h' },
+  { id: 'asmr', text: 'ASMR', group: 'ambience_3h' }
 ];
+
+export interface BadgeItemState {
+  enabled: boolean;
+  position: BadgePosition;
+}
+
+const createDefaultPresetBadgesState = (): Record<string, BadgeItemState> => {
+  const map: Record<string, BadgeItemState> = {};
+  for (const preset of BADGE_PRESETS_CONFIG) {
+    if (preset.id === '3_hours') {
+      map[preset.id] = { enabled: true, position: 'left' };
+    } else if (preset.id === 'no_ads') {
+      map[preset.id] = { enabled: true, position: 'right' };
+    } else {
+      map[preset.id] = { enabled: false, position: 'left' };
+    }
+  }
+  return map;
+};
 
 export interface ThumbnailSlotConfig {
   topText: string;
@@ -777,8 +821,10 @@ export interface ThumbnailSlotConfig {
   splashPaddingPct: number;
   splashShadowPct: number;
   badgesEnabled: boolean;
-  badgeTexts: [string, string, string];
-  badgePositions: [BadgePosition, BadgePosition, BadgePosition];
+  presetBadges: Record<string, BadgeItemState>;
+  customBadgeText: string;
+  customBadgeEnabled: boolean;
+  customBadgePosition: BadgePosition;
   badgeScalePct: number;
   hookLayout: HookTextLayout;
   bgAdjust: SlotBgAdjustConfig;
@@ -794,6 +840,10 @@ interface PersistedSlotState {
   splashPaddingPct?: number;
   splashShadowPct?: number;
   badgesEnabled?: boolean;
+  presetBadges?: Record<string, Partial<BadgeItemState>>;
+  customBadgeText?: string;
+  customBadgeEnabled?: boolean;
+  customBadgePosition?: BadgePosition;
   badgeTexts?: string[];
   badgePositions?: BadgePosition[];
   badgeScalePct?: number;
@@ -853,8 +903,10 @@ const createDefaultSlotConfig = (
     splashPaddingPct: 100,
     splashShadowPct: 100,
     badgesEnabled: true,
-    badgeTexts: [...DEFAULT_BADGE_CAPSULES],
-    badgePositions: [...DEFAULT_BADGE_POSITIONS],
+    presetBadges: createDefaultPresetBadgesState(),
+    customBadgeText: '',
+    customBadgeEnabled: false,
+    customBadgePosition: 'left',
     badgeScalePct: 100,
     hookLayout: { ...DEFAULT_HOOK_LAYOUT },
     bgAdjust: { ...DEFAULT_BG_ADJUST }
@@ -882,18 +934,46 @@ const hydrateSlotConfig = (
         ? raw.bottomLine.toUpperCase()
         : base.bottomText;
 
-  const normalizedBadges: [string, string, string] = [
-    typeof raw.badgeTexts?.[0] === 'string' ? raw.badgeTexts[0] : base.badgeTexts[0],
-    typeof raw.badgeTexts?.[1] === 'string' ? raw.badgeTexts[1] : base.badgeTexts[1],
-    typeof raw.badgeTexts?.[2] === 'string' ? raw.badgeTexts[2] : base.badgeTexts[2]
-  ];
-
   const normalizeBadgePos = (pos: unknown): BadgePosition => (pos === 'right' ? 'right' : 'left');
-  const normalizedBadgePositions: [BadgePosition, BadgePosition, BadgePosition] = [
-    normalizeBadgePos(raw.badgePositions?.[0]),
-    normalizeBadgePos(raw.badgePositions?.[1]),
-    normalizeBadgePos(raw.badgePositions?.[2])
-  ];
+  const hydratedPresetBadges = createDefaultPresetBadgesState();
+
+  if (raw.presetBadges && typeof raw.presetBadges === 'object') {
+    for (const preset of BADGE_PRESETS_CONFIG) {
+      const savedItem = raw.presetBadges[preset.id];
+      if (savedItem && typeof savedItem === 'object') {
+        hydratedPresetBadges[preset.id] = {
+          enabled: Boolean(savedItem.enabled),
+          position: normalizeBadgePos(savedItem.position)
+        };
+      }
+    }
+  } else if (Array.isArray(raw.badgeTexts)) {
+    for (const preset of BADGE_PRESETS_CONFIG) {
+      hydratedPresetBadges[preset.id] = { enabled: false, position: 'left' };
+    }
+    let leftoverCustom = '';
+    let leftoverCustomPos: BadgePosition = 'left';
+    raw.badgeTexts.forEach((rawTxt, i) => {
+      const upper = String(rawTxt || '').trim().toUpperCase();
+      if (!upper || /^(UNCENSORED|18\+)$/.test(upper)) return;
+      const pos = normalizeBadgePos(raw.badgePositions?.[i]);
+      const matched = BADGE_PRESETS_CONFIG.find(p => p.text === upper);
+      if (matched) {
+        hydratedPresetBadges[matched.id] = { enabled: true, position: pos };
+      } else if (!leftoverCustom) {
+        leftoverCustom = upper;
+        leftoverCustomPos = pos;
+      }
+    });
+    if (leftoverCustom && typeof raw.customBadgeText !== 'string') {
+      raw = {
+        ...raw,
+        customBadgeText: leftoverCustom,
+        customBadgeEnabled: true,
+        customBadgePosition: leftoverCustomPos
+      };
+    }
+  }
 
   const resolvedShape: SplashShapeId =
     raw.splashShape && VALID_SPLASH_SHAPES.has(raw.splashShape)
@@ -932,8 +1012,17 @@ const hydrateSlotConfig = (
         ? Math.max(0, Math.min(160, raw.splashShadowPct))
         : base.splashShadowPct,
     badgesEnabled: typeof raw.badgesEnabled === 'boolean' ? raw.badgesEnabled : base.badgesEnabled,
-    badgeTexts: normalizedBadges,
-    badgePositions: normalizedBadgePositions,
+    presetBadges: hydratedPresetBadges,
+    customBadgeText:
+      typeof raw.customBadgeText === 'string' &&
+      !/^(UNCENSORED|18\+)$/.test(raw.customBadgeText.trim().toUpperCase())
+        ? raw.customBadgeText
+        : base.customBadgeText,
+    customBadgeEnabled:
+      typeof raw.customBadgeEnabled === 'boolean'
+        ? raw.customBadgeEnabled
+        : base.customBadgeEnabled,
+    customBadgePosition: normalizeBadgePos(raw.customBadgePosition),
     badgeScalePct:
       typeof raw.badgeScalePct === 'number'
         ? Math.max(60, Math.min(150, raw.badgeScalePct))
@@ -1027,6 +1116,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const mobileFeedCanvasCRef = useRef<HTMLCanvasElement | null>(null);
 
   const [activeSlot, setActiveSlot] = useState<ThumbnailSlotId>('A');
+  const [badgeFilterQuery, setBadgeFilterQuery] = useState<string>('');
   const [slotImages, setSlotImages] = useState<Record<ThumbnailSlotId, HTMLImageElement | null>>({
     A: null,
     B: null,
@@ -1283,12 +1373,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const handleCopySlotSettingsTo = (targetSlot: ThumbnailSlotId) => {
     if (targetSlot === activeSlot) return;
     const sourceCfg = slotConfigs[activeSlot];
+    const clonedPresetBadges: Record<string, BadgeItemState> = {};
+    for (const preset of BADGE_PRESETS_CONFIG) {
+      const item = sourceCfg.presetBadges?.[preset.id];
+      clonedPresetBadges[preset.id] = {
+        enabled: Boolean(item?.enabled),
+        position: item?.position === 'right' ? 'right' : 'left'
+      };
+    }
     const clonedCfg: ThumbnailSlotConfig = {
       ...sourceCfg,
-      badgeTexts: [...sourceCfg.badgeTexts] as [string, string, string],
-      badgePositions: [
-        ...(sourceCfg.badgePositions || DEFAULT_BADGE_POSITIONS)
-      ] as [BadgePosition, BadgePosition, BadgePosition],
+      presetBadges: clonedPresetBadges,
       hookLayout: { ...sourceCfg.hookLayout },
       bgAdjust: { ...sourceCfg.bgAdjust }
     };
@@ -1502,22 +1597,34 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillRect(0, 0, w, h);
       }
 
-      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (Слева / Справа — отдельно для каждого активного бейджа)
-      const activeBadgeItems = cfg.badgesEnabled
-        ? cfg.badgeTexts
-            .map((t, idx) => ({
-              label: (t || '').trim().toUpperCase(),
-              position: (cfg.badgePositions?.[idx] === 'right' ? 'right' : 'left') as BadgePosition
-            }))
-            .filter(item => item.label.length > 0)
-        : [];
+      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (20 пресетов + 21-й кастомный, перенос строк и авто-масштаб)
+      const activeBadgeItems: Array<{ label: string; position: BadgePosition }> = [];
+      if (cfg.badgesEnabled) {
+        for (const preset of BADGE_PRESETS_CONFIG) {
+          const state = cfg.presetBadges?.[preset.id];
+          if (state?.enabled) {
+            activeBadgeItems.push({
+              label: preset.text.toUpperCase(),
+              position: state.position === 'right' ? 'right' : 'left'
+            });
+          }
+        }
+        const customTrimmed = (cfg.customBadgeText || '').trim().toUpperCase();
+        if (cfg.customBadgeEnabled && customTrimmed.length > 0) {
+          activeBadgeItems.push({
+            label: customTrimmed,
+            position: cfg.customBadgePosition === 'right' ? 'right' : 'left'
+          });
+        }
+      }
 
       if (activeBadgeItems.length > 0) {
         const badgeUserScale = Math.max(0.6, Math.min(1.5, (cfg.badgeScalePct ?? 100) / 100));
-        const bScale = scale * badgeUserScale;
-        const badgeFontPx = 14 * bScale;
         const badgeFontFamily = '"Montserrat", "Inter", sans-serif';
-        const baseTrackingPx = 2.0 * bScale;
+        const paddingX = 32 * scale;
+        const topY = 28 * scale;
+        const maxAvailableW = w - paddingX * 2;
+        const maxAvailableH = h * 0.36;
 
         const measureTrackedWidth = (text: string, trackingPx: number): number => {
           const chars = Array.from(text);
@@ -1546,75 +1653,134 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           }
         };
 
-        ctx.font = `800 ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
-
-        const paddingX = 32 * scale;
-        const horizontalPad = 36 * bScale;
-        const badgeGap = 12 * bScale;
-        const badgeH = 42 * bScale;
-
-        const measuredItems = activeBadgeItems.map(item => ({
-          ...item,
-          rawW: Math.max(
-            106 * bScale,
-            measureTrackedWidth(item.label, baseTrackingPx) + horizontalPad
-          )
-        }));
-
-        const leftItems = measuredItems.filter(item => item.position === 'left');
-        const rightItems = measuredItems.filter(item => item.position === 'right');
-
-        const leftRawW =
-          leftItems.reduce((sum, item) => sum + item.rawW, 0) +
-          badgeGap * Math.max(0, leftItems.length - 1);
-        const rightRawW =
-          rightItems.reduce((sum, item) => sum + item.rawW, 0) +
-          badgeGap * Math.max(0, rightItems.length - 1);
-        const interGroupGap = leftItems.length > 0 && rightItems.length > 0 ? badgeGap : 0;
-        const totalRawW = leftRawW + rightRawW + interGroupGap;
-
-        const maxAvailableW = w - paddingX * 2;
-        const fitFactor = totalRawW > maxAvailableW ? maxAvailableW / totalRawW : 1;
-
-        if (fitFactor < 1) {
-          ctx.font = `800 ${Math.max(1, Math.round(badgeFontPx * fitFactor))}px ${badgeFontFamily}`;
+        interface MeasuredBadge {
+          label: string;
+          position: BadgePosition;
+          w: number;
+        }
+        interface BadgeRowLayout {
+          left: MeasuredBadge[];
+          right: MeasuredBadge[];
+          y: number;
         }
 
-        const effectiveH = badgeH * fitFactor;
-        const effectiveGap = badgeGap * fitFactor;
-        const effectiveTracking = baseTrackingPx * fitFactor;
-        const topY = 28 * scale;
+        const computeBadgeLayout = (fitFactor: number) => {
+          const effScale = scale * badgeUserScale * fitFactor;
+          const fontPx = Math.max(8 * scale, 14 * effScale);
+          const trackingPx = 2.0 * effScale;
+          const horizontalPad = 34 * effScale;
+          const gapX = 12 * effScale;
+          const gapY = 10 * effScale;
+          const badgeH = 42 * effScale;
 
-        const drawBadgeCapsule = (label: string, bx: number, bw: number) => {
+          ctx.font = `800 ${Math.max(1, Math.round(fontPx))}px ${badgeFontFamily}`;
+
+          const measured: MeasuredBadge[] = activeBadgeItems.map(item => ({
+            label: item.label,
+            position: item.position,
+            w: Math.min(
+              maxAvailableW,
+              Math.max(96 * effScale, measureTrackedWidth(item.label, trackingPx) + horizontalPad)
+            )
+          }));
+
+          const leftList = measured.filter(m => m.position === 'left');
+          const rightList = measured.filter(m => m.position === 'right');
+
+          const rows: BadgeRowLayout[] = [];
+          const ensureRow = (idx: number): BadgeRowLayout => {
+            while (rows.length <= idx) {
+              rows.push({ left: [], right: [], y: 0 });
+            }
+            return rows[idx];
+          };
+
+          const rowUsedWidth = (r: BadgeRowLayout): number => {
+            const lw =
+              r.left.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.left.length - 1);
+            const rw =
+              r.right.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.right.length - 1);
+            const midGap = r.left.length > 0 && r.right.length > 0 ? gapX : 0;
+            return lw + rw + midGap;
+          };
+
+          let leftRowIdx = 0;
+          for (const item of leftList) {
+            let row = ensureRow(leftRowIdx);
+            const currentW = rowUsedWidth(row);
+            const addedW = currentW > 0 ? gapX + item.w : item.w;
+            if (currentW > 0 && currentW + addedW > maxAvailableW) {
+              leftRowIdx += 1;
+              row = ensureRow(leftRowIdx);
+            }
+            row.left.push(item);
+          }
+
+          let rightRowIdx = 0;
+          for (const item of rightList) {
+            let row = ensureRow(rightRowIdx);
+            const currentW = rowUsedWidth(row);
+            const addedW = currentW > 0 ? gapX + item.w : item.w;
+            while (currentW > 0 && currentW + addedW > maxAvailableW) {
+              rightRowIdx += 1;
+              row = ensureRow(rightRowIdx);
+              currentW = rowUsedWidth(row);
+              addedW = currentW > 0 ? gapX + item.w : item.w;
+            }
+            row.right.push(item);
+          }
+
+          rows.forEach((r, idx) => {
+            r.y = topY + idx * (badgeH + gapY);
+          });
+
+          const totalH =
+            rows.length > 0 ? rows.length * badgeH + (rows.length - 1) * gapY : 0;
+
+          return { rows, totalH, badgeH, gapX, trackingPx, effScale };
+        };
+
+        let fitFactor = 1;
+        let layout = computeBadgeLayout(fitFactor);
+        if (layout.totalH > maxAvailableH && layout.totalH > 0) {
+          fitFactor = Math.max(0.45, maxAvailableH / layout.totalH);
+          layout = computeBadgeLayout(fitFactor);
+        }
+
+        const drawBadgeCapsule = (label: string, bx: number, by: number, bw: number) => {
           ctx.save();
-          ctx.fillStyle = 'rgba(10, 14, 24, 0.85)';
+          ctx.fillStyle = 'rgba(10, 14, 24, 0.88)';
           ctx.strokeStyle = '#F59E0B';
-          ctx.lineWidth = Math.max(1.5, 2 * bScale * fitFactor);
+          ctx.lineWidth = Math.max(1.5, 2 * layout.effScale);
           ctx.beginPath();
-          ctx.roundRect(bx, topY, bw, effectiveH, 8 * bScale * fitFactor);
+          ctx.roundRect(bx, by, bw, layout.badgeH, 8 * layout.effScale);
           ctx.fill();
           ctx.stroke();
 
           ctx.fillStyle = '#FACC15';
-          drawTrackedCenteredText(label, bx + bw / 2, topY + effectiveH * 0.52, effectiveTracking);
+          drawTrackedCenteredText(
+            label,
+            bx + bw / 2,
+            by + layout.badgeH * 0.52,
+            layout.trackingPx
+          );
           ctx.restore();
         };
 
-        let leftCursorX = paddingX;
-        for (let i = 0; i < leftItems.length; i++) {
-          const item = leftItems[i];
-          const bw = item.rawW * fitFactor;
-          drawBadgeCapsule(item.label, leftCursorX, bw);
-          leftCursorX += bw + effectiveGap;
-        }
+        for (const row of layout.rows) {
+          let leftCursorX = paddingX;
+          for (const item of row.left) {
+            drawBadgeCapsule(item.label, leftCursorX, row.y, item.w);
+            leftCursorX += item.w + layout.gapX;
+          }
 
-        let rightEdgeX = w - paddingX;
-        for (let i = rightItems.length - 1; i >= 0; i--) {
-          const item = rightItems[i];
-          const bw = item.rawW * fitFactor;
-          const bx = rightEdgeX - bw;
-          drawBadgeCapsule(item.label, bx, bw);
-          rightEdgeX = bx - effectiveGap;
+          let rightEdgeX = w - paddingX;
+          for (let i = row.right.length - 1; i >= 0; i--) {
+            const item = row.right[i];
+            const bx = rightEdgeX - item.w;
+            drawBadgeCapsule(item.label, bx, row.y, item.w);
+            rightEdgeX = bx - layout.gapX;
+          }
         }
       }
 
@@ -1917,7 +2083,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             .filter(Boolean)
             .join(' ')
             .trim(),
-          badges: slotConfigs.A.badgesEnabled ? slotConfigs.A.badgeTexts : [],
+          badges: slotConfigs.A.badgesEnabled
+            ? [
+                ...BADGE_PRESETS_CONFIG.filter(p => slotConfigs.A.presetBadges?.[p.id]?.enabled).map(
+                  p => p.text
+                ),
+                ...(slotConfigs.A.customBadgeEnabled && slotConfigs.A.customBadgeText.trim()
+                  ? [slotConfigs.A.customBadgeText.trim().toUpperCase()]
+                  : [])
+              ]
+            : [],
           attachedAt: new Date().toISOString()
         })
       );
@@ -3713,134 +3888,323 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (СЛЕВА / СПРАВА) */}
-            <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Верхние капсулы-бейджи ({activeSlot})</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateSlotConfig(activeSlot, prev => ({
-                      ...prev,
-                      badgesEnabled: !prev.badgesEnabled
-                    }))
-                  }
-                  className={`min-h-[30px] px-3 py-1 rounded-lg border text-[10.5px] font-bold cursor-pointer transition ${
-                    activeConfig.badgesEnabled
-                      ? 'bg-[#090D16] border-[#F59E0B] text-[#FACC15]'
-                      : 'bg-[#0b0f19] border-white/[0.08] text-white/55 hover:text-white'
-                  }`}
-                >
-                  {activeConfig.badgesEnabled ? 'Вкл' : 'Выкл'}
-                </button>
-              </div>
+            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (20 ПРЕСЕТОВ В 2 ГРУППАХ + 21-Й КАСТОМНЫЙ) */}
+            {(() => {
+              const enabledPresetsCount = BADGE_PRESETS_CONFIG.filter(
+                p => activeConfig.presetBadges?.[p.id]?.enabled
+              ).length;
+              const normalizedFilter = badgeFilterQuery.trim().toUpperCase();
+              const baseGroupPresets = BADGE_PRESETS_CONFIG.filter(
+                p =>
+                  p.group === 'base' &&
+                  (!normalizedFilter || p.text.includes(normalizedFilter))
+              );
+              const ambienceGroupPresets = BADGE_PRESETS_CONFIG.filter(
+                p =>
+                  p.group === 'ambience_3h' &&
+                  (!normalizedFilter || p.text.includes(normalizedFilter))
+              );
 
-              {activeConfig.badgesEnabled && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
-                    {[0, 1, 2].map(badgeIdx => {
-                      const badgeText = activeConfig.badgeTexts[badgeIdx];
-                      const isBadgeActive = badgeText.trim().length > 0;
-                      const badgePos: BadgePosition =
-                        activeConfig.badgePositions?.[badgeIdx] === 'right' ? 'right' : 'left';
-                      return (
-                        <div
-                          key={`badge-input-${activeSlot}-${badgeIdx}`}
-                          className="space-y-1.5"
+              const renderPresetCard = (preset: BadgePresetConfig) => {
+                const itemState = activeConfig.presetBadges?.[preset.id] || {
+                  enabled: false,
+                  position: 'left' as BadgePosition
+                };
+                const isEnabled = Boolean(itemState.enabled);
+                const pos: BadgePosition = itemState.position === 'right' ? 'right' : 'left';
+
+                return (
+                  <div
+                    key={`badge-preset-${activeSlot}-${preset.id}`}
+                    className={`rounded-xl p-2 bg-[#090D16] border transition space-y-1.5 ${
+                      isEnabled
+                        ? 'border-[#F59E0B] shadow-[0_0_12px_rgba(245,158,11,0.14)]'
+                        : 'border-white/[0.08] opacity-85 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span
+                        className={`text-[10px] font-extrabold uppercase tracking-wider truncate ${
+                          isEnabled ? 'text-[#FACC15]' : 'text-white/75'
+                        }`}
+                        title={preset.text}
+                      >
+                        {preset.text}
+                      </span>
+                      <button
+                        type="button"
+                        aria-pressed={isEnabled}
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => {
+                            const cur = prev.presetBadges?.[preset.id] || {
+                              enabled: false,
+                              position: 'left' as BadgePosition
+                            };
+                            return {
+                              ...prev,
+                              presetBadges: {
+                                ...prev.presetBadges,
+                                [preset.id]: { ...cur, enabled: !cur.enabled }
+                              }
+                            };
+                          })
+                        }
+                        className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold shrink-0 cursor-pointer transition ${
+                          isEnabled
+                            ? 'bg-amber-400/20 border-amber-400/70 text-[#FACC15]'
+                            : 'bg-[#0b0f19] border-white/[0.1] text-white/50 hover:text-white'
+                        }`}
+                      >
+                        {isEnabled ? 'Вкл' : 'Выкл'}
+                      </button>
+                    </div>
+
+                    <div
+                      role="group"
+                      aria-label={`Позиция бейджа ${preset.text}`}
+                      className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#0b0f19] border border-white/[0.06]"
+                    >
+                      {(
+                        [
+                          { value: 'left', label: 'Слева' },
+                          { value: 'right', label: 'Справа' }
+                        ] as const
+                      ).map(opt => {
+                        const isSelected = pos === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() =>
+                              updateSlotConfig(activeSlot, prev => {
+                                const cur = prev.presetBadges?.[preset.id] || {
+                                  enabled: false,
+                                  position: 'left' as BadgePosition
+                                };
+                                return {
+                                  ...prev,
+                                  presetBadges: {
+                                    ...prev.presetBadges,
+                                    [preset.id]: { ...cur, position: opt.value }
+                                  }
+                                };
+                              })
+                            }
+                            className={`min-h-[24px] px-1.5 py-0.5 rounded-md text-[9.5px] font-bold cursor-pointer transition ${
+                              isSelected
+                                ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
+                                : 'border border-transparent text-white/50 hover:text-white hover:bg-white/[0.04]'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <div className="rounded-xl p-3.5 space-y-3 bg-[#111827]/80 border border-white/[0.08]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Верхние капсулы-бейджи ({activeSlot})</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10.5px] font-mono font-bold text-[#FACC15] bg-[#090D16] border border-amber-400/35 px-2 py-0.5 rounded-md tabular-nums">
+                        Включено: {enabledPresetsCount} / 20
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            badgesEnabled: !prev.badgesEnabled
+                          }))
+                        }
+                        className={`min-h-[30px] px-3 py-1 rounded-lg border text-[10.5px] font-bold cursor-pointer transition ${
+                          activeConfig.badgesEnabled
+                            ? 'bg-[#090D16] border-[#F59E0B] text-[#FACC15]'
+                            : 'bg-[#0b0f19] border-white/[0.08] text-white/55 hover:text-white'
+                        }`}
+                      >
+                        {activeConfig.badgesEnabled ? 'Вкл' : 'Выкл'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {activeConfig.badgesEnabled && (
+                    <>
+                      {/* Строка поиска и кнопка «Выключить все» */}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={badgeFilterQuery}
+                          onChange={e => setBadgeFilterQuery(e.target.value)}
+                          placeholder="Фильтр бейджей…"
+                          className="flex-1 min-h-[34px] bg-[#0b0f19] border border-white/[0.1] focus:border-amber-400 rounded-lg px-2.5 py-1 text-xs text-[#f8fafc] placeholder:text-white/40 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSlotConfig(activeSlot, prev => {
+                              const cleared: Record<string, BadgeItemState> = {};
+                              for (const p of BADGE_PRESETS_CONFIG) {
+                                const oldItem = prev.presetBadges?.[p.id];
+                                cleared[p.id] = {
+                                  enabled: false,
+                                  position: oldItem?.position === 'right' ? 'right' : 'left'
+                                };
+                              }
+                              return {
+                                ...prev,
+                                presetBadges: cleared,
+                                customBadgeEnabled: false
+                              };
+                            })
+                          }
+                          className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#0b0f19] hover:bg-rose-950/35 border border-white/[0.1] hover:border-rose-500/45 text-[10.5px] font-bold text-white/75 hover:text-rose-200 shrink-0 cursor-pointer transition"
                         >
+                          Выключить все
+                        </button>
+                      </div>
+
+                      {/* Группа «База» (8) */}
+                      {baseGroupPresets.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-white/55">
+                            База
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {baseGroupPresets.map(renderPresetCard)}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Группа «Ambience · 3 часа» (12) */}
+                      {ambienceGroupPresets.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300/80">
+                            Ambience · 3 часа
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {ambienceGroupPresets.map(renderPresetCard)}
+                          </div>
+                        </div>
+                      )}
+
+                      {baseGroupPresets.length === 0 && ambienceGroupPresets.length === 0 && (
+                        <div className="text-center py-3 text-[11px] text-white/45 bg-[#090D16] rounded-xl border border-white/[0.06]">
+                          Нет бейджей, подходящих под «{badgeFilterQuery}»
+                        </div>
+                      )}
+
+                      {/* Кастомный бейдж (21-я капсула, вне счётчика 20) */}
+                      <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
+                            Свой кастомный бейдж
+                          </span>
+                          <button
+                            type="button"
+                            aria-pressed={activeConfig.customBadgeEnabled}
+                            onClick={() =>
+                              updateSlotConfig(activeSlot, prev => ({
+                                ...prev,
+                                customBadgeEnabled: !prev.customBadgeEnabled
+                              }))
+                            }
+                            className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold cursor-pointer transition ${
+                              activeConfig.customBadgeEnabled
+                                ? 'bg-amber-400/20 border-amber-400/70 text-[#FACC15]'
+                                : 'bg-[#0b0f19] border-white/[0.1] text-white/50 hover:text-white'
+                            }`}
+                          >
+                            {activeConfig.customBadgeEnabled ? 'Вкл' : 'Выкл'}
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
                             type="text"
-                            value={badgeText}
+                            value={activeConfig.customBadgeText}
                             onChange={e => {
                               const val = e.target.value.toUpperCase();
-                              updateSlotConfig(activeSlot, prev => {
-                                const nextTexts: [string, string, string] = [...prev.badgeTexts] as [
-                                  string,
-                                  string,
-                                  string
-                                ];
-                                nextTexts[badgeIdx] = val;
-                                return { ...prev, badgeTexts: nextTexts };
-                              });
+                              updateSlotConfig(activeSlot, prev => ({
+                                ...prev,
+                                customBadgeText: val,
+                                customBadgeEnabled: val.trim().length > 0 ? true : prev.customBadgeEnabled
+                              }));
                             }}
-                            placeholder={`Бейдж #${badgeIdx + 1}`}
-                            className="w-full min-h-[36px] bg-[#0b0f19] border border-amber-400/35 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
+                            placeholder="СВОЙ ТЕКСТ КАПСУЛЫ..."
+                            className="flex-1 min-h-[34px] bg-[#090D16] border border-[#F59E0B]/45 focus:border-[#F59E0B] rounded-lg px-2.5 py-1 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
                           />
-
-                          {isBadgeActive && (
-                            <div
-                              role="group"
-                              aria-label={`Позиция бейджа #${badgeIdx + 1}`}
-                              className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#090D16] border border-white/[0.08]"
-                            >
-                              {(
-                                [
-                                  { value: 'left', label: 'Слева' },
-                                  { value: 'right', label: 'Справа' }
-                                ] as const
-                              ).map(opt => {
-                                const isSelected = badgePos === opt.value;
-                                return (
-                                  <button
-                                    key={opt.value}
-                                    type="button"
-                                    aria-pressed={isSelected}
-                                    onClick={() =>
-                                      updateSlotConfig(activeSlot, prev => {
-                                        const nextPositions: [
-                                          BadgePosition,
-                                          BadgePosition,
-                                          BadgePosition
-                                        ] = [
-                                          ...(prev.badgePositions || DEFAULT_BADGE_POSITIONS)
-                                        ] as [BadgePosition, BadgePosition, BadgePosition];
-                                        nextPositions[badgeIdx] = opt.value;
-                                        return { ...prev, badgePositions: nextPositions };
-                                      })
-                                    }
-                                    className={`min-h-[26px] px-1.5 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
-                                      isSelected
-                                        ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
-                                        : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
-                                    }`}
-                                  >
-                                    {opt.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
+                          <div
+                            role="group"
+                            aria-label="Позиция кастомного бейджа"
+                            className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#090D16] border border-white/[0.08] shrink-0 sm:w-36"
+                          >
+                            {(
+                              [
+                                { value: 'left', label: 'Слева' },
+                                { value: 'right', label: 'Справа' }
+                              ] as const
+                            ).map(opt => {
+                              const isSelected = activeConfig.customBadgePosition === opt.value;
+                              return (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  aria-pressed={isSelected}
+                                  onClick={() =>
+                                    updateSlotConfig(activeSlot, prev => ({
+                                      ...prev,
+                                      customBadgePosition: opt.value
+                                    }))
+                                  }
+                                  className={`min-h-[26px] px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    isSelected
+                                      ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
+                                      : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
 
-                  <div className="space-y-1 pt-0.5">
-                    <div className="flex items-center justify-between text-[10.5px]">
-                      <span className="text-white/70 font-semibold">Размер бейджей</span>
-                      <span className="font-mono font-bold text-[#FACC15] tabular-nums">
-                        {activeConfig.badgeScalePct}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={60}
-                      max={150}
-                      step={2}
-                      value={activeConfig.badgeScalePct}
-                      onChange={e => {
-                        const val = Number(e.target.value);
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
-                      }}
-                      className="w-full accent-amber-400 cursor-pointer"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+                      {/* Общий слайдер размера бейджей */}
+                      <div className="space-y-1 pt-0.5">
+                        <div className="flex items-center justify-between text-[10.5px]">
+                          <span className="text-white/70 font-semibold">Размер бейджей</span>
+                          <span className="font-mono font-bold text-[#FACC15] tabular-nums">
+                            {activeConfig.badgeScalePct}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={60}
+                          max={150}
+                          step={2}
+                          value={activeConfig.badgeScalePct}
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
+                          }}
+                          className="w-full accent-amber-400 cursor-pointer"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* ЛОКАЛЬНЫЙ КОНТРОЛЬ КОНТРАСТА И «СОЧНОСТИ» КАДРА + РЕСАЙЗ И ЧЁТКОСТЬ (100% HTML5 Canvas) */}
@@ -4480,7 +4844,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           <span className="text-[10.5px] font-mono font-bold text-amber-300 block">
                             {item.tag} •{' '}
                             {slotConfigs[item.slot].badgesEnabled
-                              ? slotConfigs[item.slot].badgeTexts.filter(b => b.trim()).length
+                              ? BADGE_PRESETS_CONFIG.filter(
+                                  p => slotConfigs[item.slot].presetBadges?.[p.id]?.enabled
+                                ).length +
+                                (slotConfigs[item.slot].customBadgeEnabled &&
+                                slotConfigs[item.slot].customBadgeText.trim()
+                                  ? 1
+                                  : 0)
                               : 0}{' '}
                             бейдж(а)
                           </span>
