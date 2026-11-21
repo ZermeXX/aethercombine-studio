@@ -1,8 +1,7 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
+ @license
+ SPDX-License-Identifier: Apache-2.0
+*/
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -51,6 +50,7 @@ import {
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { initDriveAuth, getRestoredGoogleSession } from './googleDriveAuth';
+import { sanitizeLogText } from './utils/logSanitizer';
 import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
 import {
   MontageCombineView,
@@ -60,10 +60,7 @@ import {
 } from './components/MontageCombineView';
 import { VerbaFlowTextWorkbench } from './components/VerbaFlowTextWorkbench';
 import { ThumbnailStudioView, ThumbnailFontStyleId } from './components/ThumbnailStudioView';
-import {
-  ImageArtEditorView,
-  ArtEditorIncomingAsset
-} from './components/ImageArtEditorView';
+import { ImageArtEditorView, ArtEditorIncomingAsset } from './components/ImageArtEditorView';
 import {
   AmbientShaderBackdrop,
   AmbientShaderMode,
@@ -85,10 +82,7 @@ import {
   toEnglishChapterTitle,
   buildEnglishYoutubeSeoBlock
 } from './utils/englishExport';
-import {
-  V21SubtitleLang,
-  parseV21ManifestObject
-} from './utils/manifestV21';
+import { V21SubtitleLang, parseV21ManifestObject } from './utils/manifestV21';
 import { serializeCompactDispatchJson } from './utils/manifestDispatch';
 import {
   AetherActiveRenderJob,
@@ -98,9 +92,11 @@ import {
   clearWorkspaceDraft,
   loadActiveRenderJob,
   loadGoogleAuthRecord,
+  loadTelegramSession,
   loadWorkspaceDraft,
   saveActiveRenderJob,
   saveGoogleAuthPatch,
+  saveTelegramSession,
   saveWorkspaceDraft
 } from './utils/aetherPersistence';
 
@@ -196,11 +192,11 @@ export interface SeamlessAsymmetryConfig {
 
 export interface AudioMasteringConfig {
   loudnorm_enabled: boolean;
-  integrated_lufs: number; // strictly -18 to -14 LUFS (default -16)
-  true_peak_dbtp: number; // <= -3 dBTP (default -3)
-  lra: number; // default 11
+  integrated_lufs: number;
+  true_peak_dbtp: number;
+  lra: number;
   e3_soft_attack_compressor: boolean;
-  e3_max_peak_over_bed_db: number; // default +6 dB
+  e3_max_peak_over_bed_db: number;
 }
 
 interface LoopBuildManifest {
@@ -302,6 +298,8 @@ interface QueuedManifestItem {
 
 const MANIFEST_PRESETS_STORAGE_KEY = 'ac_manifest_presets_v1';
 const BATCH_QUEUE_STORAGE_KEY = 'ac_batch_queue_v1';
+const RENDER_REPO_WORKFLOW_URL =
+  'https://github.com/ZermeXX/aetherflow-render/blob/main/.github/workflows/render_loop.yml';
 
 const formatTimeHMS = (totalSeconds: number): string => {
   const safe = Math.max(0, Math.floor(totalSeconds));
@@ -311,7 +309,14 @@ const formatTimeHMS = (totalSeconds: number): string => {
   return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
-// Универсальная начальная структура слотов (без захардкоженных имен видеофайлов)
+/** YouTube разрешает End Screen только в последние 5–20 секунд ролика. */
+const computeEndScreenWindow = (durationSec: number): string => {
+  if (!Number.isFinite(durationSec) || durationSec < 25) return '';
+  const start = Math.max(0, durationSec - 20);
+  const end = Math.max(start + 5, durationSec - 5);
+  return `${formatTimeHMS(start)}-${formatTimeHMS(end)}`;
+};
+
 const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
   {
     slot_index: 1,
@@ -328,10 +333,7 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1800,
     inserts: [],
-    slot_transition_out: {
-      type: 'xfade',
-      duration_sec: 90.0
-    }
+    slot_transition_out: { type: 'xfade', duration_sec: 90.0 }
   },
   {
     slot_index: 2,
@@ -348,10 +350,7 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1890,
     inserts: [],
-    slot_transition_out: {
-      type: 'xfade',
-      duration_sec: 90.0
-    }
+    slot_transition_out: { type: 'xfade', duration_sec: 90.0 }
   },
   {
     slot_index: 3,
@@ -368,10 +367,7 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 2490,
     inserts: [],
-    slot_transition_out: {
-      type: 'xfade',
-      duration_sec: 90.0
-    }
+    slot_transition_out: { type: 'xfade', duration_sec: 90.0 }
   },
   {
     slot_index: 4,
@@ -388,10 +384,7 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1290,
     inserts: [],
-    slot_transition_out: {
-      type: 'xfade',
-      duration_sec: 90.0
-    }
+    slot_transition_out: { type: 'xfade', duration_sec: 90.0 }
   },
   {
     slot_index: 5,
@@ -408,10 +401,7 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 2490,
     inserts: [],
-    slot_transition_out: {
-      type: 'xfade',
-      duration_sec: 90.0
-    }
+    slot_transition_out: { type: 'xfade', duration_sec: 90.0 }
   },
   {
     slot_index: 6,
@@ -428,511 +418,21 @@ const INITIAL_TIMELINE_SLOTS: TimelineSlot[] = [
     internal_loop_crossfade_sec: 1.0,
     slot_duration_sec: 1290,
     inserts: [],
-    slot_transition_out: {
-      type: 'none',
-      duration_sec: 0
-    }
+    slot_transition_out: { type: 'none', duration_sec: 0 }
   }
 ];
 
-const WORKFLOW_LOOP_YAML = `name: AetherCombine Universal Loop Builder (H.264 / H.265)
-on:
-  workflow_dispatch:
-    inputs:
-      manifest_payload:
-        description: 'Base64-encoded JSON Build Manifest (Universal N-Slots + 2-Layer Audio Mixer + Loudnorm)'
-        required: true
-      preflight_only:
-        description: 'Run fast 15s Google Drive file verification without rendering video'
-        required: false
-        default: 'false'
-        type: string
-
-jobs:
-  render_and_upload:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Decode Manifest for Slot Cache Key
-        env:
-          MANIFEST_B64: \${{ github.event.inputs.manifest_payload }}
-        run: |
-          python3 - << 'EOF'
-          import base64, os
-          raw_json = base64.b64decode(os.environ["MANIFEST_B64"]).decode("utf-8")
-          with open("manifest.json", "w", encoding="utf-8") as mf:
-              mf.write(raw_json)
-          with open("config.json", "w", encoding="utf-8") as cf:
-              cf.write(raw_json)
-          EOF
-
-      - name: Cache Rendered Video Slots
-        if: github.event.inputs.preflight_only != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ./temp_render/
-          key: render-slots-\${{ hashFiles('input_clips/**', 'manifest.json') }}
-          restore-keys: |
-            render-slots-
-
-      - name: Install FFmpeg, Python3, jq & Rclone
-        run: |
-          sudo apt-get update
-          if [ "\${{ github.event.inputs.preflight_only }}" == "true" ]; then
-            sudo apt-get install -y rclone python3 jq curl
-          else
-            sudo apt-get install -y ffmpeg rclone python3 jq curl
-          fi
-
-      # 1. Развертывание персонального OAuth-конфига Rclone
-      - name: Setup Personal Rclone Config
-        run: |
-          mkdir -p ~/.config/rclone
-          echo "\${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
-          chmod 600 ~/.config/rclone/rclone.conf
-          # Проверка доступности удаленного диска без вывода секретных токенов
-          rclone listremotes
-
-      # 1.5. Быстрая Preflight-проверка исходных файлов на Google Drive
-      - name: Preflight Check Google Drive Source Files
-        run: |
-          python3 - << 'EOF'
-          import json, os, subprocess, sys
-          with open("manifest.json", "r", encoding="utf-8") as f:
-              cfg = json.load(f)
-          folder_id = ((cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id") or "").strip()
-          req_files = []
-          for idx, sl in enumerate(cfg.get("timeline_slots") or cfg.get("slots") or []):
-              bc = sl.get("base_content") if isinstance(sl.get("base_content"), dict) else {}
-              fn = str(bc.get("file_name") or sl.get("file_name") or sl.get("filename") or "").strip()
-              if fn: req_files.append((f"SLOT_{idx+1}", fn))
-              for ii, ins in enumerate(sl.get("inserts") or []):
-                  ifn = str(ins.get("file_name") or ins.get("filename") or "").strip()
-                  if ifn: req_files.append((f"SLOT_{idx+1}:E{ii+1}", ifn))
-          bed = cfg.get("continuous_bed") or {}
-          if bed.get("enabled") and str(bed.get("file_name") or "").strip():
-              req_files.append(("BED", str(bed["file_name"]).strip()))
-          ma = cfg.get("master_audio") or {}
-          if ma.get("enabled") and str(ma.get("file_name") or "").strip():
-              req_files.append(("MASTER_AUDIO", str(ma["file_name"]).strip()))
-          if not req_files:
-              print("No filenames specified in manifest.")
-              sys.exit(0)
-          cmd = ["rclone", "lsf", "gdrive:", "--recursive"]
-          if folder_id: cmd += ["--drive-root-folder-id", folder_id]
-          res = subprocess.run(cmd, capture_output=True, text=True)
-          if res.returncode != 0:
-              print(res.stderr); sys.exit(1)
-          remote_set = {os.path.basename(l.strip()) for l in res.stdout.splitlines() if l.strip()}
-          missing = [f"{lbl}: {fn}" for lbl, fn in req_files if os.path.basename(fn) not in remote_set and not os.path.exists(fn)]
-          if missing:
-              print("❌ Missing on GDrive:", missing); sys.exit(1)
-          print(f"✅ Preflight PASSED: {len(req_files)} files found on Google Drive!")
-          EOF
-
-      - name: Parse Universal Loop Manifest & Run FFmpeg Pipeline
-        if: github.event.inputs.preflight_only != 'true'
-        env:
-          MANIFEST_B64: \${{ github.event.inputs.manifest_payload }}
-        run: |
-          python3 - << 'EOF'
-          import base64, json, subprocess, os, math
-
-          # 1. Декодируем manifest_payload в config.json и manifest.json
-          raw_json = base64.b64decode(os.environ["MANIFEST_B64"]).decode("utf-8")
-          with open("config.json", "w", encoding="utf-8") as f:
-              f.write(raw_json)
-          with open("manifest.json", "w", encoding="utf-8") as mf:
-              mf.write(raw_json)
-          cfg = json.loads(raw_json)
-
-          os.makedirs("./temp_render", exist_ok=True)
-          os.makedirs("./output", exist_ok=True)
-
-          exp = cfg.get("export_settings") or {}
-          res = str(exp.get("resolution") or cfg.get("resolution", "4k")).lower()
-          v_codec = exp.get("video_codec") or cfg.get("video_codec", "libx264")
-          preset = exp.get("preset") or ("ultrafast" if res == "720p" else ("veryfast" if v_codec == "libx264" else "medium"))
-          fps = int(exp.get("fps") or cfg.get("fps", 24))
-          a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps', 320))}k"
-          scale_map = {"4k": "3840:2160", "2k": "2560:1440", "1080p": "1920:1080", "720p": "1280:720"}
-          scale_wh = scale_map.get(res, "3840:2160")
-          default_crf = "26" if res == "720p" else ("22" if v_codec == "libx265" else "20")
-          crf = str(exp.get("crf") or cfg.get("crf") or default_crf)
-          folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
-
-          final_black_enabled = bool(cfg.get("final_black_screen_enabled", True))
-          final_black_sec = float(cfg.get("final_black_screen_sec", 2.0)) if final_black_enabled else 0.0
-
-          mastering = cfg.get("audio_mastering") or {}
-          lufs_i = max(-18.0, min(-14.0, float(mastering.get("integrated_lufs", -16.0))))
-          tp_limit = min(-3.0, float(mastering.get("true_peak_dbtp", -3.0)))
-          lra_val = float(mastering.get("lra", 11.0))
-
-          slots = cfg.get("timeline_slots") or cfg.get("slots") or []
-          bed = cfg.get("continuous_bed") or {}
-
-          # Вычисляем длительность таймлайна: сумма slot_duration_sec минус кроссфейды между актами
-          total_duration = 0.0
-          for idx, sl in enumerate(slots):
-              s_dur = float(sl.get("slot_duration_sec") or ((sl.get("end_sec", 1800) - sl.get("start_sec", 0)) if ("end_sec" in sl and "start_sec" in sl) else 1800))
-              t_out = sl.get("slot_transition_out") or {"type": "none", "duration_sec": 0}
-              overlap = float(t_out.get("duration_sec", 90.0)) if (idx < len(slots) - 1 and t_out.get("type") != "none") else 0.0
-              total_duration += (s_dur - overlap)
-
-          # 2. Проверка кэша скомпилированных слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 и т.д.)
-          # Если файлы слотов уже существуют в temp_render и валидны, пропускаем их тяжелый перерендер
-          # и сразу переходим к быстрой склейке (concat -c copy) с новой аудиодорожкой
-          ffmpeg_inputs = []
-          filter_parts = []
-          input_idx = 0
-          slot_video_labels = []
-          slot_audio_labels = []
-          insert_overlays = []
-          cached_slot_files = []
-          all_slots_cached = len(slots) > 0
-
-          for s_i, slot in enumerate(slots):
-              slot_num = s_i + 1
-              cached_slot_path = f"./temp_render/slot_{slot_num}.mp4"
-              base_content = slot.get("base_content") if isinstance(slot.get("base_content"), dict) else {}
-              base_file = (
-                  base_content.get("file_name")
-                  or slot.get("file_name")
-                  or slot.get("filename")
-                  or slot.get("asset_name")
-                  or slot.get("video_file")
-                  or ""
-              )
-              slot_dur = float(slot.get("slot_duration_sec") or ((slot.get("end_sec", 1800) - slot.get("start_sec", 0)) if ("end_sec" in slot and "start_sec" in slot) else 1800))
-              clip_dur = max(2.0, float(slot.get("source_clip_duration_sec", 10.0)))
-              loop_xfade = float(slot.get("internal_loop_crossfade_sec", 1.0))
-              eff_step = max(1.0, clip_dur - loop_xfade)
-              loops_count = max(1, int(math.ceil(slot_dur / eff_step)) + 1)
-
-              if os.path.exists(cached_slot_path) and os.path.getsize(cached_slot_path) > 1024:
-                  print(f"[CACHE HIT] Слот {cached_slot_path} уже существует в ./temp_render/ — пропускаем перерендер.")
-                  cached_slot_files.append(cached_slot_path)
-                  base_in = input_idx
-                  ffmpeg_inputs += ["-i", cached_slot_path]
-                  input_idx += 1
-              else:
-                  all_slots_cached = False
-                  seamless_unit = f"./temp_render/unit_slot_{slot_num}.mp4"
-                  unit_offset = max(0.5, clip_dur - loop_xfade)
-                  unit_fc = (
-                      f"[0:v]scale={scale_wh},fps={fps}[v0];"
-                      f"[v0][v0]xfade=transition=fade:duration={loop_xfade}:offset={unit_offset}[v_u];"
-                      f"[0:a][0:a]acrossfade=d={loop_xfade}[a_u]"
-                  )
-                  subprocess.run([
-                      "ffmpeg", "-y", "-i", base_file,
-                      "-filter_complex", unit_fc,
-                      "-map", "[v_u]", "-map", "[a_u]",
-                      "-c:v", v_codec, "-preset", "ultrafast", "-crf", crf,
-                      "-c:a", "aac", "-b:a", a_bitrate, seamless_unit
-                  ], check=True)
-
-                  # Сохраняем скомпилированный слот в ./temp_render/slot_N.mp4 для кэширования
-                  subprocess.run([
-                      "ffmpeg", "-y",
-                      "-stream_loop", str(loops_count), "-t", str(slot_dur), "-i", seamless_unit,
-                      "-c:v", v_codec, "-preset", preset, "-crf", crf,
-                      "-c:a", "aac", "-b:a", a_bitrate,
-                      cached_slot_path
-                  ], check=True)
-                  cached_slot_files.append(cached_slot_path)
-
-                  base_in = input_idx
-                  ffmpeg_inputs += ["-i", cached_slot_path]
-                  input_idx += 1
-
-              cur_v = f"v_slot_{s_i}_base"
-              filter_parts.append(
-                  f"[{base_in}:v]scale={scale_wh},setsar=1,fps={fps},trim=duration={slot_dur},setpts=PTS-STARTPTS[{cur_v}]"
-              )
-
-              cur_a = f"a_slot_{s_i}"
-              filter_parts.append(
-                  f"[{base_in}:a]atrim=duration={slot_dur},asetpts=PTS-STARTPTS[{cur_a}]"
-              )
-              slot_audio_labels.append(f"[{cur_a}]")
-              slot_video_labels.append((cur_v, slot_dur, slot.get("slot_transition_out") or {"type": "none", "duration_sec": 0}))
-
-              for ins in (slot.get("inserts") or []):
-                  insert_overlays.append(ins)
-
-          out_name = cfg.get("output_filename") or f"./output/render_output_{res}_{v_codec}_{fps}fps.mp4"
-          master_audio_cfg = cfg.get("master_audio") or {}
-          master_audio_file = str(master_audio_cfg.get("file_name") or cfg.get("audio_filename") or "").strip()
-
-          # Если все слоты уже лежат в ./temp_render/ и нет кастомных оверлеев — мгновенная склейка concat -c copy с новой аудиодорожкой
-          if all_slots_cached and len(insert_overlays) == 0 and len(cached_slot_files) > 0:
-              concat_list_file = "./temp_render/concat_slots.txt"
-              with open(concat_list_file, "w", encoding="utf-8") as cf:
-                  for sp in cached_slot_files:
-                      cf.write(f"file '{os.path.abspath(sp)}'\n")
-              fast_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_file]
-              if master_audio_file and os.path.exists(master_audio_file):
-                  fast_cmd += [
-                      "-i", master_audio_file,
-                      "-map", "0:v:0", "-map", "1:a:0",
-                      "-c:v", "copy", "-c:a", "aac", "-b:a", a_bitrate,
-                      "-shortest", "-movflags", "+faststart", out_name
-                  ]
-              else:
-                  fast_cmd += ["-c", "copy", "-movflags", "+faststart", out_name]
-              print("[FAST CONCAT -c copy] Склейка кэшированных слотов:", " ".join(fast_cmd))
-              subprocess.run(fast_cmd, check=True)
-          else:
-              # 3. Сшиваем акты через xfade и синхронный acrossfade
-              accum_offset = slot_video_labels[0][1]
-              prev_v = slot_video_labels[0][0]
-              prev_a = slot_audio_labels[0].strip("[]")
-
-              for idx in range(1, len(slot_video_labels)):
-                  prev_trans = slot_video_labels[idx - 1][2]
-                  t_type = prev_trans.get("type", "xfade")
-                  t_dur = float(prev_trans.get("duration_sec", 90.0)) if t_type != "none" else 0.0
-                  next_v_src, next_dur, _ = slot_video_labels[idx]
-                  next_a_src = slot_audio_labels[idx].strip("[]")
-                  out_v = f"v_act_chain_{idx}"
-                  out_a = f"a_act_chain_{idx}"
-
-                  if t_type == "none" or t_dur <= 0:
-                      filter_parts.append(f"[{prev_v}][{next_v_src}]concat=n=2:v=1:a=0[{out_v}]")
-                      filter_parts.append(f"[{prev_a}][{next_a_src}]acrossfade=d=1.0[{out_a}]")
-                      accum_offset += next_dur
-                  else:
-                      xfade_mode = "dissolve" if t_type == "dissolve" else "fade"
-                      offset_sec = max(0.0, accum_offset - t_dur)
-                      filter_parts.append(
-                          f"[{prev_v}][{next_v_src}]xfade=transition={xfade_mode}:duration={t_dur}:offset={offset_sec}[{out_v}]"
-                      )
-                      filter_parts.append(
-                          f"[{prev_a}][{next_a_src}]acrossfade=d={t_dur}:c1=tri:c2=tri[{out_a}]"
-                      )
-                      accum_offset = offset_sec + next_dur
-                  prev_v = out_v
-                  prev_a = out_a
-
-              cur_timeline_v = prev_v
-              cur_timeline_a = prev_a
-              e3_audio_nodes = []
-
-              # 4. Точная асимметричная анимация вставок
-              for ins_i, ins in enumerate(insert_overlays):
-                  ins_id = ins.get("insert_id") or f"E{ins_i+1}"
-                  ins_file = ins.get("file_name") or ins.get("filename") or ins.get("asset_name") or ins.get("video_file") or ""
-                  trig = float(ins.get("trigger_at_sec", 0))
-                  ins_dur = float(ins.get("duration_sec", 10))
-                  hold_end = bool(ins.get("hold_until_end", False))
-
-                  tr_in = ins.get("transition_in") or {"type": "dissolve", "duration_sec": 1.5}
-                  tr_out = ins.get("transition_out") or {"type": "dissolve", "duration_sec": 1.5}
-                  fade_in_d = float(tr_in.get("duration_sec", 1.5))
-                  fade_out_type = tr_out.get("type", "dissolve")
-                  fade_out_d = 0.0 if (hold_end or fade_out_type == "none") else float(tr_out.get("duration_sec", 1.5))
-
-                  ins_in = input_idx
-                  ffmpeg_inputs += ["-i", ins_file]
-                  input_idx += 1
-
-                  ins_v = f"v_ins_{ins_id}"
-                  next_v = f"v_ovr_{ins_id}"
-
-                  fade_chain = f"fade=t=in:st=0:d={fade_in_d}:alpha=1"
-                  if fade_out_d > 0:
-                      st_out = max(0.0, ins_dur - fade_out_d)
-                      fade_chain += f",fade=t=out:st={st_out}:d={fade_out_d}:alpha=1"
-
-                  end_t = total_duration if hold_end else (trig + ins_dur)
-                  eof_act = "repeat" if hold_end else "pass"
-
-                  filter_parts.append(
-                      f"[{ins_in}:v]scale={scale_wh},setsar=1,fps={fps},format=yuva420p,"
-                      f"{fade_chain},setpts=PTS-STARTPTS+{trig}/TB[{ins_v}]"
-                  )
-                  filter_parts.append(
-                      f"[{cur_timeline_v}][{ins_v}]overlay=enable='between(t,{trig},{end_t})':eof_action={eof_act}[{next_v}]"
-                  )
-                  cur_timeline_v = next_v
-
-                  if ins.get("audio_soft_compressor") or ins_id == "E3":
-                      ins_a = f"a_ins_{ins_id}"
-                      delay_ms = int(trig * 1000)
-                      max_peak_db = float(ins.get("max_peak_over_bed_db", 6.0))
-                      filter_parts.append(
-                          f"[{ins_in}:a]acompressor=attack=45:release=250:ratio=3:threshold=-18dB:makeup=2dB,"
-                          f"alimiter=limit={max_peak_db}dB,adelay={delay_ms}|{delay_ms}[{ins_a}]"
-                      )
-                      e3_audio_nodes.append(f"[{ins_a}]")
-
-              # 5. Опциональный 2-секундный черный экран в финале
-              if final_black_enabled and final_black_sec > 0:
-                  filter_parts.append(
-                      f"[{cur_timeline_v}]tpad=stop_mode=add:stop_duration={final_black_sec}:color=black[v_final]"
-                  )
-                  cur_timeline_v = "v_final"
-                  total_duration += final_black_sec
-
-              # 5.5. Гибкая система субтитров
-              subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
-              subs_enabled = bool(subs_cfg.get("enabled", False))
-              burn_in = bool(subs_cfg.get("burn_in", False))
-              upload_srt = bool(subs_cfg.get("upload_srt", False))
-              srt_content = (subs_cfg.get("srt_content") or "").strip()
-              if not srt_content and subs_cfg.get("srt_content_base64"):
-                  srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
-
-              output_srt_path = "./output/subtitles.srt"
-              if (upload_srt or burn_in) and srt_content:
-                  with open(output_srt_path, "w", encoding="utf-8") as sf:
-                      sf.write(srt_content)
-                  with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
-                      sf_root.write(srt_content)
-
-              if subs_enabled and burn_in and srt_content:
-                  filter_parts.append(
-                      f"[{cur_timeline_v}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled]"
-                  )
-                  cur_timeline_v = "v_subtitled"
-
-              # 6. Аудио-микс и финальный loudnorm=I=-16:TP=-3:LRA=11
-              mix_inputs = [f"[{cur_timeline_a}]"]
-              mix_weights = [str(bed.get("veo_audio_weight", 0.85))]
-
-              if bed.get("enabled", True) and bed.get("file_name"):
-                  bed_in = input_idx
-                  ffmpeg_inputs += ["-stream_loop", "-1", "-t", str(total_duration), "-i", bed["file_name"]]
-                  input_idx += 1
-                  filter_parts.append(
-                      f"[{bed_in}:a]afade=t=in:st=0:d=2.0,atrim=duration={total_duration},asetpts=PTS-STARTPTS[a_bed]"
-                  )
-                  mix_inputs.append("[a_bed]")
-                  mix_weights.append(str(bed.get("bed_audio_weight", 0.55)))
-
-              for e3_a in e3_audio_nodes:
-                  mix_inputs.append(e3_a)
-                  mix_weights.append("1.0")
-
-              if len(mix_inputs) > 1:
-                  w_str = " ".join(mix_weights)
-                  filter_parts.append(
-                      f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:weights='{w_str}'[a_pre_norm]"
-                  )
-                  pre_norm_label = "a_pre_norm"
-              else:
-                  pre_norm_label = cur_timeline_a
-
-              filter_parts.append(
-                  f"[{pre_norm_label}]loudnorm=I={lufs_i}:TP={tp_limit}:LRA={lra_val}[a_master]"
-              )
-
-              filter_complex_str = ";".join(filter_parts)
-              with open("filter_complex.txt", "w", encoding="utf-8") as f:
-                  f.write(filter_complex_str)
-
-              cmd = [
-                  "ffmpeg", "-y",
-                  *ffmpeg_inputs,
-                  "-filter_complex_script", "filter_complex.txt",
-                  "-map", f"[{cur_timeline_v}]",
-                  "-map", "[a_master]",
-                  "-t", str(total_duration),
-                  "-r", str(fps),
-                  "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-                  "-c:a", "aac", "-b:a", a_bitrate,
-                  "-movflags", "+faststart", out_name
-              ]
-              print("Running FFmpeg command:", " ".join(cmd))
-              subprocess.run(cmd, check=True)
-
-          import shutil
-          if os.path.exists(out_name):
-              shutil.copyfile(out_name, "./output.mp4")
-
-          shorts_factory = cfg.get("shorts_factory") or {}
-          if shorts_factory.get("enabled") and os.path.exists("./output.mp4"):
-              clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
-              insert_timestamps = []
-              for sl in slots:
-                  for ins in (sl.get("inserts") or []):
-                      insert_timestamps.append(max(0.0, float(ins.get("trigger_at_sec") or 0)))
-              if not insert_timestamps:
-                  insert_timestamps = [0.0, 60.0, 120.0, 180.0]
-              os.makedirs("./output/Shorts", exist_ok=True)
-              for idx, start_sec in enumerate(insert_timestamps[:4]):
-                  out_short = f"./output/Shorts/short_{idx + 1:02d}_1080x1920.mp4"
-                  s_cmd = [
-                      "ffmpeg", "-y", "-ss", str(start_sec), "-i", "./output.mp4",
-                      "-t", str(clip_dur), "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
-                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out_short
-                  ]
-                  subprocess.run(s_cmd, check=True)
-          EOF
-
-      # 2. Выгрузка готового видео на Google Диск
-      - name: Upload Output Video to Google Drive
-        if: github.event.inputs.preflight_only != 'true'
-        run: |
-          echo "Начинаем выгрузку финального видео в Google Drive..."
-          # Выгрузка с расширенным логированием, чанками по 64МБ и защитой от обрывов
-          rclone copy ./output.mp4 gdrive:AetherFlow_Output/ \\
-            --drive-chunk-size 64M \\
-            --transfers 2 \\
-            --checkers 4 \\
-            --retries 5 \\
-            --low-level-retries 10 \\
-            --stats 15s \\
-            -v
-
-          if [ -d "./output/Shorts" ] && [ "\$(ls -A ./output/Shorts)" ]; then
-            echo "Выгрузка вертикальных тизеров Shorts (1080x1920) в подпапку Shorts/ на Google Drive..."
-            rclone copy ./output/Shorts gdrive:AetherFlow_Output/Shorts/ \\
-              --drive-chunk-size 64M \\
-              --transfers 2 \\
-              --checkers 4 \\
-              --retries 5 \\
-              --low-level-retries 10 \\
-              --stats 15s \\
-              -v
-          fi
-
-      - name: Upload Emergency FFmpeg Logs
-        if: always() && github.event.inputs.preflight_only != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-emergency-logs
-          path: |
-            *.log
-            filter_complex*.txt
-            manifest.json
-          if-no-files-found: ignore
-
-      # 3. Гарантированное Telegram-уведомление (срабатывает ВСЕГДА: и при успехе, и при сбое)
-      - name: Send Telegram Notification
-        if: always()
-        run: |
-          if [ "\${{ github.event.inputs.preflight_only }}" == "true" ]; then
-            if [ "\${{ job.status }}" == "success" ]; then
-              MSG="🔍 *Preflight-проверка GDrive пройдена!* Все исходные файлы найдены."
-            else
-              MSG="❌ *Preflight FAILED!* На Google Диске отсутствуют файлы из манифеста."
-            fi
-          elif [ "\${{ job.status }}" == "success" ]; then
-            MSG="✅ *Рендеринг и выгрузка завершены успешно!*%0A%0A📁 *Файл:* output.mp4%0A☁️ *Локация:* Google Drive / AetherFlow_Output%0A⏱️ *Статус:* Готово к публикации"
-          else
-            MSG="❌ *Ошибка в процессе пайплайна!*%0A%0A⚠️ *Статус:* \${{ job.status }}%0A🔍 Проверьте логи шага выгрузки или сборки FFmpeg."
-          fi
-          
-          curl -s -X POST "https://api.telegram.org/bot\${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \\
-            -d "chat_id=\${{ secrets.TELEGRAM_CHAT_ID }}" \\
-            -d "parse_mode=Markdown" \\
-            -d "text=\$MSG"`;
+/**
+ P0: старый инлайн-шаблон workflow удалён из клиента.
+ Копирование его в раннер перезаписывало fixes (loop-baker, мосты актов,
+ санитайз секретов, stream-upload). Источник правды — репозиторий раннера.
+ */
+const WORKFLOW_LOOP_YAML = `# Актуальный workflow хранится ТОЛЬКО в репозитории раннера:
+# ${RENDER_REPO_WORKFLOW_URL}
+#
+# НЕ вставляйте сюда старые шаблоны из студии — они перезапишут P0-фиксы:
+# loop-baker, мосты актов 90с, санитайз секретов, stream-upload, guard пустых слотов.
+# Правьте файл напрямую в репозитории раннера.`;
 
 const DEFAULT_SEO_SCRIPT_TEXT =
   'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.';
@@ -976,7 +476,6 @@ const DEFAULT_SEAMLESS_ASYMMETRY: SeamlessAsymmetryConfig = {
 };
 
 export default function App() {
-  // Синхронная первичная загрузка всех снимков из localStorage при старте / F5
   const [bootSnapshot] = useState(() => {
     const googleAuth = loadGoogleAuthRecord();
     const restoredGoogleSession = getRestoredGoogleSession();
@@ -991,7 +490,6 @@ export default function App() {
       ? bootSnapshot.activeJob
       : null;
 
-  // Ключ перемонтирования дочерних цехов при сбросе проекта («Сбросить проект»)
   const [workspaceResetKey, setWorkspaceResetKey] = useState<number>(0);
   const [initialCombineDraft, setInitialCombineDraft] = useState<AetherCombineDraftSlice | null>(
     () => bootDraft?.combine ?? null
@@ -1009,7 +507,6 @@ export default function App() {
     setCombineDraftRev(prev => prev + 1);
   }, []);
 
-  // Active tab state & animation pulse trigger key
   const [activeTab, setActiveTab] = useState<TabId>('combine');
   const [tabPulseKey, setTabPulseKey] = useState<number>(0);
 
@@ -1018,19 +515,21 @@ export default function App() {
     setTabPulseKey(prev => prev + 1);
   };
 
-  // Combine studio state
   const [scenes, setScenes] = useState<SceneItem[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [filmFormat, setFilmFormat] = useState<string>('16:9');
   const [filmResolution, setFilmResolution] = useState<string>('4k');
   const [transferredScript, setTransferredScript] = useState<string>('');
-  const [externalNarrativeScenes, setExternalNarrativeScenes] = useState<NarrativeSceneItem[] | null>(null);
+  const [externalNarrativeScenes, setExternalNarrativeScenes] = useState<NarrativeSceneItem[] | null>(
+    null
+  );
   const [activeNarrativeScenes, setActiveNarrativeScenes] = useState<NarrativeSceneItem[]>([]);
   const [externalMasterAudioFile, setExternalMasterAudioFile] = useState<{
     fileName: string;
     file?: File;
     durationSec?: number;
   } | null>(null);
+
   const [seoScriptText, setSeoScriptText] = useState<string>(
     () => bootDraft?.project?.seo_script_text ?? DEFAULT_SEO_SCRIPT_TEXT
   );
@@ -1038,7 +537,6 @@ export default function App() {
     () => bootDraft?.project?.verbaflow_chapters_txt ?? ''
   );
 
-  // Пресеты форматов каналов (1-Click Format Presets) + синхронизация Ритм-карты, Shorts и шрифта превью
   const [activeFormatPreset, setActiveFormatPreset] = useState<StudioFormatPresetId>(() =>
     bootDraft?.project?.active_format_preset === 'ambient_loop_3h'
       ? 'ambient_loop_3h'
@@ -1047,13 +545,12 @@ export default function App() {
   const [rhythmProfilePreset, setRhythmProfilePreset] = useState<
     'historical_storytelling' | 'ambient_meditative' | null
   >(null);
-  const [shortsExportConfig, setShortsExportConfig] = useState<
-    ShortsExportManifestBlock | undefined
-  >(undefined);
+  const [shortsExportConfig, setShortsExportConfig] = useState<ShortsExportManifestBlock | undefined>(
+    undefined
+  );
   const [externalThumbFontStyle, setExternalThumbFontStyle] =
     useState<ThumbnailFontStyleId | null>(null);
 
-  // Loop studio state (Universal dynamic manifest state)
   const [loopProjectName, setLoopProjectName] = useState<string>(
     () => bootDraft?.project?.name || 'HistoViva Documentary 4K'
   );
@@ -1071,6 +568,7 @@ export default function App() {
     text: string;
     nonce: number;
   } | null>(null);
+
   const [strictSceneDurationLock, setStrictSceneDurationLock] = useState<boolean>(
     () => bootDraft?.render_settings?.strict_scene_duration_lock ?? true
   );
@@ -1096,6 +594,7 @@ export default function App() {
   const [exportReleaseCardMdEnabled, setExportReleaseCardMdEnabled] = useState<boolean>(
     () => bootDraft?.render_settings?.export_release_card_md_enabled ?? true
   );
+
   const [manifestThumbnailSlots, setManifestThumbnailSlots] = useState<{
     A: string;
     B: string;
@@ -1105,15 +604,18 @@ export default function App() {
     B: 'thumbnail_4k_3840x2160_B.jpg',
     C: 'thumbnail_4k_3840x2160_C.jpg'
   });
+
   const [endScreenSafeZone, setEndScreenSafeZone] = useState<string>(
-    () => bootDraft?.project?.end_screen_safe_zone || '05:14-05:24'
+    () => bootDraft?.project?.end_screen_safe_zone || ''
   );
   const [manifestDurationBadge, setManifestDurationBadge] = useState<string>(
     () => bootDraft?.project?.manifest_duration_badge || ''
   );
+
   const [youtubeSeoState, setYoutubeSeoState] = useState<YoutubeSeoState>(() =>
     loadStoredYoutubeSeoState()
   );
+
   useEffect(() => {
     try {
       localStorage.setItem(YOUTUBE_SEO_STORAGE_KEY, JSON.stringify(youtubeSeoState));
@@ -1130,12 +632,14 @@ export default function App() {
   const [loopMedia, setLoopMedia] = useState<File | null>(null);
   const [loopAudio, setLoopAudio] = useState<File | null>(null);
   const [uploadedLoopAssets, setUploadedLoopAssets] = useState<Record<string, File>>({});
+
   const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(() =>
     Array.isArray(bootDraft?.render_settings?.timeline_slots) &&
     bootDraft.render_settings.timeline_slots.length > 0
       ? (bootDraft.render_settings.timeline_slots as TimelineSlot[])
       : INITIAL_TIMELINE_SLOTS
   );
+
   const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>(() =>
     bootDraft?.render_settings?.video_codec === 'libx265' ? 'libx265' : 'libx264'
   );
@@ -1203,9 +707,7 @@ export default function App() {
   );
   const [seamlessTransitionMode, setSeamlessTransitionMode] = useState<'crossfade' | 'pingpong'>(
     () =>
-      bootDraft?.render_settings?.seamless_transition_mode === 'pingpong'
-        ? 'pingpong'
-        : 'crossfade'
+      bootDraft?.render_settings?.seamless_transition_mode === 'pingpong' ? 'pingpong' : 'crossfade'
   );
   const [seamlessStitchEnabled, setSeamlessStitchEnabled] = useState<boolean>(
     () => bootDraft?.render_settings?.seamless_stitch_enabled ?? true
@@ -1232,7 +734,6 @@ export default function App() {
   const [showFilterComplexPreview, setShowFilterComplexPreview] = useState<boolean>(true);
   const [isLoopDispatching, setIsLoopDispatching] = useState<boolean>(false);
 
-  // Локальные пресеты манифеста (localStorage)
   const [savedManifestPresets, setSavedManifestPresets] = useState<SavedManifestPreset[]>(() => {
     try {
       const raw = localStorage.getItem(MANIFEST_PRESETS_STORAGE_KEY);
@@ -1258,7 +759,6 @@ export default function App() {
     insIdx: number;
   } | null>(null);
 
-  // Локальная очередь сборок (Batch Queue) в localStorage
   const [batchQueue, setBatchQueue] = useState<QueuedManifestItem[]>(() => {
     try {
       const raw = localStorage.getItem(BATCH_QUEUE_STORAGE_KEY);
@@ -1269,17 +769,18 @@ export default function App() {
       return [];
     }
   });
+
   const lastDispatchWasPreflightRef = useRef<boolean>(false);
   const queueAutoConsumedRunRef = useRef<string | number | null>(null);
   const dispatchLoopWorkflowRef = useRef<
-    ((
-      preflightOnly: boolean,
-      overrideManifest?: LoopBuildManifest,
-      options?: { bypassActiveGuard?: boolean }
-    ) => Promise<void>) | null
+    | ((
+        preflightOnly: boolean,
+        overrideManifest?: LoopBuildManifest,
+        options?: { bypassActiveGuard?: boolean }
+      ) => Promise<void>)
+    | null
   >(null);
 
-  // Гибкая система субтитров и Shorts Factory для текущего манифеста
   const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(
     () => bootDraft?.render_settings?.loop_burn_in_subtitles ?? false
   );
@@ -1297,7 +798,6 @@ export default function App() {
   );
   const [showLoopAdvancedAccordion, setShowLoopAdvancedAccordion] = useState<boolean>(false);
 
-  // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
   const [thumbTitle, setThumbTitle] = useState<string>(
     () => bootDraft?.project?.thumb_title || 'SEALED ARCHIVE'
@@ -1310,7 +810,6 @@ export default function App() {
   const [editorEditedCoverAUrl, setEditorEditedCoverAUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Фоновый шейдер и переключатель производительности (localStorage + prefers-reduced-motion)
   const [ambientShaderMode, setAmbientShaderMode] = useState<AmbientShaderMode>(() =>
     getInitialAmbientShaderMode()
   );
@@ -1350,7 +849,6 @@ export default function App() {
     });
   };
 
-  // 2. ПЕРЕКЛЮЧАТЕЛЬ ФОРМАТОВ ПРОЕКТА В ШАПКЕ СТУДИИ (1-Click Format Presets)
   const applyStudioFormatPreset = (presetId: StudioFormatPresetId) => {
     setActiveFormatPreset(presetId);
     if (presetId === 'histoviva_doc') {
@@ -1379,12 +877,10 @@ export default function App() {
     }
   };
 
-  // VerbaFlow source text state
   const [sourceText, setSourceText] = useState<string>(
     () => bootDraft?.verbaflow?.source_text ?? DEFAULT_VERBAFLOW_SOURCE_TEXT
   );
 
-  // GitHub & Google Drive Runner Configuration state (единый ключ "aether_google_auth" + совместимость с ac_*)
   const [ghToken, setGhToken] = useState<string>(() => bootSnapshot.googleAuth.github_token || '');
   const [ghRepo, setGhRepo] = useState<string>(
     () => bootSnapshot.googleAuth.repo || 'ZermeXX/aetherflow-render'
@@ -1393,17 +889,11 @@ export default function App() {
   const [gdriveFolderId, setGdriveFolderId] = useState<string>(
     () => bootSnapshot.googleAuth.drive_folder_id || '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK'
   );
-  const [gdriveSaKey, setGdriveSaKey] = useState<string>(
-    () => localStorage.getItem('ac_gdrive_sa_key') || ''
-  );
   const [telegramBotToken, setTelegramBotToken] = useState<string>(
-    () => localStorage.getItem('ac_tg_bot_token') || ''
+    () => loadTelegramSession().bot_token
   );
-  const [telegramChatId, setTelegramChatId] = useState<string>(
-    () => localStorage.getItem('ac_tg_chat_id') || ''
-  );
+  const [telegramChatId, setTelegramChatId] = useState<string>(() => loadTelegramSession().chat_id);
 
-  // Автосинхронизация GitHub Token / repo / branch / Drive Folder ID в "aether_google_auth"
   useEffect(() => {
     saveGoogleAuthPatch({
       github_token: ghToken,
@@ -1413,7 +903,6 @@ export default function App() {
     });
   }, [ghToken, ghRepo, ghBranch, gdriveFolderId]);
 
-  // Автосохранение черновика проекта "aether_workspace_draft" (debounce 400 мс)
   useEffect(() => {
     if (suppressNextDraftSaveRef.current) {
       suppressNextDraftSaveRef.current = false;
@@ -1484,7 +973,6 @@ export default function App() {
       saveWorkspaceDraft(draftPayload);
       draftDebounceTimerRef.current = null;
     }, 400);
-
     return () => {
       if (draftDebounceTimerRef.current !== null) {
         window.clearTimeout(draftDebounceTimerRef.current);
@@ -1541,18 +1029,15 @@ export default function App() {
     exportReleaseCardMdEnabled
   ]);
 
-  // Modal state
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(false);
   const [showYamlPreview, setShowYamlPreview] = useState<boolean>(false);
   const [modalToken, setModalToken] = useState<string>('');
   const [modalRepo, setModalRepo] = useState<string>('');
   const [modalBranch, setModalBranch] = useState<string>('main');
   const [modalGdriveFolderId, setModalGdriveFolderId] = useState<string>('');
-  const [modalGdriveSaKey, setModalGdriveSaKey] = useState<string>('');
   const [modalTelegramBotToken, setModalTelegramBotToken] = useState<string>('');
   const [modalTelegramChatId, setModalTelegramChatId] = useState<string>('');
 
-  // Состояние авторизации Google Drive (OAuth 2.0 Resumable Upload в текущую папку)
   const [driveUser, setDriveUser] = useState<User | null>(
     () => bootSnapshot.restoredGoogleSession?.user ?? null
   );
@@ -1574,7 +1059,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Cloud Render status bar & GitHub Actions Polling state (автовосстановление из "aether_active_render_job" при F5)
   const bootElapsedSeconds = bootRunningJob
     ? Math.max(0, Math.floor((Date.now() - bootRunningJob.started_at) / 1000))
     : 0;
@@ -1627,7 +1111,6 @@ export default function App() {
         }
   );
 
-  // Состояние студийного псевдотерминала (LiveTerminal)
   const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>(() => {
     if (!bootRunningJob) return [];
     return [
@@ -1645,9 +1128,9 @@ export default function App() {
       const seeded: Record<string, string> = {};
       if (bootRunningJob?.logs) {
         for (const entry of bootRunningJob.logs) {
-          const inProg = entry.text.match(/⚙️ Выполняется шаг:\s*(.+?)\.\.\.$/);
+          const inProg = entry.text.match(/⚙️ Выполняется шаг:\s*(.+?)...$/);
           if (inProg) seeded[`name:${inProg[1].trim()}`] = 'in_progress';
-          const okMatch = entry.text.match(/✅ Шаг\s+(.+?)\s+завершён успешно\.$/);
+          const okMatch = entry.text.match(/✅ Шаг\s+(.+?)\s+завершён успешно.$/);
           if (okMatch) seeded[`name:${okMatch[1].trim()}`] = 'completed_success';
           const failMatch = entry.text.match(/❌ Сбой на шаге:\s*(.+?)!$/);
           if (failMatch) seeded[`name:${failMatch[1].trim()}`] = 'completed_failure';
@@ -1656,6 +1139,7 @@ export default function App() {
       return seeded;
     })()
   );
+
   const secondsRef = useRef<number>(bootElapsedSeconds);
   const dispatchTimeRef = useRef<number>(bootRunningJob?.started_at ?? 0);
   const activeRunIdRef = useRef<number | null>(bootRunningJob?.run_id ?? null);
@@ -1681,7 +1165,7 @@ export default function App() {
   const appendTerminalLog = useCallback(
     (text: string, level: TerminalLogEntry['level'] = 'info') => {
       const id = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-      setTerminalLogs(prev => [...prev, { id, text, level }]);
+      setTerminalLogs(prev => [...prev, { id, text: sanitizeLogText(text), level }]);
     },
     []
   );
@@ -1694,7 +1178,6 @@ export default function App() {
     }
   }, [renderStatus.status]);
 
-  // Автообновление "aether_active_render_job" при каждом изменении статуса, run_id и logs
   useEffect(() => {
     const meta = activeRenderMetaRef.current;
     if (!meta) return;
@@ -1736,29 +1219,22 @@ export default function App() {
         ? 'queued'
         : 'running'
       : renderStatus.status === 'success'
-      ? 'success'
-      : renderStatus.status === 'failure'
-      ? 'failed'
-      : 'idle';
+        ? 'success'
+        : renderStatus.status === 'failure'
+          ? 'failed'
+          : 'idle';
 
-  const isRunnerActive =
-    terminalRunnerStatus === 'running' || terminalRunnerStatus === 'queued';
+  const isRunnerActive = terminalRunnerStatus === 'running' || terminalRunnerStatus === 'queued';
 
-  // Toast notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
   const scenesInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const manifestInputRef = useRef<HTMLInputElement | null>(null);
 
   const showToast = useCallback(
-    (
-      text: string,
-      type: 'info' | 'error' | 'success' = 'info',
-      action?: ToastAction
-    ) => {
+    (text: string, type: 'info' | 'error' | 'success' = 'info', action?: ToastAction) => {
       const id = Math.random().toString(36).substring(2, 9);
-      setToasts(prev => [...prev.slice(-2), { id, text, type, action }]);
+      setToasts(prev => [...prev.slice(-2), { id, text: sanitizeLogText(text), type, action }]);
       window.setTimeout(
         () => {
           setToasts(prev => prev.filter(t => t.id !== id));
@@ -1769,7 +1245,6 @@ export default function App() {
     []
   );
 
-  // Двухтональный аккорд завершения через Web Audio API (без внешних mp3)
   const playRenderSuccessChime = useCallback(() => {
     try {
       const AudioCtx =
@@ -1778,8 +1253,6 @@ export default function App() {
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const now = ctx.currentTime;
-
-      // Первый тон аккорда (C5 + E5)
       const playTone = (freq: number, startTime: number, duration: number, peakGain: number) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -1793,18 +1266,15 @@ export default function App() {
         osc.start(startTime);
         osc.stop(startTime + duration + 0.02);
       };
-
-      playTone(523.25, now, 0.35, 0.16); // C5
-      playTone(659.25, now, 0.35, 0.12); // E5
-      // Второй тон аккорда (G5 + C6)
-      playTone(783.99, now + 0.16, 0.55, 0.18); // G5
-      playTone(1046.5, now + 0.16, 0.65, 0.14); // C6
+      playTone(523.25, now, 0.35, 0.16);
+      playTone(659.25, now, 0.35, 0.12);
+      playTone(783.99, now + 0.16, 0.55, 0.18);
+      playTone(1046.5, now + 0.16, 0.65, 0.14);
     } catch {
       // Игнорируем блокировку автовоспроизведения браузером
     }
   }, []);
 
-  // Системное браузерное уведомление Notification API
   const triggerBrowserRenderNotification = useCallback(() => {
     try {
       if (!('Notification' in window)) return;
@@ -1826,7 +1296,6 @@ export default function App() {
     }
   }, []);
 
-  // Уведомление в Telegram по завершении или при ошибке рендера
   const sendTelegramRenderAlert = useCallback(
     async (statusType: 'success' | 'error', messageDetails: string, runUrl?: string) => {
       const botToken = telegramBotToken.trim();
@@ -1855,7 +1324,6 @@ export default function App() {
     [telegramBotToken, telegramChatId, gdriveFolderId]
   );
 
-  // Перевод имени шага GitHub Actions на понятный русский статус для нижней панели
   const mapGitHubStepToRussian = useCallback((rawStepName?: string, stepIdx?: number): string => {
     if (!rawStepName) {
       return 'Шаг: Скачивание клипов из Google Drive...';
@@ -1894,30 +1362,24 @@ export default function App() {
     return `Шаг: ${rawStepName}...`;
   }, []);
 
-  // Динамический таймер прошедшего времени (ММ:СС), пока идет сборка
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const timer = setInterval(() => {
       setRenderStatus(prev => {
         const nextSec = prev.seconds + 1;
         secondsRef.current = nextSec;
-        return {
-          ...prev,
-          seconds: nextSec
-        };
+        return { ...prev, seconds: nextSec };
       });
     }, 1000);
     return () => clearInterval(timer);
   }, [renderStatus.visible, renderStatus.status]);
 
-  // Кнопка отмены текущей сборки в терминале (POST /actions/runs/${activeRunId}/cancel)
   const cancelActiveRenderRun = useCallback(async () => {
     const githubToken = ghToken.trim();
     if (!githubToken) {
       showToast('Укажите GitHub Personal Access Token для отмены сборки!', 'error');
       return;
     }
-
     let activeRunId = activeRunIdRef.current || renderStatus.runId;
     const cancelTargetRepo = (
       activeRenderMetaRef.current?.repo ||
@@ -1929,7 +1391,6 @@ export default function App() {
       Authorization: `Bearer ${githubToken}`,
       'X-GitHub-Api-Version': '2022-11-28'
     };
-
     try {
       if (!activeRunId) {
         const runsRes = await fetch(
@@ -1949,20 +1410,14 @@ export default function App() {
           }
         }
       }
-
       if (!activeRunId) {
         showToast('Активный run_id еще не зарегистрирован на стороне GitHub Actions', 'info');
         return;
       }
-
       await fetch(
         `https://api.github.com/repos/${cancelTargetRepo}/actions/runs/${activeRunId}/cancel`,
-        {
-          method: 'POST',
-          headers
-        }
+        { method: 'POST', headers }
       );
-
       appendTerminalLog('[ПРЕРВАНО]: Запрос на отмену отправлен в GitHub Actions.', 'error');
       setRenderStatus(prev => ({
         ...prev,
@@ -1977,7 +1432,6 @@ export default function App() {
     }
   }, [ghToken, ghRepo, renderStatus.runId, appendTerminalLog, showToast]);
 
-  // Автоматический умный опрос GitHub Actions каждые 5 сек (мгновенное возобновление при F5)
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
     const targetRepo = (
@@ -1992,7 +1446,6 @@ export default function App() {
     if (ghToken) {
       headers.Authorization = `Bearer ${ghToken.trim()}`;
     }
-
     let isCancelled = false;
 
     type GhWorkflowRun = {
@@ -2008,7 +1461,6 @@ export default function App() {
         const startTime = dispatchTimeRef.current;
         let latestRun: GhWorkflowRun | undefined;
 
-        // Если run_id уже известен (например, восстановлен из "aether_active_render_job" при F5), опрашиваем его напрямую
         if (activeRunIdRef.current !== null) {
           const directRes = await fetch(
             `https://api.github.com/repos/${targetRepo}/actions/runs/${activeRunIdRef.current}`,
@@ -2025,16 +1477,9 @@ export default function App() {
             { headers }
           );
           if (!runsRes.ok || isCancelled) return;
-
-          const runsData = (await runsRes.json()) as {
-            workflow_runs?: GhWorkflowRun[];
-          };
-
+          const runsData = (await runsRes.json()) as { workflow_runs?: GhWorkflowRun[] };
           const rawRuns = runsData.workflow_runs || [];
           if (rawRuns.length === 0 || isCancelled) return;
-
-          // Игнорируем любые runs со статусом 'cancelled' или 'completed', если они были созданы раньше startTime.
-          // Подхватываем только run_id, который находится в 'queued' или 'in_progress' (или новый run после startTime).
           const candidateRuns = rawRuns.filter(run => {
             if (activeRunIdRef.current !== null && run.id === activeRunIdRef.current) {
               return true;
@@ -2044,41 +1489,31 @@ export default function App() {
               run.status === 'cancelled' ||
               run.status === 'completed' ||
               run.conclusion === 'cancelled';
-
             if (isCancelledOrCompleted && runCreatedTime < startTime) {
               return false;
             }
-
             if (run.status === 'queued' || run.status === 'in_progress') {
               return true;
             }
-
             return runCreatedTime >= startTime;
           });
-
           latestRun =
             activeRunIdRef.current !== null
               ? candidateRuns.find(r => r.id === activeRunIdRef.current) || candidateRuns[0]
               : candidateRuns[0];
         }
 
-        // Если актуальный запуск еще не появился на стороне GitHub — продолжаем ждать без перехода в FAILED
         if (!latestRun || isCancelled) return;
-
-        // Фиксируем ID найденного актуального запуска
         if (activeRunIdRef.current === null) {
           activeRunIdRef.current = latestRun.id;
         }
-
         const runId = latestRun.id;
         const runUrl = latestRun.html_url || `https://github.com/${targetRepo}/actions`;
 
-        // Запрашиваем список шагов и текущей задачи
         const jobsRes = await fetch(
           `https://api.github.com/repos/${targetRepo}/actions/runs/${runId}/jobs`,
           { headers }
         );
-
         let activeStepText = 'Шаг: Скачивание клипов из Google Drive...';
         let failedStepName = '';
         let jobId: number | undefined;
@@ -2098,43 +1533,29 @@ export default function App() {
           const primaryJob = jobsData.jobs?.[0];
           jobId = primaryJob?.id;
           const steps = primaryJob?.steps || [];
-
-          // Пошаговая трансляция шагов jobs[0].steps в студийный терминал (без дублей после F5)
           steps.forEach(step => {
             const stepKey = `${runId}-${step.number ?? step.name}`;
             const nameKey = `name:${step.name.trim()}`;
             const prevRecorded = seenStepsRef.current[stepKey] || seenStepsRef.current[nameKey];
             const timeStr = formatTerminalTime(secondsRef.current);
-
             if (step.status === 'in_progress' && !prevRecorded) {
               seenStepsRef.current[stepKey] = 'in_progress';
               seenStepsRef.current[nameKey] = 'in_progress';
-              appendTerminalLog(
-                `[${timeStr}] ⚙️ Выполняется шаг: ${step.name}...`,
-                'step'
-              );
+              appendTerminalLog(`[${timeStr}] ⚙️ Выполняется шаг: ${step.name}...`, 'step');
             } else if (step.status === 'completed') {
               if (step.conclusion === 'success' && prevRecorded !== 'completed_success') {
                 seenStepsRef.current[stepKey] = 'completed_success';
                 seenStepsRef.current[nameKey] = 'completed_success';
-                appendTerminalLog(
-                  `[${timeStr}] ✅ Шаг ${step.name} завершён успешно.`,
-                  'success'
-                );
+                appendTerminalLog(`[${timeStr}] ✅ Шаг ${step.name} завершён успешно.`, 'success');
               } else if (step.conclusion === 'failure' && prevRecorded !== 'completed_failure') {
                 seenStepsRef.current[stepKey] = 'completed_failure';
                 seenStepsRef.current[nameKey] = 'completed_failure';
-                appendTerminalLog(
-                  `[${timeStr}] ❌ Сбой на шаге: ${step.name}!`,
-                  'error'
-                );
+                appendTerminalLog(`[${timeStr}] ❌ Сбой на шаге: ${step.name}!`, 'error');
               }
             }
           });
-
           const inProgressStep = steps.find(s => s.status === 'in_progress');
           const failedStep = steps.find(s => s.conclusion === 'failure');
-
           if (inProgressStep) {
             activeStepText = mapGitHubStepToRussian(inProgressStep.name, inProgressStep.number);
           } else if (steps.length > 0) {
@@ -2145,7 +1566,6 @@ export default function App() {
               activeStepText = 'Шаг: Рендеринг и сборка таймлайна в FFmpeg...';
             }
           }
-
           if (failedStep) {
             failedStepName = failedStep.name;
           }
@@ -2155,13 +1575,11 @@ export default function App() {
 
         if (latestRun.status === 'completed') {
           const finalTimeStr = formatTerminalTime(secondsRef.current);
-
           if (latestRun.conclusion === 'success') {
             appendTerminalLog(
               `[${finalTimeStr}] 🎉 Рендер и выгрузка мастера в Google Drive завершены успешно!`,
               'success'
             );
-
             setRenderStatus(prev => ({
               ...prev,
               status: 'success',
@@ -2177,12 +1595,7 @@ export default function App() {
               `Рендер успешно завершён за ${finalTimeStr}! Видео и субтитры выгружены на Google Диск.`,
               runUrl
             );
-            showToast(
-              '✅ Готово! 4K мастер успешно собран и выгружен на Google Drive',
-              'success'
-            );
-
-            // Подгрузка полного текста лога задачи по завершении (FFmpeg отчет)
+            showToast('✅ Готово! 4K мастер успешно собран и выгружен на Google Drive', 'success');
             if (jobId) {
               try {
                 const jobLogRes = await fetch(
@@ -2204,7 +1617,7 @@ export default function App() {
                       },
                       ...tailLines.map((line, idx) => ({
                         id: `${Date.now()}-raw-${idx}`,
-                        text: line,
+                        text: sanitizeLogText(line),
                         level: 'raw' as const
                       }))
                     ]);
@@ -2219,7 +1632,6 @@ export default function App() {
               `[${finalTimeStr}] ❌ Сборка прервана с ошибкой. Проверьте детали в логе выше.`,
               'error'
             );
-
             const errStepInfo = failedStepName
               ? `на шаге «${failedStepName}»`
               : `(статус: ${latestRun.conclusion || 'failure'})`;
@@ -2239,8 +1651,6 @@ export default function App() {
               runUrl
             );
             showToast(`Ошибка рендера в GitHub Actions ${errStepInfo}`, 'error');
-
-            // Подгрузка полного текста лога задачи при ошибке
             if (jobId) {
               try {
                 const jobLogRes = await fetch(
@@ -2262,7 +1672,7 @@ export default function App() {
                       },
                       ...tailLines.map((line, idx) => ({
                         id: `${Date.now()}-err-raw-${idx}`,
-                        text: line,
+                        text: sanitizeLogText(line),
                         level: 'raw' as const
                       }))
                     ]);
@@ -2288,7 +1698,6 @@ export default function App() {
       }
     };
 
-    // При восстановлении после F5 опрашиваем немедленно, при свежем старте ждём 4.5с; далее интервал 5 сек
     let interval: ReturnType<typeof setInterval> | null = null;
     const startPollingWithDelay = async () => {
       const initialDelayMs = resumedFromStorageRef.current ? 0 : 4500;
@@ -2301,9 +1710,7 @@ export default function App() {
       if (isCancelled) return;
       interval = setInterval(pollGitHubActions, 5000);
     };
-
     void startPollingWithDelay();
-
     return () => {
       isCancelled = true;
       if (interval) clearInterval(interval);
@@ -2321,7 +1728,6 @@ export default function App() {
     appendTerminalLog
   ]);
 
-  // Автоматический запуск следующего манифеста из локальной очереди (Batch Queue), когда текущий run переходит в completed (success)
   useEffect(() => {
     if (
       renderStatus.status !== 'success' ||
@@ -2330,16 +1736,14 @@ export default function App() {
     ) {
       return;
     }
-
-    const completedKey = renderStatus.runId ?? `success-${renderStatus.seconds}-${renderStatus.runUrl}`;
+    const completedKey =
+      renderStatus.runId ?? `success-${renderStatus.seconds}-${renderStatus.runUrl}`;
     if (queueAutoConsumedRunRef.current === completedKey) {
       return;
     }
     queueAutoConsumedRunRef.current = completedKey;
-
     const [nextItem, ...restQueue] = batchQueue;
     if (!nextItem) return;
-
     const timer = setTimeout(() => {
       setBatchQueue(restQueue);
       localStorage.setItem(BATCH_QUEUE_STORAGE_KEY, JSON.stringify(restQueue));
@@ -2355,9 +1759,16 @@ export default function App() {
         void dispatchLoopWorkflowRef.current(false, nextItem.manifest, { bypassActiveGuard: true });
       }
     }, 1200);
-
     return () => clearTimeout(timer);
-  }, [renderStatus.status, renderStatus.runId, renderStatus.seconds, renderStatus.runUrl, batchQueue, appendTerminalLog, showToast]);
+  }, [
+    renderStatus.status,
+    renderStatus.runId,
+    renderStatus.seconds,
+    renderStatus.runUrl,
+    batchQueue,
+    appendTerminalLog,
+    showToast
+  ]);
 
   const formatTime = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -2366,29 +1777,26 @@ export default function App() {
   };
 
   const totalDurationSec = scenes.reduce((acc, sc) => acc + sc.duration, 0);
-
-  // Source text counters
   const charCount = sourceText.length;
   const wordCount = sourceText.trim() ? sourceText.trim().split(/\s+/).length : 0;
 
-  // Dynamic file size calculator for 3-10h loop based on resolution + codec + hours
   const estimateLoopSizeGb = useCallback(() => {
     const base4kGbPerHour =
       videoCodec === 'libx264'
         ? 8.2
         : bitratePreset === 'cinema'
-        ? 11.8
-        : bitratePreset === 'standard'
-        ? 6.4
-        : 3.8;
+          ? 11.8
+          : bitratePreset === 'standard'
+            ? 6.4
+            : 3.8;
     const resMultiplier =
       loopResolution === '4k'
         ? 1.0
         : loopResolution === '2k'
-        ? 0.48
-        : loopResolution === '1080p'
-        ? 0.24
-        : 0.11;
+          ? 0.48
+          : loopResolution === '1080p'
+            ? 0.24
+            : 0.11;
     const rawGb = loopHours * base4kGbPerHour * resMultiplier;
     return Math.round(rawGb * 10) / 10;
   }, [loopHours, loopResolution, bitratePreset, videoCodec]);
@@ -2397,24 +1805,17 @@ export default function App() {
     res === '4k'
       ? 'scale=3840:2160'
       : res === '2k'
-      ? 'scale=2560:1440'
-      : res === '1080p'
-      ? 'scale=1920:1080'
-      : 'scale=1280:720';
-
-  const getCrfValue = (_preset?: 'standard' | 'cinema' | 'eco') => videoCrf;
+        ? 'scale=2560:1440'
+        : res === '1080p'
+          ? 'scale=1920:1080'
+          : 'scale=1280:720';
 
   const getResolutionLabel = (res: '720p' | '1080p' | '2k' | '4k') =>
     res === '4k' ? '4K' : res === '2k' ? '2K' : res === '1080p' ? '1080p' : 'Draft 720p';
 
   const getPresetShortLabel = (preset: 'standard' | 'cinema' | 'eco') =>
-    preset === 'cinema'
-      ? 'Master Cinema'
-      : preset === 'standard'
-      ? 'YouTube Standard'
-      : 'Эконом';
+    preset === 'cinema' ? 'Master Cinema' : preset === 'standard' ? 'YouTube Standard' : 'Эконом';
 
-  // Handle batch scene upload (unlimited N-scenes)
   const handleSceneFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || !fileList.length) return;
@@ -2454,13 +1855,11 @@ export default function App() {
     }
   };
 
-  // Open GitHub & Google Drive Modal
   const openConfigModal = () => {
     setModalToken(ghToken);
     setModalRepo(ghRepo);
     setModalBranch(ghBranch || 'main');
     setModalGdriveFolderId(gdriveFolderId);
-    setModalGdriveSaKey(gdriveSaKey);
     setModalTelegramBotToken(telegramBotToken);
     setModalTelegramChatId(telegramChatId);
     setIsConfigOpen(true);
@@ -2475,7 +1874,6 @@ export default function App() {
     const trimmedRepo = modalRepo.trim();
     const trimmedBranch = modalBranch.trim() || 'main';
     const trimmedFolder = modalGdriveFolderId.trim();
-    const trimmedSaKey = modalGdriveSaKey.trim();
     const trimmedTgToken = modalTelegramBotToken.trim();
     const trimmedTgChat = modalTelegramChatId.trim();
 
@@ -2483,24 +1881,21 @@ export default function App() {
     setGhRepo(trimmedRepo);
     setGhBranch(trimmedBranch);
     setGdriveFolderId(trimmedFolder);
-    setGdriveSaKey(trimmedSaKey);
     setTelegramBotToken(trimmedTgToken);
     setTelegramChatId(trimmedTgChat);
 
-    localStorage.setItem('ac_gh_token', trimmedToken);
+    // P0: секреты (PAT / Telegram) — только sessionStorage через persistence-модуль.
     localStorage.setItem('ac_gh_repo', trimmedRepo);
     localStorage.setItem('ac_gh_branch', trimmedBranch);
     localStorage.setItem('ac_gdrive_folder_id', trimmedFolder);
-    localStorage.setItem('ac_gdrive_sa_key', trimmedSaKey);
-    localStorage.setItem('ac_tg_bot_token', trimmedTgToken);
-    localStorage.setItem('ac_tg_chat_id', trimmedTgChat);
+    saveTelegramSession({ bot_token: trimmedTgToken, chat_id: trimmedTgChat });
+
     saveGoogleAuthPatch({
       github_token: trimmedToken,
       repo: trimmedRepo,
       branch: trimmedBranch,
       drive_folder_id: trimmedFolder
     });
-
     closeConfigModal();
     showToast('Конфигурация GitHub Actions, Google Drive и Telegram сохранена', 'success');
   };
@@ -2514,7 +1909,6 @@ export default function App() {
     clearWorkspaceDraft();
     combineDraftSliceRef.current = undefined;
     setInitialCombineDraft(null);
-
     setLoopProjectName('HistoViva Documentary 4K');
     setActiveFormatPreset('histoviva_doc');
     setThumbTitle('SEALED ARCHIVE');
@@ -2523,7 +1917,7 @@ export default function App() {
     setVerbaFlowChaptersTxt('');
     setSourceText(DEFAULT_VERBAFLOW_SOURCE_TEXT);
     setAmbientLoopEnabled(true);
-    setEndScreenSafeZone('05:14-05:24');
+    setEndScreenSafeZone('');
     setManifestDurationBadge('');
     setTimelineSlots(INITIAL_TIMELINE_SLOTS);
     setVideoCodec('libx264');
@@ -2563,15 +1957,14 @@ export default function App() {
     setRenderSpecsSummary(DEFAULT_RENDER_SPECS_SUMMARY);
     setExportOutputChaptersEnabled(true);
     setExportReleaseCardMdEnabled(true);
-
     setWorkspaceResetKey(prev => prev + 1);
     setIsResetProjectModalOpen(false);
     showToast('Проект и черновик сброшены к настройкам по умолчанию', 'success');
   };
 
   const copyWorkflowTemplate = () => {
-    navigator.clipboard.writeText(WORKFLOW_LOOP_YAML);
-    showToast('Шаблон render_loop.yml скопирован в буфер обмена!', 'success');
+    window.open(RENDER_REPO_WORKFLOW_URL, '_blank', 'noopener');
+    showToast('Открыт актуальный render_loop.yml в репозитории раннера', 'info');
   };
 
   const showStatusBar = (
@@ -2588,8 +1981,7 @@ export default function App() {
     const startedAt = customDispatchTime || new Date().getTime();
     const resolvedWorkflow = meta?.workflow || 'render_scenes.yml';
     const resolvedBranch = (meta?.branch || ghBranch || 'main').trim();
-    const resolvedProjectName =
-      meta?.projectName || loopProjectName || 'Aether Combine Project';
+    const resolvedProjectName = meta?.projectName || loopProjectName || 'Aether Combine Project';
 
     dispatchTimeRef.current = startedAt;
     activeRunIdRef.current = null;
@@ -2643,11 +2035,6 @@ export default function App() {
     });
   };
 
-  // =========================================
-  // УНИВЕРСАЛЬНЫЙ ПАРСЕР СЛОТОВ (N-СЦЕН) И ДИНАМИЧЕСКИХ ВСТАВОК (INSERTS: [])
-  // =========================================
-
-  // Вычисление длительности проекта: сумма slot_duration_sec минус нахлесты переходов slot_transition_out.duration_sec
   const calculatedProjectDurationSec = timelineSlots.reduce((acc, slot, idx) => {
     const isLast = idx === timelineSlots.length - 1;
     const overlap =
@@ -2662,7 +2049,14 @@ export default function App() {
     0
   );
 
-  // Проверка привязки ассета (по file_name или asset_id) среди загруженных пользователем файлов
+  const effectiveEndScreenSafeZone =
+    endScreenSafeZone.trim() || computeEndScreenWindow(calculatedProjectDurationSec);
+
+  const emptySlotNumbers = timelineSlots
+    .map((s, i) => ((s.file_name || s.base_content?.file_name || '').trim() ? null : i + 1))
+    .filter((n): n is number => n !== null);
+  const canDispatchLoop = emptySlotNumbers.length === 0;
+
   const isAssetMatched = useCallback(
     (fileName?: string, assetId?: string): boolean => {
       const fn = (fileName || '').trim().toLowerCase();
@@ -2691,13 +2085,11 @@ export default function App() {
     [loopMedia, loopAudio, uploadedLoopAssets]
   );
 
-  // Автоматическая подстановка точных имен выбранных/загруженных файлов в свободные слоты таймлайна (без тестовых заглушек)
   const handleLoopFilesSelected = useCallback(
     (files: File[]) => {
       if (!files.length) return;
       const videoFiles: File[] = [];
       const audioFiles: File[] = [];
-
       files.forEach(f => {
         const lower = f.name.toLowerCase();
         if (
@@ -2712,19 +2104,13 @@ export default function App() {
           videoFiles.push(f);
         }
       });
-
       if (videoFiles.length > 0) {
         setLoopMedia(videoFiles[0]);
       }
       if (audioFiles.length > 0) {
         setLoopAudio(audioFiles[0]);
-        setContinuousBed(prev => ({
-          ...prev,
-          enabled: true,
-          file_name: audioFiles[0].name
-        }));
+        setContinuousBed(prev => ({ ...prev, enabled: true, file_name: audioFiles[0].name }));
       }
-
       setUploadedLoopAssets(prev => {
         const next = { ...prev };
         files.forEach(f => {
@@ -2732,8 +2118,6 @@ export default function App() {
         });
         return next;
       });
-
-      // Автоматически заполняем слоты таймлайна (и вставки inserts) реальными именами перетащенных видеофайлов
       if (videoFiles.length > 0) {
         setTimelineSlots(prev => {
           const next = prev.map(sl => ({
@@ -2741,24 +2125,17 @@ export default function App() {
             inserts: sl.inserts.map(ins => ({ ...ins }))
           }));
           let qIdx = 0;
-
-          // 1. Заполняем пустые основные слоты (file_name === '')
           for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
             if (!next[i].file_name.trim()) {
               const exactName = videoFiles[qIdx].name;
               next[i] = {
                 ...next[i],
                 file_name: exactName,
-                base_content: {
-                  ...(next[i].base_content || {}),
-                  file_name: exactName
-                }
+                base_content: { ...(next[i].base_content || {}), file_name: exactName }
               };
               qIdx += 1;
             }
           }
-
-          // 2. Оставшимися файлами заполняем пустые вставки (inserts) внутри слотов
           for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
             for (let j = 0; j < next[i].inserts.length && qIdx < videoFiles.length; j++) {
               if (!next[i].inserts[j].file_name.trim()) {
@@ -2772,18 +2149,13 @@ export default function App() {
               }
             }
           }
-
-          // 3. Если все слоты и вставки уже были заполнены ранее (qIdx === 0), обновляем их по порядку новыми перетащенными файлами
           if (qIdx === 0) {
             for (let i = 0; i < next.length && qIdx < videoFiles.length; i++) {
               const exactName = videoFiles[qIdx].name;
               next[i] = {
                 ...next[i],
                 file_name: exactName,
-                base_content: {
-                  ...(next[i].base_content || {}),
-                  file_name: exactName
-                }
+                base_content: { ...(next[i].base_content || {}), file_name: exactName }
               };
               qIdx += 1;
             }
@@ -2799,11 +2171,9 @@ export default function App() {
               }
             }
           }
-
           return next;
         });
       }
-
       showToast(
         `Файлы добавлены (${files.length} шт.) — слоты таймлайна заполнены, запущена выгрузка в Google Drive!`,
         'success'
@@ -2812,7 +2182,6 @@ export default function App() {
     [showToast]
   );
 
-  // Пакетная загрузка файлов в дропзону (слоты + вставки E1..En + фоновый звук)
   const handleLoopMedia = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || !fileList.length) return;
@@ -2840,7 +2209,6 @@ export default function App() {
     setLoopHours(clamped);
   };
 
-  // Распределение общей длительности (loopHours * 3600) равномерно по текущим N слотам
   const syncSlotsToTargetHours = (targetHours: number) => {
     const clampedH = Math.max(3, Math.min(10, targetHours));
     setLoopHours(clampedH);
@@ -2862,7 +2230,6 @@ export default function App() {
     });
   };
 
-  // Сброс структуры к чистым 6 актам (3:00:00) без подмены пользовательских имен файлов
   const applyBlizzard3HSpecPreset = () => {
     setTimelineSlots(prev =>
       INITIAL_TIMELINE_SLOTS.map((baseSlot, idx) => {
@@ -2871,10 +2238,7 @@ export default function App() {
         return {
           ...baseSlot,
           file_name: preservedFile,
-          base_content: {
-            ...(existing?.base_content || {}),
-            file_name: preservedFile
-          },
+          base_content: { ...(existing?.base_content || {}), file_name: preservedFile },
           asset_id: existing?.asset_id || '',
           inserts: existing?.inserts ? [...existing.inserts] : []
         };
@@ -2903,7 +2267,6 @@ export default function App() {
     );
   };
 
-  // Добавление нового слота (поддержка от 1 до 50+ сцен, без захардкоженных имен файлов)
   const addTimelineSlot = () => {
     setTimelineSlots(prev => {
       const nextIdx = prev.length + 1;
@@ -2928,17 +2291,13 @@ export default function App() {
           internal_loop_crossfade_sec: internalLoopCrossfadeSec,
           slot_duration_sec: 1800,
           inserts: [],
-          slot_transition_out: {
-            type: 'none',
-            duration_sec: 0
-          }
+          slot_transition_out: { type: 'none' as const, duration_sec: 0 }
         }
       ];
     });
     showToast('Добавлен новый слот в таймлайн', 'info');
   };
 
-  // Генератор произвольного числа N слотов (без захардкоженных имен файлов)
   const generateNSlotsPreset = (count: number) => {
     const totalSec = loopHours * 3600;
     const perSlotSec = Math.max(120, Math.round((totalSec + (count - 1) * actCrossfadeSec) / count));
@@ -2949,7 +2308,6 @@ export default function App() {
         const isLast = idx === count - 1;
         const existing = prev[idx];
         const preservedFileName = existing?.file_name || '';
-
         return {
           slot_index: num,
           slot_id: existing?.slot_id || `SLOT_${pad}`,
@@ -2958,17 +2316,15 @@ export default function App() {
           act_timecode: existing?.act_timecode || `Слот #${num}`,
           asset_id: existing?.asset_id || '',
           file_name: preservedFileName,
-          base_content: {
-            ...(existing?.base_content || {}),
-            file_name: preservedFileName
-          },
+          base_content: { ...(existing?.base_content || {}), file_name: preservedFileName },
           source_clip_duration_sec: existing?.source_clip_duration_sec ?? 10,
-          internal_loop_crossfade_sec: existing?.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec,
+          internal_loop_crossfade_sec:
+            existing?.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec,
           slot_duration_sec: perSlotSec,
           inserts: existing?.inserts ? [...existing.inserts] : [],
           slot_transition_out: isLast
-            ? { type: 'none', duration_sec: 0 }
-            : { type: 'xfade', duration_sec: actCrossfadeSec }
+            ? { type: 'none' as const, duration_sec: 0 }
+            : { type: 'xfade' as const, duration_sec: actCrossfadeSec }
         };
       })
     );
@@ -2984,12 +2340,7 @@ export default function App() {
         showToast('В таймлайне должен оставаться минимум 1 слот!', 'error');
         return prev;
       }
-      return prev
-        .filter((_, idx) => idx !== slotIdx)
-        .map((s, idx) => ({
-          ...s,
-          slot_index: idx + 1
-        }));
+      return prev.filter((_, idx) => idx !== slotIdx).map((s, idx) => ({ ...s, slot_index: idx + 1 }));
     });
   };
 
@@ -3003,10 +2354,7 @@ export default function App() {
         if (idx !== slotIdx) return s;
         const updated: TimelineSlot = { ...s, [field]: value };
         if (field === 'file_name') {
-          updated.base_content = {
-            ...(s.base_content || {}),
-            file_name: String(value ?? '')
-          };
+          updated.base_content = { ...(s.base_content || {}), file_name: String(value ?? '') };
         }
         if (field === 'title') {
           updated.act_title = String(value ?? '');
@@ -3019,7 +2367,6 @@ export default function App() {
     );
   };
 
-  // Добавление новой вставки E(n) в массив slot.inserts (без захардкоженных имен файлов)
   const addInsertToSlot = (slotIdx: number) => {
     setTimelineSlots(prev =>
       prev.map((slot, idx) => {
@@ -3028,9 +2375,7 @@ export default function App() {
         const isE3Style = nextNum === 3;
         const isE2Style = nextNum === 2;
         const lastTrigger =
-          slot.inserts.length > 0
-            ? slot.inserts[slot.inserts.length - 1].trigger_at_sec
-            : 0;
+          slot.inserts.length > 0 ? slot.inserts[slot.inserts.length - 1].trigger_at_sec : 0;
         const suggestedTrigger = Math.min(
           Math.max(30, slot.slot_duration_sec - 15),
           lastTrigger + 120
@@ -3040,30 +2385,21 @@ export default function App() {
           timecode_label: isE3Style
             ? `E${nextNum} • in 1.5с / БЕЗ fade out`
             : isE2Style
-            ? `E${nextNum} • in 1.5с / out 3.0с`
-            : `E${nextNum} • in 1.5с / out 1.5с`,
+              ? `E${nextNum} • in 1.5с / out 3.0с`
+              : `E${nextNum} • in 1.5с / out 1.5с`,
           asset_id: '',
           file_name: '',
           trigger_at_sec: suggestedTrigger,
           duration_sec: 10,
-          transition_in: {
-            type: isE3Style ? 'fade' : 'dissolve',
-            duration_sec: 1.5
-          },
+          transition_in: { type: isE3Style ? 'fade' : 'dissolve', duration_sec: 1.5 },
           transition_out: isE3Style
             ? { type: 'none', duration_sec: 0 }
-            : {
-                type: 'dissolve',
-                duration_sec: isE2Style ? 3.0 : 1.5
-              },
+            : { type: 'dissolve', duration_sec: isE2Style ? 3.0 : 1.5 },
           hold_until_end: isE3Style,
           audio_soft_compressor: isE3Style,
           max_peak_over_bed_db: isE3Style ? 6 : undefined
         };
-        return {
-          ...slot,
-          inserts: [...slot.inserts, newInsert]
-        };
+        return { ...slot, inserts: [...slot.inserts, newInsert] };
       })
     );
   };
@@ -3108,7 +2444,6 @@ export default function App() {
     );
   };
 
-  // АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ FFmpeg FILTER_COMPLEX ПО СПЕЦИФИКАЦИИ «МЕТЕЛЬ: 3:00:00»
   const buildFFmpegFilterComplexPreview = useCallback((): {
     inputsArgs: string[];
     filterLines: string[];
@@ -3120,22 +2455,19 @@ export default function App() {
       loopResolution === '4k'
         ? '3840:2160'
         : loopResolution === '2k'
-        ? '2560:1440'
-        : loopResolution === '1080p'
-        ? '1920:1080'
-        : '1280:720';
-
+          ? '2560:1440'
+          : loopResolution === '1080p'
+            ? '1920:1080'
+            : '1280:720';
     const inputsArgs: string[] = [];
     const filterLines: string[] = [];
     let inputIdx = 0;
-
     const slotVideoNodes: {
       label: string;
       durationSec: number;
       transitionOut: SlotTransitionOut;
     }[] = [];
     const slotAudioLabels: string[] = [];
-
     let cumulativeSlotStartSec = 0;
 
     timelineSlots.forEach((slot, sIdx) => {
@@ -3143,15 +2475,18 @@ export default function App() {
       const clipDur = Math.max(2, Number(slot.source_clip_duration_sec) || 10);
       const seamSec = Math.max(
         0.2,
-        Math.min(clipDur * 0.45, Number(slot.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec) || 1.0)
+        Math.min(
+          clipDur * 0.45,
+          Number(slot.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec) || 1.0
+        )
       );
       const effStep = Math.max(1, clipDur - seamSec);
       const loopSteps = Math.max(1, Math.ceil(slotDur / effStep));
       const baseInput = inputIdx++;
+      const slotFileName = (slot.file_name || '').trim() || 'MISSING_FILE.mp4';
 
-      // 1) Бесшовная петля 10-секундных исходников со швом video+audio crossfade ровно 1.0 сек внутри слота
       inputsArgs.push(
-        `-stream_loop ${loopSteps} -t ${slotDur} -i "${slot.file_name}" # [Слот #${slot.slot_index}: ${slot.act_timecode || ''} • исходник ${clipDur}с со швом xfade+acrossfade=${seamSec.toFixed(1)}с]`
+        `-stream_loop ${loopSteps} -t ${slotDur} -i "${slotFileName}" # [Слот #${slot.slot_index}: ${slot.act_timecode || ''} • исходник ${clipDur}с со швом xfade+acrossfade=${seamSec.toFixed(1)}с]`
       );
 
       let curVideoLabel = `v_slot_${sIdx}_base`;
@@ -3159,15 +2494,13 @@ export default function App() {
         `# Слот #${slot.slot_index} (${slot.title}): бесшовная склейка ${clipDur}с исходника через xfade=duration=${seamSec.toFixed(1)}:offset=${(clipDur - seamSec).toFixed(1)} @ ${videoFps}fps`
       );
       filterLines.push(
-        `[${baseInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},trim=duration=${slotDur},setpts=PTS-STARTPTS[${curVideoLabel}]`
+        `[${baseInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},format=yuv420p,trim=duration=${slotDur},setpts=PTS-STARTPTS[${curVideoLabel}]`
       );
-
       let curAudioLabel = `a_slot_${sIdx}_base`;
       filterLines.push(
-        `[${baseInput}:a]acrossfade=d=${seamSec.toFixed(1)}:c1=tri:c2=tri,atrim=duration=${slotDur},asetpts=PTS-STARTPTS[${curAudioLabel}]`
+        `[${baseInput}:a]atrim=duration=${slotDur},asetpts=PTS-STARTPTS[${curAudioLabel}]`
       );
 
-      // 2) Точная асимметричная анимация вставок (inserts: E1, E2, E3)
       if (Array.isArray(slot.inserts) && slot.inserts.length > 0) {
         slot.inserts.forEach((ins, insIdx) => {
           const insInput = inputIdx++;
@@ -3179,25 +2512,25 @@ export default function App() {
           const fadeOutType = ins.transition_out?.type ?? 'dissolve';
           const fadeOutDur = Math.max(0, Number(ins.transition_out?.duration_sec) || 0);
           const holdToEnd = Boolean(ins.hold_until_end || fadeOutType === 'none' || fadeOutDur <= 0);
-
           const insLabel = `v_s${sIdx}_${ins.insert_id || `E${insIdx + 1}`}`;
           const nextOverlayLabel = `v_slot_${sIdx}_ovr_${insIdx + 1}`;
+          const insFileName = (ins.file_name || '').trim() || 'MISSING_INSERT.mp4';
 
-          inputsArgs.push(`-i "${ins.file_name}" # [${ins.insert_id} @ глобальный таймкод ${absProjectSec}с / локальный +${trig}с]`);
+          inputsArgs.push(
+            `-i "${insFileName}" # [${ins.insert_id} @ глобальный таймкод ${absProjectSec}с / локальный +${trig}с]`
+          );
 
           if (holdToEnd) {
-            // Вставка E3 (таймкод 2:56 / 10560 сек): появление in 1.5 сек, БЕЗ fade out (до конца хронометража)
             filterLines.push(
-              `[${insInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},format=yuva420p,fade=t=in:st=0:d=${fadeInDur}:alpha=1,tpad=stop_mode=clone:stop_duration=${Math.max(1, slotDur - trig)},setpts=PTS-STARTPTS+${trig}/TB[${insLabel}] # ${ins.insert_id}: in ${fadeInDur}s (${fadeInType}) / БЕЗ fade out (до конца хронометража)`
+              `[${insInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},format=yuva420p,fade=t=in:st=0:d=${fadeInDur}:alpha=1,tpad=stop_mode=clone:stop_duration=${Math.max(1, slotDur - trig)},setpts=PTS-STARTPTS+${trig}/TB[${insLabel}] # ${ins.insert_id}: in ${fadeInDur}s (${fadeInType}) / БЕЗ fade out`
             );
             filterLines.push(
               `[${curVideoLabel}][${insLabel}]overlay=enable='gte(t,${trig})':eof_action=pass[${nextOverlayLabel}]`
             );
           } else {
-            // Вставки E1 (in 1.5s / out 1.5s) и E2 (in 1.5s / out 3.0s)
             const fadeOutStart = Math.max(fadeInDur, dur - fadeOutDur);
             filterLines.push(
-              `[${insInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},format=yuva420p,fade=t=in:st=0:d=${fadeInDur}:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeOutDur}:alpha=1,setpts=PTS-STARTPTS+${trig}/TB[${insLabel}] # ${ins.insert_id}: in ${fadeInDur}s (${fadeInType}) / out ${fadeOutDur}s (${fadeOutType})`
+              `[${insInput}:v]scale=${scaleWh},setsar=1,fps=${videoFps},format=yuva420p,fade=t=in:st=0:d=${fadeInDur}:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeOutDur}:alpha=1,setpts=PTS-STARTPTS+${trig}/TB[${insLabel}] # ${ins.insert_id}: in ${fadeInDur}s / out ${fadeOutDur}s`
             );
             filterLines.push(
               `[${curVideoLabel}][${insLabel}]overlay=enable='between(t,${trig},${trig + dur})':eof_action=pass[${nextOverlayLabel}]`
@@ -3205,7 +2538,6 @@ export default function App() {
           }
           curVideoLabel = nextOverlayLabel;
 
-          // Аудио вставки: для треска E3 — мягкая компрессия по атаке (soft attack) и лимитер пика <= +6 дБ поверх фона
           const insAudioLabel = `a_s${sIdx}_${ins.insert_id || `E${insIdx + 1}`}`;
           const nextSlotAudioLabel = `a_slot_${sIdx}_mix_${insIdx + 1}`;
           const delayMs = Math.round(trig * 1000);
@@ -3221,10 +2553,9 @@ export default function App() {
             !holdToEnd && fadeOutDur > 0
               ? `,afade=t=out:st=${Math.max(0.1, dur - fadeOutDur).toFixed(2)}:d=${fadeOutDur}`
               : '';
-
           if (isE3Soft && ins.insert_id.toUpperCase() === 'E3') {
             filterLines.push(
-              `[${insInput}:a]afade=t=in:st=0:d=${fadeInDur}${aFadeOutChain},acompressor=attack=45:release=250:ratio=3:threshold=-18dB:knee=6dB:makeup=2dB,alimiter=limit=${peakLimitDb.toFixed(1)}dB:attack=15:release=100,adelay=${delayMs}|${delayMs}[${insAudioLabel}] # Треск E3: soft-attack компрессия, пик <= +${peakLimitDb} дБ`
+              `[${insInput}:a]afade=t=in:st=0:d=${fadeInDur}${aFadeOutChain},acompressor=attack=45:release=250:ratio=3:threshold=-18dB:knee=6dB:makeup=2dB,alimiter=limit=${peakLimitDb.toFixed(1)}dB:attack=15:release=100,adelay=${delayMs}|${delayMs}[${insAudioLabel}]`
             );
           } else {
             filterLines.push(
@@ -3239,30 +2570,21 @@ export default function App() {
       }
 
       slotAudioLabels.push(curAudioLabel);
-
       const transOut = slot.slot_transition_out || { type: 'none', duration_sec: 0 };
-      slotVideoNodes.push({
-        label: curVideoLabel,
-        durationSec: slotDur,
-        transitionOut: transOut
-      });
-
+      slotVideoNodes.push({ label: curVideoLabel, durationSec: slotDur, transitionOut: transOut });
       const overlap = transOut.type !== 'none' ? Number(transOut.duration_sec) || 0 : 0;
       cumulativeSlotStartSec += slotDur - overlap;
     });
 
-    // 3) Стыки актов (0:30, 1:00, 1:40, 2:00, 2:40) — плавный crossfade 90 секунд (видео + синхронное аудио)
     let chainedVideoLabel = slotVideoNodes[0]?.label || '0:v';
     let accumOffset = slotVideoNodes[0]?.durationSec || 0;
 
     if (slotVideoNodes.length > 1) {
       let prevLabel = slotVideoNodes[0].label;
-
       for (let i = 1; i < slotVideoNodes.length; i++) {
         const prevTrans = slotVideoNodes[i - 1].transitionOut;
         const nextNode = slotVideoNodes[i];
         const chainLabel = `v_act_chain_${i}`;
-
         if (prevTrans.type === 'none' || prevTrans.duration_sec <= 0) {
           filterLines.push(`[${prevLabel}][${nextNode.label}]concat=n=2:v=1:a=0[${chainLabel}]`);
           accumOffset += nextNode.durationSec;
@@ -3274,7 +2596,7 @@ export default function App() {
           const boundaryH = Math.floor(boundaryMin / 60);
           const boundaryRemMin = String(boundaryMin % 60).padStart(2, '0');
           filterLines.push(
-            `[${prevLabel}][${nextNode.label}]xfade=transition=${xfadeType}:duration=${dur}:offset=${offset}[${chainLabel}] # Стык актов ${boundaryH}:${boundaryRemMin} (${offset}с): crossfade ${dur}с`
+            `[${prevLabel}][${nextNode.label}]xfade=transition=${xfadeType}:duration=${dur}:offset=${offset}[${chainLabel}] # Стык актов ${boundaryH}:${boundaryRemMin} (${offset}с)`
           );
           accumOffset = offset + nextNode.durationSec;
         }
@@ -3283,7 +2605,6 @@ export default function App() {
       chainedVideoLabel = prevLabel;
     }
 
-    // 4) Опциональный 2-секундный черный экран в финале после затухания трещины
     let finalVideoMap = chainedVideoLabel;
     const lastTrans = slotVideoNodes[slotVideoNodes.length - 1]?.transitionOut;
     if (lastTrans && lastTrans.type !== 'none' && lastTrans.duration_sec > 0) {
@@ -3297,19 +2618,18 @@ export default function App() {
     if (finalBlackScreenEnabled && finalBlackScreenSec > 0) {
       const crackFadeStart = Math.max(0, accumOffset - 1.5);
       filterLines.push(
-        `[${chainedVideoLabel}]fade=t=out:st=${crackFadeStart.toFixed(1)}:d=1.5,tpad=stop_mode=add:stop_duration=${finalBlackScreenSec.toFixed(1)}:color=black[v_master_out] # Затухание трещины + финальный черный экран ${finalBlackScreenSec.toFixed(1)} сек`
+        `[${chainedVideoLabel}]fade=t=out:st=${crackFadeStart.toFixed(1)}:d=1.5,tpad=stop_mode=add:stop_duration=${finalBlackScreenSec.toFixed(1)}:color=black[v_master_out]`
       );
       finalVideoMap = 'v_master_out';
     }
 
     if (loopBurnInSubtitles) {
       filterLines.push(
-        `[${finalVideoMap}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled] # Hardsub (burn_in: true)`
+        `[${finalVideoMap}]subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'[v_subtitled]`
       );
       finalVideoMap = 'v_subtitled';
     }
 
-    // 5) Синхронный аудиокроссфейд между актами (90 сек) + continuous_bed + loudnorm=I=-16:TP=-3:LRA=11
     let veoAudioChain = slotAudioLabels[0] || '0:a';
     if (slotAudioLabels.length > 1) {
       let prevAudio = slotAudioLabels[0];
@@ -3321,7 +2641,7 @@ export default function App() {
             : actCrossfadeSec;
         const outAudio = `a_act_chain_${i}`;
         filterLines.push(
-          `[${prevAudio}][${slotAudioLabels[i]}]acrossfade=d=${aDur}:c1=tri:c2=tri[${outAudio}] # Аудио синхронно следует за видеокроссфейдом (${aDur}с)`
+          `[${prevAudio}][${slotAudioLabels[i]}]acrossfade=d=${aDur}:c1=tri:c2=tri[${outAudio}]`
         );
         prevAudio = outAudio;
       }
@@ -3348,7 +2668,7 @@ export default function App() {
     if (loopMasterAudio.enabled && loopMasterAudio.file_name.trim()) {
       const masterIn = inputIdx++;
       inputsArgs.push(
-        `-i "${loopMasterAudio.file_name.trim()}" # [Слой 2: Мастер-аудиодорожка (озвучка / саундтрек)]`
+        `-i "${loopMasterAudio.file_name.trim()}" # [Слой 2: Мастер-аудиодорожка]`
       );
       filterLines.push(
         `[${masterIn}:a]atrim=duration=${calculatedProjectDurationSec},asetpts=PTS-STARTPTS[a_master_track]`
@@ -3378,7 +2698,7 @@ export default function App() {
       const tpDb = Math.min(-3, Number(audioMastering.true_peak_dbtp) || -3);
       const lraVal = Math.max(1, Number(audioMastering.lra) || 11);
       filterLines.push(
-        `[${preMasterAudio}]loudnorm=I=${iLufs}:TP=${tpDb}:LRA=${lraVal}[a_master_loudnorm] # Нормализация -18..-14 LUFS, True-Peak <= -3 dBTP`
+        `[${preMasterAudio}]loudnorm=I=${iLufs}:TP=${tpDb}:LRA=${lraVal}[a_master_loudnorm]`
       );
       finalAudioMap = 'a_master_loudnorm';
     }
@@ -3390,9 +2710,14 @@ export default function App() {
         ? `-c:v libx265 -preset medium -crf ${crfVal} -tag:v hvc1 -pix_fmt yuv420p -r ${videoFps}`
         : `-c:v libx264 -preset ${h264Preset} -crf ${crfVal} -pix_fmt yuv420p -r ${videoFps}`;
     const audioFlags = `-c:a aac -b:a ${audioBitrateKbps}k -ar 48000`;
-    const encodingFlags = `${codecFlags} ${audioFlags}`;
 
-    return { inputsArgs, filterLines, finalVideoMap, finalAudioMap, encodingFlags };
+    return {
+      inputsArgs,
+      filterLines,
+      finalVideoMap,
+      finalAudioMap,
+      encodingFlags: `${codecFlags} ${audioFlags}`
+    };
   }, [
     timelineSlots,
     loopResolution,
@@ -3487,17 +2812,12 @@ export default function App() {
         const start = cursor;
         const end = cursor + effectiveDur - 0.5;
         cursor += effectiveDur;
-
         const rawTitle = (slot.act_title || slot.title || '').trim();
         const fallbackList = localizedDefaults[lang] || localizedDefaults.en;
         const lineText =
-          lang === 'original' && rawTitle
-            ? rawTitle
-            : fallbackList[idx % fallbackList.length];
-
+          lang === 'original' && rawTitle ? rawTitle : fallbackList[idx % fallbackList.length];
         return `${idx + 1}\n${formatSrtTimeFromSeconds(start)} --> ${formatSrtTimeFromSeconds(end)}\n${lineText}`;
       });
-
       return blocks.join('\n\n');
     },
     [timelineSlots, loopSubtitleLanguage]
@@ -3534,7 +2854,6 @@ export default function App() {
     srt_content: loopBurnInSubtitles || loopUploadSrtToDrive ? resolvedLoopSrtContent : ''
   };
 
-  // Формирование исходящего манифеста строго из текущего состояния полей интерфейса (2.2-FINAL dual compatibility)
   const currentManifest: LoopBuildManifest = {
     version: '4.0-universal',
     manifest_version: '2.2-FINAL',
@@ -3561,8 +2880,8 @@ export default function App() {
         loopDraftMode || loopResolution === '720p'
           ? 'ultrafast'
           : videoCodec === 'libx264'
-          ? 'veryfast'
-          : 'medium',
+            ? 'veryfast'
+            : 'medium',
       draft_mode: loopDraftMode || loopResolution === '720p',
       crf: videoCrf,
       resolution: loopResolution,
@@ -3572,8 +2891,7 @@ export default function App() {
     },
     subtitles: loopSubtitlesManifestObj,
     subtitles_export: {
-      enabled:
-        exportSeparateSrtFiles || sidecarBurnInVideo || loopSubtitlesManifestObj.enabled,
+      enabled: exportSeparateSrtFiles || sidecarBurnInVideo || loopSubtitlesManifestObj.enabled,
       burn_in_video: sidecarBurnInVideo,
       export_separate_srt_files: exportSeparateSrtFiles,
       strict_scene_duration_lock: strictSceneDurationLock,
@@ -3592,11 +2910,7 @@ export default function App() {
     audio_mastering: audioMastering,
     seamless_asymmetry: seamlessAsymmetry,
     random_interval: seamlessAsymmetry.random_interval,
-    video_filename:
-      loopMedia?.name ||
-      timelineSlots[0]?.file_name ||
-      expectedVideoFilename ||
-      '',
+    video_filename: loopMedia?.name || timelineSlots[0]?.file_name || expectedVideoFilename || '',
     ...(useEmbeddedAudio
       ? {}
       : {
@@ -3608,18 +2922,11 @@ export default function App() {
             ''
         }),
     gdrive_folder_id: gdriveFolderId || '',
-    cloud_export: {
-      target_folder_id: gdriveFolderId || ''
-    },
+    cloud_export: { target_folder_id: gdriveFolderId || '' },
     continuous_bed: continuousBed,
     master_audio: loopMasterAudio,
     ...(shortsFactoryEnabled
-      ? {
-          shorts_factory: {
-            enabled: true,
-            clip_duration_sec: 38
-          }
-        }
+      ? { shorts_factory: { enabled: true, clip_duration_sec: 38 } }
       : {}),
     youtube_seo: exportYoutubeSeoBlock,
     timeline_slots: timelineSlots.map((slot, idx) => {
@@ -3634,11 +2941,7 @@ export default function App() {
         slot.assets?.video_file ||
         ''
       ).trim();
-      const resolvedVoiceoverFile = (
-        slot.voiceover_file ||
-        slot.assets?.voiceover_file ||
-        ''
-      ).trim();
+      const resolvedVoiceoverFile = (slot.voiceover_file || slot.assets?.voiceover_file || '').trim();
       return {
         ...slot,
         act_title: englishChapterTitle,
@@ -3651,10 +2954,7 @@ export default function App() {
           video_file: resolvedVideoFile,
           voiceover_file: resolvedVoiceoverFile
         },
-        base_content: {
-          ...(slot.base_content || {}),
-          file_name: resolvedVideoFile
-        },
+        base_content: { ...(slot.base_content || {}), file_name: resolvedVideoFile },
         inserts: slot.inserts.map(ins => ({
           ...ins,
           file_name: ins.file_name ?? '',
@@ -3664,7 +2964,6 @@ export default function App() {
     })
   };
 
-  // Безопасное UTF-8 кодирование строки с кириллицей в Base64
   const toBase64 = (str: string): string => {
     try {
       const bytes = new TextEncoder().encode(str);
@@ -3679,11 +2978,9 @@ export default function App() {
     return toBase64(JSON.stringify(manifestObj));
   };
 
-  // 100% универсальный динамический парсер слота из любого входного JSON (без подстановки фейковых имен)
   const normalizeTimelineSlot = (rawSlot: Record<string, unknown>, idx: number): TimelineSlot => {
     const num = idx + 1;
     const pad = String(num).padStart(2, '0');
-
     const baseContent =
       rawSlot.base_content && typeof rawSlot.base_content === 'object'
         ? (rawSlot.base_content as Record<string, unknown>)
@@ -3693,7 +2990,6 @@ export default function App() {
         ? (rawSlot.assets as Record<string, unknown>)
         : undefined;
 
-    // Универсальная цепочка чтения имени файла слота (2.2-FINAL: assets.video_file || video_file || file_name)
     const rawFileName = String(
       slotAssets?.video_file ||
         rawSlot.video_file ||
@@ -3723,13 +3019,10 @@ export default function App() {
         const insertId = String(item.insert_id || item.id || `E${insIdx + 1}`);
         const isE3 = insertId.toUpperCase() === 'E3';
         const isE2 = insertId.toUpperCase() === 'E2';
-
         const itemBaseContent =
           item.base_content && typeof item.base_content === 'object'
             ? (item.base_content as Record<string, unknown>)
             : undefined;
-
-        // Реальное имя файла вставки без подстановки тестовых заглушек
         const rawInsertFileName = String(
           item.file_name ||
             item.filename ||
@@ -3739,7 +3032,6 @@ export default function App() {
             itemBaseContent?.filename ||
             ''
         ).trim();
-
         const transInObj =
           item.transition_in && typeof item.transition_in === 'object'
             ? (item.transition_in as Record<string, unknown>)
@@ -3749,7 +3041,6 @@ export default function App() {
         const tInDur =
           Number(transInObj.duration_sec ?? item.fade_in_sec ?? item.transition_duration_sec ?? 1.5) ||
           1.5;
-
         const transOutObj =
           item.transition_out && typeof item.transition_out === 'object'
             ? (item.transition_out as Record<string, unknown>)
@@ -3764,40 +3055,28 @@ export default function App() {
           tOutType === 'none'
             ? 0
             : Number(transOutObj.duration_sec ?? item.fade_out_sec ?? defaultOutDur) || defaultOutDur;
-
         const holdUntilEnd = Boolean(item.hold_until_end ?? (tOutType === 'none' || isE3));
-
         const insStartSec = typeof item.start_sec === 'number' ? item.start_sec : undefined;
         const insEndSec = typeof item.end_sec === 'number' ? item.end_sec : undefined;
         const insComputedDur =
           insStartSec !== undefined && insEndSec !== undefined && insEndSec > insStartSec
             ? insEndSec - insStartSec
             : undefined;
-
         return {
           insert_id: insertId,
           timecode_label:
             typeof item.timecode_label === 'string'
               ? item.timecode_label
               : typeof item.title === 'string'
-              ? item.title
-              : undefined,
+                ? item.title
+                : undefined,
           asset_id: String(item.asset_id ?? item.id ?? ''),
           file_name: rawInsertFileName,
           filename: rawInsertFileName,
-          trigger_at_sec: Math.max(
-            0,
-            Number(item.trigger_at_sec ?? item.start_sec ?? 0) || 0
-          ),
+          trigger_at_sec: Math.max(0, Number(item.trigger_at_sec ?? item.start_sec ?? 0) || 0),
           duration_sec: Math.max(1, Number(item.duration_sec ?? insComputedDur ?? 10) || 10),
-          transition_in: {
-            type: tInType,
-            duration_sec: tInDur
-          },
-          transition_out: {
-            type: tOutType,
-            duration_sec: tOutDur
-          },
+          transition_in: { type: tInType, duration_sec: tInDur },
+          transition_out: { type: tOutType, duration_sec: tOutDur },
           hold_until_end: holdUntilEnd,
           audio_soft_compressor: Boolean(item.audio_soft_compressor ?? isE3),
           max_peak_over_bed_db: Number(item.max_peak_over_bed_db ?? 6) || 6
@@ -3808,21 +3087,20 @@ export default function App() {
       rawSlot.slot_transition_out && typeof rawSlot.slot_transition_out === 'object'
         ? (rawSlot.slot_transition_out as Record<string, unknown>)
         : rawSlot.transition_out && typeof rawSlot.transition_out === 'object'
-        ? (rawSlot.transition_out as Record<string, unknown>)
-        : {};
+          ? (rawSlot.transition_out as Record<string, unknown>)
+          : {};
     const outTypeRaw = String(rawTransOut.type ?? 'xfade').toLowerCase();
     const outType: SlotTransitionOut['type'] =
       outTypeRaw === 'none'
         ? 'none'
         : outTypeRaw === 'dissolve'
-        ? 'dissolve'
-        : outTypeRaw === 'fade'
-        ? 'fade'
-        : 'xfade';
+          ? 'dissolve'
+          : outTypeRaw === 'fade'
+            ? 'fade'
+            : 'xfade';
     const outDur =
       outType === 'none' ? 0 : Math.max(0, Number(rawTransOut.duration_sec ?? 90.0) || 90.0);
 
-    // Вычисление длительности слота: slot.slot_duration_sec ?? (slot.end_sec - slot.start_sec)
     const startSec = typeof rawSlot.start_sec === 'number' ? rawSlot.start_sec : undefined;
     const endSec = typeof rawSlot.end_sec === 'number' ? rawSlot.end_sec : undefined;
     const rangeDurationSec =
@@ -3836,12 +3114,9 @@ export default function App() {
         rangeDurationSec ??
         1800
     );
-
     const resolvedActTitle = String(rawSlot.act_title || rawSlot.title || '');
     const resolvedSlotId = String(rawSlot.slot_id ?? `SLOT_${pad}`);
-    const resolvedAssetId = String(
-      rawSlot.asset_id || baseContent?.asset_id || ''
-    );
+    const resolvedAssetId = String(rawSlot.asset_id || baseContent?.asset_id || '');
 
     return {
       slot_index: Number(rawSlot.slot_index ?? num) || num,
@@ -3852,8 +3127,8 @@ export default function App() {
         typeof rawSlot.act_timecode === 'string'
           ? rawSlot.act_timecode
           : startSec !== undefined && endSec !== undefined
-          ? `${startSec}s – ${endSec}s`
-          : undefined,
+            ? `${startSec}s – ${endSec}s`
+            : undefined,
       asset_id: resolvedAssetId,
       file_name: rawFileName,
       video_file: rawFileName,
@@ -3863,10 +3138,7 @@ export default function App() {
         video_file: rawFileName,
         ...(rawVoiceoverFile ? { voiceover_file: rawVoiceoverFile } : {})
       },
-      base_content: {
-        ...(baseContent || {}),
-        file_name: rawFileName
-      },
+      base_content: { ...(baseContent || {}), file_name: rawFileName },
       ...(startSec !== undefined ? { start_sec: startSec } : {}),
       ...(endSec !== undefined ? { end_sec: endSec } : {}),
       source_clip_duration_sec: Math.max(
@@ -3889,14 +3161,10 @@ export default function App() {
       ),
       slot_duration_sec: Math.max(1, resolvedDurationSec || 1800),
       inserts: parsedInserts,
-      slot_transition_out: {
-        type: outType,
-        duration_sec: outDur
-      }
+      slot_transition_out: { type: outType, duration_sec: outDur }
     };
   };
 
-  // Единый синхронизатор v2.1 JSON-манифеста на все 5 вкладок студии (Монтаж, Луп, VerbaFlow, SEO, Превью)
   const applyV21CrossTabSettings = (
     raw: Record<string, unknown>,
     sourceLabel: string,
@@ -3904,20 +3172,14 @@ export default function App() {
   ) => {
     const parsed = parseV21ManifestObject(raw);
     if (!parsed.isV21Manifest) return;
-
     if (parsed.projectName) {
       setLoopProjectName(parsed.projectName);
     }
-    // Таб 2: отключаем Ambient Loop при загрузке однопроходного повествовательного манифеста или tab_2_ambient_loop.enabled === false
     setAmbientLoopEnabled(parsed.ambientLoopEnabled);
-
-    // Таб 3: VerbaFlow — строгий лок длительности, отключение hardsub, мульти-язычный SRT
     setStrictSceneDurationLock(parsed.tab3Verbaflow.strictSceneDurationLock);
     setSidecarBurnInVideo(parsed.tab3Verbaflow.burnInVideo);
     setExportSeparateSrtFiles(parsed.tab3Verbaflow.exportSeparateSrtFiles);
     setSelectedSubtitleLanguages(parsed.tab3Verbaflow.subtitleLanguages);
-
-    // Таб 4: YouTube SEO — редактируемый video_title из манифеста, chapters_youtube, чекбоксы RELEASE_CARD.md / output_chapters.txt
     if (parsed.videoTitle) {
       const nextTitle = parsed.videoTitle.slice(0, 100);
       setYoutubeSeoState(prev => ({
@@ -3933,26 +3195,19 @@ export default function App() {
     }
     setExportOutputChaptersEnabled(parsed.tab4Seo.exportOutputChaptersTxt);
     setExportReleaseCardMdEnabled(parsed.tab4Seo.exportReleaseCardMd);
-
-    // Таб 5: 4K Превью & Арт-цех — слоты A/B/C и направляющая End Screen safe-zone
     setManifestThumbnailSlots(parsed.tab5Art.thumbnailSlots);
     setEndScreenSafeZone(parsed.tab5Art.endScreenSafeZone);
     if (parsed.totalDurationFormatted) {
       setManifestDurationBadge(parsed.totalDurationFormatted);
     }
-
     if (options?.syncCombine) {
-      setExternalV21Manifest({
-        raw,
-        fileName: sourceLabel,
-        nonce: Date.now()
-      });
+      setExternalV21Manifest({ raw, fileName: sourceLabel, nonce: Date.now() });
     }
   };
 
-  // Прямой маппинг всех полей любого валидного JSON-манифеста 1 в 1 в состояние приложения
   const applyManifestObject = (raw: Record<string, unknown>, sourceLabel: string) => {
     applyV21CrossTabSettings(raw, sourceLabel, { syncCombine: true });
+
     const timelineObj =
       raw.timeline && typeof raw.timeline === 'object'
         ? (raw.timeline as Record<string, unknown>)
@@ -3961,37 +3216,33 @@ export default function App() {
       raw.export_settings && typeof raw.export_settings === 'object'
         ? (raw.export_settings as Record<string, unknown>)
         : raw.encoding && typeof raw.encoding === 'object'
-        ? (raw.encoding as Record<string, unknown>)
-        : undefined;
+          ? (raw.encoding as Record<string, unknown>)
+          : undefined;
     const cloudExportObj =
       raw.cloud_export && typeof raw.cloud_export === 'object'
         ? (raw.cloud_export as Record<string, unknown>)
         : undefined;
 
-    // 1. Parse unlimited timeline_slots / slots / timeline / scenes
     const rawSlots = Array.isArray(raw.timeline_slots)
       ? raw.timeline_slots
       : Array.isArray(raw.slots)
-      ? raw.slots
-      : Array.isArray(timelineObj?.timeline_slots)
-      ? (timelineObj?.timeline_slots as unknown[])
-      : Array.isArray(timelineObj?.slots)
-      ? (timelineObj?.slots as unknown[])
-      : null;
+        ? raw.slots
+        : Array.isArray(timelineObj?.timeline_slots)
+          ? (timelineObj?.timeline_slots as unknown[])
+          : Array.isArray(timelineObj?.slots)
+            ? (timelineObj?.slots as unknown[])
+            : null;
 
     if (rawSlots && rawSlots.length > 0) {
       const normalized = rawSlots
         .filter((s): s is Record<string, unknown> => Boolean(s && typeof s === 'object'))
         .map((s, idx) => normalizeTimelineSlot(s, idx));
-
       if (normalized.length > 0) {
         setTimelineSlots(normalized);
         const totalSec = normalized.reduce((acc, sl, idx) => {
           const isLast = idx === normalized.length - 1;
           const overlap =
-            !isLast && sl.slot_transition_out.type !== 'none'
-              ? sl.slot_transition_out.duration_sec
-              : 0;
+            !isLast && sl.slot_transition_out.type !== 'none' ? sl.slot_transition_out.duration_sec : 0;
           return acc + sl.slot_duration_sec - overlap;
         }, 0);
         const derivedHours = Math.max(3, Math.min(10, Math.round(totalSec / 3600) || 3));
@@ -4006,12 +3257,9 @@ export default function App() {
       setLoopProjectName(raw.project_name.trim());
     }
 
-    // 2. Parse continuous_bed & master_audio config if present
     if (raw.continuous_bed && typeof raw.continuous_bed === 'object') {
       const bedObj = raw.continuous_bed as Record<string, unknown>;
-      const bedFileName = String(
-        bedObj.file_name || bedObj.filename || bedObj.asset_name || ''
-      ).trim();
+      const bedFileName = String(bedObj.file_name || bedObj.filename || bedObj.asset_name || '').trim();
       setContinuousBed(prev => ({
         enabled: typeof bedObj.enabled === 'boolean' ? bedObj.enabled : Boolean(bedFileName),
         asset_id: typeof bedObj.asset_id === 'string' ? bedObj.asset_id : '',
@@ -4019,21 +3267,13 @@ export default function App() {
         loop_entire_duration:
           typeof bedObj.loop_entire_duration === 'boolean' ? bedObj.loop_entire_duration : true,
         acrossfade_sec:
-          typeof bedObj.acrossfade_sec === 'number'
-            ? bedObj.acrossfade_sec
-            : prev.acrossfade_sec,
+          typeof bedObj.acrossfade_sec === 'number' ? bedObj.acrossfade_sec : prev.acrossfade_sec,
         veo_native_audio:
-          typeof bedObj.veo_native_audio === 'boolean'
-            ? bedObj.veo_native_audio
-            : prev.veo_native_audio,
+          typeof bedObj.veo_native_audio === 'boolean' ? bedObj.veo_native_audio : prev.veo_native_audio,
         veo_audio_weight:
-          typeof bedObj.veo_audio_weight === 'number'
-            ? bedObj.veo_audio_weight
-            : prev.veo_audio_weight,
+          typeof bedObj.veo_audio_weight === 'number' ? bedObj.veo_audio_weight : prev.veo_audio_weight,
         bed_audio_weight:
-          typeof bedObj.bed_audio_weight === 'number'
-            ? bedObj.bed_audio_weight
-            : prev.bed_audio_weight
+          typeof bedObj.bed_audio_weight === 'number' ? bedObj.bed_audio_weight : prev.bed_audio_weight
       }));
     }
 
@@ -4052,13 +3292,9 @@ export default function App() {
     if (Array.isArray(raw.random_interval) && raw.random_interval.length >= 2) {
       const minInt = Math.max(60, Number(raw.random_interval[0]) || 1200);
       const maxInt = Math.max(minInt, Number(raw.random_interval[1]) || 2400);
-      setSeamlessAsymmetry({
-        enabled: true,
-        random_interval: [minInt, maxInt]
-      });
+      setSeamlessAsymmetry({ enabled: true, random_interval: [minInt, maxInt] });
     }
 
-    // 2b. Parse codec, fps, audio bitrate, act crossfade, black screen & audio_mastering
     const rawCodec = raw.video_codec ?? exportSettingsObj?.video_codec ?? exportSettingsObj?.codec;
     if (rawCodec === 'libx265' || rawCodec === 'libx264') {
       setVideoCodec(rawCodec);
@@ -4077,21 +3313,14 @@ export default function App() {
     if (rawFps === 24 || rawFps === 30 || rawFps === 60) {
       setVideoFps(rawFps as 24 | 30 | 60);
     }
-
-    const rawAudioBitrate = Number(
-      raw.audio_bitrate_kbps ?? exportSettingsObj?.audio_bitrate_kbps
-    );
+    const rawAudioBitrate = Number(raw.audio_bitrate_kbps ?? exportSettingsObj?.audio_bitrate_kbps);
     if (rawAudioBitrate === 320 || rawAudioBitrate === 256 || rawAudioBitrate === 192) {
       setAudioBitrateKbps(rawAudioBitrate as 320 | 256 | 192);
     }
-
     if (typeof raw.act_crossfade_sec === 'number' && raw.act_crossfade_sec > 0) {
       setActCrossfadeSec(raw.act_crossfade_sec);
     }
-    if (
-      typeof raw.internal_loop_crossfade_sec === 'number' &&
-      raw.internal_loop_crossfade_sec > 0
-    ) {
+    if (typeof raw.internal_loop_crossfade_sec === 'number' && raw.internal_loop_crossfade_sec > 0) {
       setInternalLoopCrossfadeSec(raw.internal_loop_crossfade_sec);
     }
     if (typeof raw.final_black_screen_enabled === 'boolean') {
@@ -4100,6 +3329,7 @@ export default function App() {
     if (typeof raw.final_black_screen_sec === 'number' && raw.final_black_screen_sec >= 0) {
       setFinalBlackScreenSec(raw.final_black_screen_sec);
     }
+
     if (raw.audio_mastering && typeof raw.audio_mastering === 'object') {
       const am = raw.audio_mastering as Record<string, unknown>;
       setAudioMastering(prev => ({
@@ -4110,9 +3340,7 @@ export default function App() {
             ? Math.max(-18, Math.min(-14, am.integrated_lufs))
             : prev.integrated_lufs,
         true_peak_dbtp:
-          typeof am.true_peak_dbtp === 'number'
-            ? Math.min(-1, am.true_peak_dbtp)
-            : prev.true_peak_dbtp,
+          typeof am.true_peak_dbtp === 'number' ? Math.min(-1, am.true_peak_dbtp) : prev.true_peak_dbtp,
         lra: typeof am.lra === 'number' ? am.lra : prev.lra,
         e3_soft_attack_compressor:
           typeof am.e3_soft_attack_compressor === 'boolean'
@@ -4125,13 +3353,10 @@ export default function App() {
       }));
     }
 
-    // 3. Hours (clamped 3..10)
     if (raw.hours !== undefined) {
-      const h = Math.max(3, Math.min(10, Number(raw.hours) || 3));
-      setLoopHours(h);
+      setLoopHours(Math.max(3, Math.min(10, Number(raw.hours) || 3)));
     }
 
-    // 4. Resolution ('720p' | '1080p' | '2k' | '4k')
     const rawRes = raw.resolution ?? exportSettingsObj?.resolution;
     if (typeof rawRes === 'string') {
       const normRes = rawRes.toLowerCase();
@@ -4150,7 +3375,6 @@ export default function App() {
       }
     }
 
-    // 5. Bitrate Preset & CRF ('cinema' | 'standard' | 'eco')
     const rawPreset = raw.bitrate_preset ?? exportSettingsObj?.bitrate_preset;
     const rawCrf = raw.crf ?? exportSettingsObj?.crf;
     if (typeof rawCrf === 'number' && rawCrf >= 14 && rawCrf <= 32) {
@@ -4173,25 +3397,21 @@ export default function App() {
       else setBitratePreset('standard');
     }
 
-    // 6. Seamless Stitch & Video/Audio Crossfade Durations
     if (typeof raw.crossfade_loop === 'boolean') {
       setSeamlessStitchEnabled(raw.crossfade_loop);
     } else if (typeof raw.seamless_crossfade === 'boolean') {
       setSeamlessStitchEnabled(raw.seamless_crossfade);
     }
-
     if (typeof raw.seamless_mode === 'string') {
       if (raw.seamless_mode === 'pingpong' || raw.seamless_mode === 'crossfade') {
         setSeamlessTransitionMode(raw.seamless_mode);
       }
     }
-
     const vFade = Number(raw.video_crossfade_sec ?? raw.seamless_crossfade);
     if (!isNaN(vFade) && vFade >= 0.5 && vFade <= 5.0) {
       setCrossfadeDuration(vFade);
       setSeamlessStitchEnabled(true);
     }
-
     const aFade = Number(raw.audio_crossfade_sec);
     if (!isNaN(aFade)) {
       if (aFade > 0) {
@@ -4202,12 +3422,10 @@ export default function App() {
       }
     }
 
-    // 7. Flag for using embedded audio from video file
     if (typeof raw.use_embedded_audio === 'boolean') {
       setUseEmbeddedAudio(raw.use_embedded_audio);
     }
 
-    // 8. Target Google Drive Folder ID (from cloud_export.target_folder_id or gdrive_folder_id)
     const resolvedFolderId = String(
       cloudExportObj?.target_folder_id ||
         cloudExportObj?.gdrive_folder_id ||
@@ -4221,7 +3439,6 @@ export default function App() {
       localStorage.setItem('ac_gdrive_folder_id', resolvedFolderId);
     }
 
-    // 9. Bound top-level filenames if explicitly provided
     if (typeof raw.video_filename === 'string') {
       setExpectedVideoFilename(raw.video_filename.trim());
     }
@@ -4229,7 +3446,6 @@ export default function App() {
       setExpectedAudioFilename(raw.audio_filename.trim());
     }
 
-    // 10. Parse subtitles config from raw.subtitles or raw.export_settings.subtitles
     const rawSubsObj =
       (raw.subtitles && typeof raw.subtitles === 'object'
         ? (raw.subtitles as Record<string, unknown>)
@@ -4267,16 +3483,17 @@ export default function App() {
     const importedSceneCount = Array.isArray(raw.timeline)
       ? raw.timeline.length
       : Array.isArray(raw.scenes)
-      ? raw.scenes.length
-      : 0;
+        ? raw.scenes.length
+        : 0;
+
     setImportedManifestName(sourceLabel);
     showToast(
       `JSON-манифест «${sourceLabel}» (${
         rawSlots
           ? `${rawSlots.length} слотов`
           : importedSceneCount > 0
-          ? `${importedSceneCount} сцен`
-          : 'конфиг'
+            ? `${importedSceneCount} сцен`
+            : 'конфиг'
       }) успешно применен!`,
       'success'
     );
@@ -4318,7 +3535,6 @@ export default function App() {
     }
   };
 
-  // Import JSON Manifest from file input
   const handleImportManifestFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -4341,7 +3557,6 @@ export default function App() {
     e.target.value = '';
   };
 
-  // Export current Loop settings to JSON file
   const handleExportManifestFile = () => {
     const jsonString = JSON.stringify(currentManifest, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
@@ -4358,25 +3573,17 @@ export default function App() {
     showToast(`Манифест ${exportFileName} экспортирован!`, 'success');
   };
 
-  // Прикрепление локального видеофайла напрямую к конкретному слоту
   const handleAttachSlotFile = (slotIdx: number, file: File | null) => {
     if (!file) return;
     setLoopMedia(file);
-    setUploadedLoopAssets(prev => ({
-      ...prev,
-      [file.name]: file
-    }));
+    setUploadedLoopAssets(prev => ({ ...prev, [file.name]: file }));
     updateTimelineSlotField(slotIdx, 'file_name', file.name);
     showToast(`К слоту #${slotIdx + 1} прикреплен локальный файл «${file.name}»`, 'success');
   };
 
-  // Прикрепление локального видеофайла напрямую к вставке внутри слота
   const handleAttachInsertFile = (slotIdx: number, insIdx: number, file: File | null) => {
     if (!file) return;
-    setUploadedLoopAssets(prev => ({
-      ...prev,
-      [file.name]: file
-    }));
+    setUploadedLoopAssets(prev => ({ ...prev, [file.name]: file }));
     updateSlotInsert(slotIdx, insIdx, { file_name: file.name });
     showToast(
       `К вставке E${insIdx + 1} (слот #${slotIdx + 1}) прикреплен файл «${file.name}»`,
@@ -4384,7 +3591,6 @@ export default function App() {
     );
   };
 
-  // Сохранение / загрузка / удаление локальных пресетов манифеста (localStorage)
   const saveManifestPreset = () => {
     const cleanName =
       presetNameInput.trim() ||
@@ -4416,11 +3622,11 @@ export default function App() {
       showToast('Выберите сохранённый пресет из списка для загрузки.', 'info');
       return;
     }
-    applyManifestObject(
-      preset.manifest as unknown as Record<string, unknown>,
-      `preset:${preset.name}`
+    applyManifestObject(preset.manifest as unknown as Record<string, unknown>, `preset:${preset.name}`);
+    showToast(
+      `📂 Загружен пресет «${preset.name}» (${preset.manifest.timeline_slots.length} сл.)`,
+      'success'
     );
-    showToast(`📂 Загружен пресет «${preset.name}» (${preset.manifest.timeline_slots.length} сл.)`, 'success');
   };
 
   const deleteSelectedManifestPreset = () => {
@@ -4437,7 +3643,6 @@ export default function App() {
     }
   };
 
-  // Управление локальной очередью сборок (Batch Queue)
   const enqueueCurrentManifest = () => {
     const manifestSnapshot = JSON.parse(JSON.stringify(currentManifest)) as LoopBuildManifest;
     const item: QueuedManifestItem = {
@@ -4479,7 +3684,10 @@ export default function App() {
 
   const startNextFromBatchQueue = () => {
     if (isRunnerActive || isLoopDispatching) {
-      showToast('Дождитесь завершения активного run — следующий манифест стартует автоматически!', 'info');
+      showToast(
+        'Дождитесь завершения активного run — следующий манифест стартует автоматически!',
+        'info'
+      );
       return;
     }
     const [nextItem, ...restQueue] = batchQueue;
@@ -4489,7 +3697,6 @@ export default function App() {
     void dispatchLoopWorkflow(false, nextItem.manifest);
   };
 
-  // Единая функция запуска workflow_dispatch (полная сборка, Preflight или авто-запуск из очереди)
   const dispatchLoopWorkflow = async (
     preflightOnly: boolean,
     overrideManifest?: LoopBuildManifest,
@@ -4502,13 +3709,13 @@ export default function App() {
       );
       return;
     }
-
     const githubToken = ghToken.trim();
     if (!githubToken) {
       showToast('Настройте подключение к GitHub (Personal Access Token)!', 'error');
       openConfigModal();
       return;
     }
+
     const baseManifestToSend = overrideManifest || currentManifest;
     const manifestToSend: LoopBuildManifest = {
       ...baseManifestToSend,
@@ -4519,13 +3726,21 @@ export default function App() {
           idx,
           slot.act_timecode
         );
-        return {
-          ...slot,
-          act_title: englishChapterTitle,
-          title: englishChapterTitle
-        };
+        return { ...slot, act_title: englishChapterTitle, title: englishChapterTitle };
       })
     };
+
+    const emptySlots = manifestToSend.timeline_slots
+      .map((s, i) => ((s.file_name || s.base_content?.file_name || '').trim() ? null : i + 1))
+      .filter((n): n is number => n !== null);
+    if (emptySlots.length > 0) {
+      showToast(
+        `Пустые file_name в слотах: ${emptySlots.join(', ')}. Заполните их перед запуском.`,
+        'error'
+      );
+      return;
+    }
+
     if (!preflightOnly && (manifestToSend.hours < 3 || manifestToSend.hours > 10)) {
       showToast('Длительность лупа должна быть строго от 3 до 10 часов!', 'error');
       return;
@@ -4537,7 +3752,6 @@ export default function App() {
     const scaleFlag = getScaleFilter(manifestToSend.resolution);
     const crfVal = manifestToSend.crf;
 
-    // Облегчённый рабочий манифест для workflow_dispatch (без дублей и SEO-текстов)
     const compactLoopPayloadObj = {
       manifest_version: manifestToSend.manifest_version || '2.2-FINAL',
       enabled: manifestToSend.enabled,
@@ -4578,11 +3792,13 @@ export default function App() {
       video_filename: manifestToSend.video_filename,
       ...(manifestToSend.audio_filename ? { audio_filename: manifestToSend.audio_filename } : {}),
       gdrive_folder_id: manifestToSend.gdrive_folder_id,
+      cloud_export: manifestToSend.cloud_export,
       continuous_bed: manifestToSend.continuous_bed,
       master_audio: manifestToSend.master_audio,
       ...(manifestToSend.shorts_factory ? { shorts_factory: manifestToSend.shorts_factory } : {}),
       timeline_slots: manifestToSend.timeline_slots.map((slot, idx) => ({
         slot_index: idx + 1,
+        slot_id: slot.slot_id,
         act_title: slot.act_title,
         act_timecode: slot.act_timecode,
         file_name: slot.file_name,
@@ -4612,17 +3828,15 @@ export default function App() {
       showToast(
         'Манифест слишком большой для API — скачайте manifest.json и закиньте его в папку Google Drive',
         'error',
-        {
-          label: 'Скачать manifest.json',
-          onClick: handleExportManifestFile
-        }
+        { label: 'Скачать manifest.json', onClick: handleExportManifestFile }
       );
       return;
     }
-    const manifestPayloadJson = serializedLoop.payload;
 
+    const manifestPayloadJson = serializedLoop.payload;
     lastDispatchWasPreflightRef.current = preflightOnly;
     setIsLoopDispatching(true);
+
     try {
       const response = await fetch(
         `https://api.github.com/repos/${targetRepo}/actions/workflows/render_loop.yml/dispatches`,
@@ -4636,15 +3850,10 @@ export default function App() {
           },
           body: JSON.stringify({
             ref: targetBranch,
-            inputs: preflightOnly
-              ? {
-                  manifest_payload: manifestPayloadJson,
-                  preflight_only: 'true'
-                }
-              : {
-                  manifest_payload: manifestPayloadJson,
-                  preflight_only: 'false'
-                }
+            inputs: {
+              manifest_payload: manifestPayloadJson,
+              preflight_only: preflightOnly ? 'true' : 'false'
+            }
           })
         }
       );
@@ -4655,8 +3864,7 @@ export default function App() {
           : `Сборка «${manifestToSend.project_name}» запущена в GitHub Actions!`;
         const statusDesc = preflightOnly
           ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${manifestToSend.gdrive_folder_id || 'GDrive'}`
-          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (JSON, ${manifestPayloadJson.length} симв.) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
-
+          : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | Хронометраж: ${formatTimeHMS(manifestToSend.calculated_project_duration_sec)} | ${scaleFlag}`;
         showStatusBar(statusTitle, statusDesc, targetRepo, startTime, {
           workflow: 'render_loop.yml',
           branch: targetBranch,
@@ -4671,7 +3879,7 @@ export default function App() {
         showToast(statusTitle, 'success');
       } else {
         const errText = await response.text().catch(() => '');
-        const exactError = errText.trim() || response.statusText || `HTTP ${response.status}`;
+        const exactError = sanitizeLogText(errText.trim() || response.statusText || `HTTP ${response.status}`);
         setRenderStatus(prev => ({
           ...prev,
           visible: true,
@@ -4680,14 +3888,11 @@ export default function App() {
           title: `❌ Ошибка запуска GitHub Actions (${response.status})`,
           stepLabel: exactError
         }));
-        appendTerminalLog(
-          `[00:00] ❌ Ошибка GitHub API (${response.status}): ${exactError}`,
-          'error'
-        );
+        appendTerminalLog(`[00:00] ❌ Ошибка GitHub API (${response.status}): ${exactError}`, 'error');
         showToast(`Ошибка GitHub API (${response.status}): ${exactError}`, 'error');
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = sanitizeLogText(e instanceof Error ? e.message : String(e));
       setRenderStatus(prev => ({
         ...prev,
         visible: true,
@@ -4708,16 +3913,13 @@ export default function App() {
   const startLoopRender = () => dispatchLoopWorkflow(false);
   const startPreflightCheck = () => dispatchLoopWorkflow(true);
 
-  // Thumbnail Canvas Rendering
   const renderThumbnailCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     ctx.clearRect(0, 0, 1280, 720);
 
-    // Background
     if (thumbImg) {
       ctx.drawImage(thumbImg, 0, 0, 1280, 720);
     } else {
@@ -4730,8 +3932,6 @@ export default function App() {
     }
 
     const trimmedTitle = (thumbTitle || '').trim();
-
-    // Bottom gradient overlay only when title hook exists
     if (trimmedTitle) {
       const grad = ctx.createLinearGradient(0, 400, 0, 720);
       grad.addColorStop(0, 'rgba(0,0,0,0)');
@@ -4740,7 +3940,6 @@ export default function App() {
       ctx.fillRect(0, 400, 1280, 320);
     }
 
-    // Cinematic badge
     if (thumbBadge && thumbBadge !== 'none') {
       const firstId = thumbBadge.split(',')[0]?.trim();
       const labelMap: Record<string, string> = {
@@ -4766,21 +3965,34 @@ export default function App() {
       const bText = labelMap[firstId || ''] || '4K ULTRA HD';
       const badgeX = 1280 - 220;
       const badgeY = 30;
+      const badgeW = 190;
+      const badgeH = 42;
+      const r = 8;
       ctx.fillStyle = 'rgba(9, 13, 22, 0.90)';
       ctx.strokeStyle = '#FACC15';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.roundRect(badgeX, badgeY, 190, 42, 8);
+      const nativeRoundRect = (
+        ctx as CanvasRenderingContext2D & { roundRect?: (...args: number[]) => void }
+      ).roundRect;
+      if (typeof nativeRoundRect === 'function') {
+        nativeRoundRect.call(ctx, badgeX, badgeY, badgeW, badgeH, r);
+      } else {
+        ctx.moveTo(badgeX + r, badgeY);
+        ctx.arcTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + badgeH, r);
+        ctx.arcTo(badgeX + badgeW, badgeY + badgeH, badgeX, badgeY + badgeH, r);
+        ctx.arcTo(badgeX, badgeY + badgeH, badgeX, badgeY, r);
+        ctx.arcTo(badgeX, badgeY, badgeX + badgeW, badgeY, r);
+        ctx.closePath();
+      }
       ctx.fill();
       ctx.stroke();
-
       ctx.fillStyle = '#FDE047';
       ctx.font = '800 13px "Montserrat", "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(bText, badgeX + 95, badgeY + 26);
     }
 
-    // Title text
     if (trimmedTitle) {
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 64px "Bebas Neue", sans-serif';
@@ -4827,24 +4039,22 @@ export default function App() {
   const isGhConnected = Boolean(ghToken && ghRepo);
   const isGdriveConfigured = Boolean(gdriveFolderId);
   const estimatedGb = estimateLoopSizeGb();
-
-  return (
+    return (
     <div className="relative min-h-screen flex flex-col justify-between selection:bg-amber-500/30 bg-[#080c14] text-[#f8fafc] overflow-x-hidden">
-      {/* ЛЁГКИЙ АНИМИРОВАННЫЙ ФОНОВЫЙ ШЕЙДЕР (24fps Scroll Shader / Экономный статичный режим) */}
       <AmbientShaderBackdrop mode={ambientShaderMode} />
 
-      {/* ШАПКА ПРИЛОЖЕНИЯ (Header & Segmented Tabs со скользящим индикатором layoutId) */}
       <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#080c14]/85 backdrop-blur-xl px-3 sm:px-4 py-2.5 sm:py-3 shadow-[0_16px_40px_-15px_rgba(0,0,0,0.85)]">
-        {/* Верхний ряд: Логотип, пресеты форматов и статус подключения */}
         <div className="mx-auto flex max-w-[1600px] flex-wrap xl:flex-nowrap items-center justify-between gap-2.5 sm:gap-3">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink-0">
-            {/* Иконка и заголовок AETHER COMBINE */}
             <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 shadow-[0_8px_20px_-4px_rgba(245,158,11,0.45)]">
               <Layers className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <h1 className="text-sm sm:text-lg font-extrabold tracking-tight text-[#f8fafc] whitespace-nowrap">
-                AETHER <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">COMBINE</span>
+                AETHER{' '}
+                <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">
+                  COMBINE
+                </span>
               </h1>
               <p className="hidden 2xl:block text-[11px] text-white/50 truncate">
                 4K Production Studio • GitHub Actions → Google Drive
@@ -4852,7 +4062,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Центральный блок: 1-Click Format Presets + Свободный ввод названия проекта и обложки */}
           <div className="order-3 w-full xl:order-none xl:w-auto flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar bg-[#090d16]/90 border border-white/[0.08] rounded-2xl p-1.5 shadow-inner">
             <button
               type="button"
@@ -4866,7 +4075,6 @@ export default function App() {
             >
               <span>🏛️ HistoViva • Документальный (~10 мин)</span>
             </button>
-
             <button
               type="button"
               onClick={() => applyStudioFormatPreset('ambient_loop_3h')}
@@ -4875,11 +4083,10 @@ export default function App() {
                   ? 'bg-amber-500/25 border border-amber-400/60 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.3)]'
                   : 'text-slate-400 hover:text-slate-200 border border-transparent'
               }`}
-              title="Переключить на Многочасовой Луп, медитативный профиль (10–18 сек), шрифт Gold & Ice Magic и бейджи 4K ULTRA HD • 3 HOURS • NO ADS • SEAMLESS"
+              title="Переключить на Многочасовой Луп, медитативный профиль (10–18 сек) и бейджи 3 HOURS • NO ADS • DEEP SLEEP"
             >
               <span>🌙 Ambient Loop • 3 Часа (Атмосфера)</span>
             </button>
-
             <div className="hidden xl:flex items-center gap-1.5 pl-2 border-l border-white/[0.08]">
               <input
                 type="text"
@@ -4900,7 +4107,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Правая группа: Переключатель «✨ Живой фон / ⚡ Экономный режим» + Статус GitHub / GDrive */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
@@ -4908,7 +4114,7 @@ export default function App() {
               aria-pressed={ambientShaderMode === 'live'}
               title={
                 ambientShaderMode === 'live'
-                  ? 'Активен плавный шейдер 24fps. Нажмите для включения Экономного режима (статичный фон #080c14)'
+                  ? 'Активен плавный шейдер 24fps. Нажмите для включения Экономного режима'
                   : 'Активен Экономный режим (0% нагрузки на GPU). Нажмите для включения Живого фона'
               }
               className={`min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 rounded-xl border px-2.5 sm:px-3 py-2 text-xs font-bold cursor-pointer transition ${
@@ -4931,17 +4137,15 @@ export default function App() {
                 </>
               )}
             </button>
-
             <button
               type="button"
               onClick={() => setIsResetProjectModalOpen(true)}
-              title="Очистить черновик проекта (aether_workspace_draft) и сбросить сцены, сценарий и настройки рендера"
+              title="Очистить черновик проекта и сбросить сцены, сценарий и настройки рендера"
               className="min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-rose-950/35 hover:border-rose-500/45 text-slate-300 hover:text-rose-200 px-2.5 sm:px-3 py-2 text-xs font-bold cursor-pointer transition"
             >
               <RotateCcw className="w-3.5 h-3.5 text-rose-400 shrink-0" />
               <span className="whitespace-nowrap hidden sm:inline">Сбросить проект</span>
             </button>
-
             <button
               type="button"
               onClick={openConfigModal}
@@ -4955,7 +4159,10 @@ export default function App() {
                     : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
                 }`}
               />
-              <span id="gh-status-text" className="font-mono text-amber-300 truncate max-w-[100px] sm:max-w-[160px] xl:max-w-none">
+              <span
+                id="gh-status-text"
+                className="font-mono text-amber-300 truncate max-w-[100px] sm:max-w-[160px] xl:max-w-none"
+              >
                 {ghRepo || 'ZermeXX/aetherflow-render'}
               </span>
               <span className="h-4 w-px bg-white/[0.1] hidden md:inline-block" />
@@ -4971,7 +4178,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Нижний ряд: Горизонтальная панель навигации со скользящим индикатором */}
         <nav
           role="tablist"
           aria-label="Цехи продакшна AetherCombine"
@@ -5074,14 +4280,10 @@ export default function App() {
         </nav>
       </header>
 
-      {/* ОСНОВНОЙ КОНТЕНТ */}
       <main
         onPaste={handleGlobalManifestPaste}
         className="relative z-10 flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
       >
-        {/* =========================================
-            ЦЕХ 1: КОМБАЙН МОНТАЖА (60+ СЦЕН) — ПОВЕСТВОВАТЕЛЬНЫЙ ТАЙМЛАЙН & МАСТЕР-АУДИО
-           ========================================= */}
         <section
           id="view-combine"
           className={`studio-view space-y-6 ${activeTab === 'combine' ? '' : 'hidden'}`}
@@ -5147,15 +4349,11 @@ export default function App() {
           />
         </section>
 
-        {/* =========================================
-            ЦЕХ 2: МНОГОЧАСОВОЙ ЛУП (N-СЛОТОВ) — 4K AMBIENT LOOP BUILDER
-           ========================================= */}
         <section
           id="view-loop"
           className={`studio-view space-y-6 ${activeTab === 'loop' ? '' : 'hidden'}`}
         >
           <div className="aether-surface rounded-2xl p-3.5 sm:p-6 space-y-5 sm:space-y-6">
-            {/* Баннер состояния Ambient Loop (enabled: false при однопроходном документальном рендере v2.1) */}
             <div
               className={`rounded-xl px-4 py-3 border flex flex-wrap items-center justify-between gap-3 transition ${
                 ambientLoopEnabled
@@ -5164,7 +4362,11 @@ export default function App() {
               }`}
             >
               <div className="flex items-center gap-2.5 text-xs">
-                <Repeat className={`w-4 h-4 shrink-0 ${ambientLoopEnabled ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <Repeat
+                  className={`w-4 h-4 shrink-0 ${
+                    ambientLoopEnabled ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                />
                 <div>
                   <span className="font-bold">
                     {ambientLoopEnabled
@@ -5174,7 +4376,7 @@ export default function App() {
                   <p className="text-[11px] text-white/60">
                     {ambientLoopEnabled
                       ? 'Многочасовое зацикливание активно для сборки длинных 3–10 ч эмбиент-выпусков.'
-                      : 'Автоматически отключено при импорте документального v2.1 манифеста с timeline[], чтобы не зацикливать однопроходный монтаж.'}
+                      : 'Автоматически отключено при импорте документального v2.1 манифеста с timeline[].'}
                   </p>
                 </div>
               </div>
@@ -5208,7 +4410,12 @@ export default function App() {
                   />
                 </div>
                 <p className="text-xs text-white/55">
-                  Экспорт <code className="font-mono text-amber-300">{videoCodec} (CRF {videoCrf})</code> {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с • Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с)
+                  Экспорт{' '}
+                  <code className="font-mono text-amber-300">
+                    {videoCodec} (CRF {videoCrf})
+                  </code>{' '}
+                  {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с •
+                  Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с)
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono tabular-nums text-white/75">
@@ -5217,12 +4424,12 @@ export default function App() {
                 </span>
                 <span className="text-white/25">•</span>
                 <span className="text-emerald-300 font-semibold">
-                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} • {formatTimeHMS(calculatedProjectDurationSec)}
+                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} •{' '}
+                  {formatTimeHMS(calculatedProjectDurationSec)}
                 </span>
               </div>
             </div>
 
-            {/* МОДУЛЬ ИМПОРТА И ЭКСПОРТА JSON-МАНИФЕСТА (УНИВЕРСАЛЬНЫЙ ПАРСЕР N-СЛОТОВ) */}
             <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
@@ -5232,11 +4439,13 @@ export default function App() {
                       JSON-манифест сборки • Проект «{loopProjectName || 'Ambient Loop 4K'}»
                     </h3>
                     <p className="text-[11px] text-white/55">
-                      Универсальный парсер слотов <code className="font-mono text-amber-300">timeline_slots</code> (1–50+), кривых <code className="font-mono text-amber-300">transition_in/out</code> и <code className="font-mono text-emerald-300">audio_mastering</code>
+                      Универсальный парсер слотов{' '}
+                      <code className="font-mono text-amber-300">timeline_slots</code> (1–50+),
+                      кривых <code className="font-mono text-amber-300">transition_in/out</code> и{' '}
+                      <code className="font-mono text-emerald-300">audio_mastering</code>
                     </p>
                   </div>
                 </div>
-
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     ref={manifestInputRef}
@@ -5272,14 +4481,13 @@ export default function App() {
                     type="button"
                     onClick={() => generateNSlotsPreset(10)}
                     className="min-h-[44px] bg-white/[0.04] hover:bg-white/[0.08] border border-amber-400/30 text-amber-300 px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer"
-                    title="Сгенерировать 10 слотов с динамическими массивами inserts: []"
+                    title="Сгенерировать 10 слотов с динамическими массивами inserts"
                   >
                     Пресет 10 слотов
                   </button>
                 </div>
               </div>
 
-              {/* Подсветка ожидаемого файла из манифеста (video_filename) */}
               {expectedVideoFilename && (
                 <div
                   className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-lg border text-xs ${
@@ -5297,7 +4505,7 @@ export default function App() {
                     <span>
                       {isAssetMatched(expectedVideoFilename)
                         ? `Файл манифеста подтвержден: ${expectedVideoFilename} загружен в зону дропа`
-                        : `«Ожидается файл: ${expectedVideoFilename} — загрузите его в зону дропа»`}
+                        : `Ожидается файл: ${expectedVideoFilename} — загрузите его в зону дропа`}
                     </span>
                   </div>
                   {importedManifestName && (
@@ -5309,7 +4517,6 @@ export default function App() {
               )}
             </div>
 
-            {/* ЕДИСТВЕННОЕ МЕСТО ЗАГРУЗКИ ФАЙЛОВ НА GOOGLE ДИСК + АВТОЗАПОЛНЕНИЕ СЛОТОВ ТАЙМЛАЙНА */}
             <GoogleDriveDirectUploader
               targetFolderId={gdriveFolderId}
               onTargetFolderIdChange={newFolder => {
@@ -5326,10 +4533,9 @@ export default function App() {
               onNotify={showToast}
               accentColor="amber"
               title="Перетащите исходные видеоклипы сюда или выберите файлы (Прямая выгрузка в Google Drive)"
-              subtitle="Верхняя дропзона — единственное место загрузки файлов на Google Диск. Имена файлов сразу заполняют слоты таймлайна, а сами файлы выгружаются напрямую в целевую папку."
+              subtitle="Верхняя дропзона — единственное место загрузки файлов на Google Диск. Имена файлов сразу заполняют слоты таймлайна."
             />
 
-            {/* 2-СЛОЙНЫЙ АУДИО-МИКШЕР: А) ФОНОВЫЙ ЭМБИЕНТ + Б) МАСТЕР-АУДИОДОРОЖКА */}
             <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2.5">
                 <div className="flex items-center gap-2.5">
@@ -5339,14 +4545,19 @@ export default function App() {
                       2-Слойный Аудио-Микшер (Фоновый эмбиент + Мастер-аудиодорожка)
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      Микширование аудиослоев в <code className="text-amber-300 font-mono">filter_complex</code> с финальной нормализацией <code className="text-sky-400 font-mono">loudnorm=I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}</code>
+                      Микширование аудиослоев в{' '}
+                      <code className="text-amber-300 font-mono">filter_complex</code> с финальной
+                      нормализацией{' '}
+                      <code className="text-sky-400 font-mono">
+                        loudnorm=I={audioMastering.integrated_lufs}:TP=
+                        {audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}
+                      </code>
                     </span>
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-                {/* а) Фоновый эмбиент */}
                 <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="flex items-center gap-2 font-bold text-amber-300 cursor-pointer">
@@ -5360,7 +4571,6 @@ export default function App() {
                       />
                       <span>а) Фоновый эмбиент (непрерывный фоновый звук)</span>
                     </label>
-
                     <label className="flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg cursor-pointer">
                       <input
                         type="checkbox"
@@ -5376,7 +4586,6 @@ export default function App() {
                       <span>Зациклить на всю длину видео</span>
                     </label>
                   </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <div className="sm:col-span-2">
                       <label className="text-[10px] text-slate-400 uppercase block mb-1">
@@ -5418,7 +4627,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* б) Мастер-аудиодорожка */}
                 <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="flex items-center gap-2 font-bold text-indigo-300 cursor-pointer">
@@ -5436,7 +4644,6 @@ export default function App() {
                       Синхронный мастер-трек
                     </span>
                   </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                     <div className="sm:col-span-2">
                       <label className="text-[10px] text-slate-400 uppercase block mb-1">
@@ -5497,7 +4704,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* ПЛАВНЫЙ АККОРДЕОН ПРОДВИНУТЫХ НАСТРОЕК ЛУПА (SEAMLESS ASYMMETRY, СТЫКИ АКТОВ & LOUDNORM E3) */}
             <div className="aether-card rounded-2xl overflow-hidden">
               <button
                 type="button"
@@ -5508,10 +4714,12 @@ export default function App() {
                   <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
                   <div className="min-w-0">
                     <span className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider block truncate">
-                      Продвинутая инженерия петли (Seamless Asymmetry • Стыки 90с • Мастеринг Loudnorm)
+                      Продвинутая инженерия петли (Seamless Asymmetry • Стыки актов • Loudnorm)
                     </span>
                     <span className="text-[11px] text-white/55 block truncate font-mono">
-                      random_interval: [{seamlessAsymmetry.random_interval[0]}..{seamlessAsymmetry.random_interval[1]}s] • Crossfade {actCrossfadeSec}s • loudnorm I={audioMastering.integrated_lufs} LUFS
+                      random_interval: [{seamlessAsymmetry.random_interval[0]}..
+                      {seamlessAsymmetry.random_interval[1]}s] • Crossfade {actCrossfadeSec}s •
+                      loudnorm I={audioMastering.integrated_lufs} LUFS
                     </span>
                   </div>
                 </div>
@@ -5529,17 +4737,21 @@ export default function App() {
 
               {showLoopAdvancedAccordion && (
                 <div className="p-4 border-t border-white/[0.08] space-y-4">
-                  {/* РАНДОМИЗАТОР ШВОВ И ИНТЕРВАЛОВ (SEAMLESS ASYMMETRY • random_interval: [1200, 2400]) */}
                   <div className="bg-[#080c14]/80 border border-emerald-500/25 rounded-xl p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-emerald-400" />
                         <div>
                           <span className="text-xs font-bold text-[#f8fafc] uppercase tracking-wider block">
-                            Рандомизатор швов и интервалов (Seamless Asymmetry • Защита от Reused Content)
+                            Рандомизатор швов и интервалов (Seamless Asymmetry)
                           </span>
                           <span className="text-[11px] text-white/55">
-                            Непериодическое наложение микровставок каждые 20–40 минут (<code className="text-emerald-300 font-mono">random_interval: [{seamlessAsymmetry.random_interval[0]}, {seamlessAsymmetry.random_interval[1]}]</code> сек) с мягким кроссфейдом 1.5 сек
+                            Непериодическое наложение микровставок (
+                            <code className="text-emerald-300 font-mono">
+                              random_interval: [{seamlessAsymmetry.random_interval[0]},{' '}
+                              {seamlessAsymmetry.random_interval[1]}]
+                            </code>{' '}
+                            сек) с мягким кроссфейдом 1.5 сек
                           </span>
                         </div>
                       </div>
@@ -5555,7 +4767,6 @@ export default function App() {
                         <span>Seamless Asymmetry активен</span>
                       </label>
                     </div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                       <div>
                         <label className="text-[10px] text-white/55 uppercase block mb-1">
@@ -5588,7 +4799,10 @@ export default function App() {
                           step={60}
                           value={seamlessAsymmetry.random_interval[1]}
                           onChange={e => {
-                            const v = Math.max(seamlessAsymmetry.random_interval[0], Number(e.target.value) || 2400);
+                            const v = Math.max(
+                              seamlessAsymmetry.random_interval[0],
+                              Number(e.target.value) || 2400
+                            );
                             setSeamlessAsymmetry(prev => ({
                               ...prev,
                               random_interval: [prev.random_interval[0], v]
@@ -5611,7 +4825,11 @@ export default function App() {
                                     const maxI = seamlessAsymmetry.random_interval[1];
                                     const randTrig = Math.min(
                                       Math.max(30, sl.slot_duration_sec - 20),
-                                      Math.round(minI / 3 + ((idx + 1) * (iIdx + 1) * 173) % Math.max(120, maxI - minI))
+                                      Math.round(
+                                        minI / 3 +
+                                          (((idx + 1) * (iIdx + 1) * 173) %
+                                            Math.max(120, maxI - minI))
+                                      )
                                     );
                                     return {
                                       ...ins,
@@ -5635,18 +4853,16 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* БЛОК ПАРАМЕТРОВ СТЫКОВ АКТОВ (90 СЕК), ШВА ПЕТЛИ (1.0 СЕК), ЧЕРНОГО ЭКРАНА (2 СЕК) И НОРМАЛИЗАЦИИ LOUDNORM */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className="bg-[#080c14]/80 border border-white/[0.08] rounded-xl p-4 space-y-3">
                       <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
                         <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                          Стыки актов (90 сек) &amp; Бесшовная петля 10с (1.0 сек)
+                          Стыки актов &amp; Бесшовная петля
                         </span>
                         <span className="text-[10px] font-mono text-white/55">
-                          0:30 • 1:00 • 1:40 • 2:00 • 2:40
+                          {actCrossfadeSec}с / {internalLoopCrossfadeSec.toFixed(1)}с
                         </span>
                       </div>
-
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
@@ -5678,10 +4894,9 @@ export default function App() {
                             className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-amber-300 font-bold outline-none focus:border-amber-400"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
-                            Шов петли 10с исходника (сек):
+                            Шов петли исходника (сек):
                           </label>
                           <input
                             type="number"
@@ -5690,7 +4905,10 @@ export default function App() {
                             step={0.1}
                             value={internalLoopCrossfadeSec}
                             onChange={e => {
-                              const val = Math.max(0.2, Math.min(4.0, Number(e.target.value) || 1.0));
+                              const val = Math.max(
+                                0.2,
+                                Math.min(4.0, Number(e.target.value) || 1.0)
+                              );
                               setInternalLoopCrossfadeSec(val);
                               setTimelineSlots(prev =>
                                 prev.map(s => ({ ...s, internal_loop_crossfade_sec: val }))
@@ -5699,7 +4917,6 @@ export default function App() {
                             className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-emerald-300 font-bold outline-none focus:border-amber-400"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
                             Черный экран в финале (сек):
@@ -5719,7 +4936,9 @@ export default function App() {
                               disabled={!finalBlackScreenEnabled}
                               value={finalBlackScreenSec}
                               onChange={e =>
-                                setFinalBlackScreenSec(Math.max(0.5, Number(e.target.value) || 2.0))
+                                setFinalBlackScreenSec(
+                                  Math.max(0.5, Number(e.target.value) || 2.0)
+                                )
                               }
                               className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-mono text-[#f8fafc] outline-none disabled:opacity-50"
                             />
@@ -5746,11 +4965,11 @@ export default function App() {
                             className="accent-sky-400"
                           />
                           <span className="font-mono">
-                            I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}:LRA={audioMastering.lra}
+                            I={audioMastering.integrated_lufs}:TP={audioMastering.true_peak_dbtp}
+                            :LRA={audioMastering.lra}
                           </span>
                         </label>
                       </div>
-
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
@@ -5765,13 +4984,15 @@ export default function App() {
                             onChange={e =>
                               setAudioMastering(prev => ({
                                 ...prev,
-                                integrated_lufs: Math.max(-18, Math.min(-14, Number(e.target.value) || -16))
+                                integrated_lufs: Math.max(
+                                  -18,
+                                  Math.min(-14, Number(e.target.value) || -16)
+                                )
                               }))
                             }
                             className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
                             True-Peak (dBTP):
@@ -5791,7 +5012,6 @@ export default function App() {
                             className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-sky-300 font-bold outline-none"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
                             LRA:
@@ -5811,7 +5031,6 @@ export default function App() {
                             className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-[#f8fafc] outline-none"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-white/55 uppercase block mb-1">
                             Пик E3 (дБ):
@@ -5837,7 +5056,10 @@ export default function App() {
                               onChange={e =>
                                 setAudioMastering(prev => ({
                                   ...prev,
-                                  e3_max_peak_over_bed_db: Math.min(6, Math.max(1, Number(e.target.value) || 6))
+                                  e3_max_peak_over_bed_db: Math.min(
+                                    6,
+                                    Math.max(1, Number(e.target.value) || 6)
+                                  )
                                 }))
                               }
                               className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-2 py-1.5 text-xs font-mono text-emerald-300 font-bold outline-none"
@@ -5851,23 +5073,26 @@ export default function App() {
               )}
             </div>
 
-            {/* КОНСТРУКТОР АКТОВ И СЛОТОВ (TIMELINE_SLOTS: 1..50+ СЦЕН) И АСИММЕТРИЧНЫХ ВСТАВОК (INSERTS: []) */}
             <div className="bg-[#0b0f17] border border-slate-800 rounded-2xl p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
                 <div>
                   <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
-                    <LayoutGrid className="w-4 h-4 text-amber-500" /> Архитектура таймлайна: Слоты актов (<code className="text-amber-400">timeline_slots: [{timelineSlots.length}]</code>) &amp; Асимметричные вставки <code className="text-emerald-400">inserts: []</code>
+                    <LayoutGrid className="w-4 h-4 text-amber-500" /> Архитектура таймлайна: Слоты
+                    актов (<code className="text-amber-400">timeline_slots: [{timelineSlots.length}]</code>)
+                    &amp; Асимметричные вставки <code className="text-emerald-400">inserts</code>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Сумма <code className="text-slate-300">slot_duration_sec</code> за вычетом 5 кроссфейдов по {actCrossfadeSec}с ={' '}
+                    Сумма <code className="text-slate-300">slot_duration_sec</code> за вычетом
+                    кроссфейдов ={' '}
                     <strong className="text-amber-400">{calculatedProjectDurationSec} сек</strong> (
-                    {(calculatedProjectDurationSec / 3600).toFixed(2)} ч / 3:00:00)
-                    {finalBlackScreenEnabled ? ` + ${finalBlackScreenSec.toFixed(1)}с черный экран в финале` : ''}
+                    {(calculatedProjectDurationSec / 3600).toFixed(2)} ч /{' '}
+                    {formatTimeHMS(calculatedProjectDurationSec)})
+                    {finalBlackScreenEnabled
+                      ? ` + ${finalBlackScreenSec.toFixed(1)}с черный экран в финале`
+                      : ''}
                   </p>
                 </div>
-
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Локальные пресеты манифеста (localStorage) */}
                   <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1.5">
                     <input
                       type="text"
@@ -5880,7 +5105,7 @@ export default function App() {
                       type="button"
                       onClick={saveManifestPreset}
                       className="min-h-[38px] sm:min-h-[32px] bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-semibold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer whitespace-nowrap"
-                      title="Сохранить слоты, врезки, кодек и папку GDrive в браузер (localStorage)"
+                      title="Сохранить слоты, врезки, кодек и папку GDrive в браузер"
                     >
                       💾 Сохранить пресет
                     </button>
@@ -5920,7 +5145,6 @@ export default function App() {
                       </button>
                     )}
                   </div>
-
                   <button
                     type="button"
                     onClick={addTimelineSlot}
@@ -5938,7 +5162,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ИНТЕРАКТИВНАЯ ВИЗУАЛЬНАЯ КАРТА ТАЙМЛАЙНА (TIMELINE SCRUBBER) */}
               {(() => {
                 const totalSpan = Math.max(1, calculatedProjectDurationSec);
                 const actPalette = [
@@ -5949,7 +5172,6 @@ export default function App() {
                   'from-pink-500/80 to-rose-600/80 border-pink-300/50',
                   'from-violet-500/80 to-fuchsia-600/80 border-violet-300/50'
                 ];
-
                 let cursorSec = 0;
                 const scrubberActs: Array<{
                   slotIdx: number;
@@ -5973,11 +5195,13 @@ export default function App() {
                   const slotDur = Math.max(1, Number(slot.slot_duration_sec) || 1800);
                   const overlapOut =
                     !isLast && slot.slot_transition_out.type !== 'none'
-                      ? Math.min(slotDur, Math.max(0, Number(slot.slot_transition_out.duration_sec) || 0))
+                      ? Math.min(
+                          slotDur,
+                          Math.max(0, Number(slot.slot_transition_out.duration_sec) || 0)
+                        )
                       : 0;
                   const effectiveStep = Math.max(1, slotDur - overlapOut);
                   const slotStart = cursorSec;
-
                   scrubberActs.push({
                     slotIdx: sIdx,
                     slotId: slot.slot_id,
@@ -5987,7 +5211,6 @@ export default function App() {
                     overlapOut,
                     effectiveStep
                   });
-
                   (slot.inserts || []).forEach((ins, insIdx) => {
                     const globalSec = Math.min(
                       totalSpan,
@@ -6001,7 +5224,6 @@ export default function App() {
                       timecodeHMS: formatTimeHMS(globalSec)
                     });
                   });
-
                   cursorSec += effectiveStep;
                 });
 
@@ -6016,8 +5238,7 @@ export default function App() {
                         ins: timelineSlots[selectedScrubberInsert.slotIdx].inserts[
                           selectedScrubberInsert.insIdx
                         ],
-                        actStartSec:
-                          scrubberActs[selectedScrubberInsert.slotIdx]?.startSec ?? 0
+                        actStartSec: scrubberActs[selectedScrubberInsert.slotIdx]?.startSec ?? 0
                       }
                     : null;
 
@@ -6043,11 +5264,12 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Пропорциональная шкала + вертикальные маркеры-флажки */}
                     <div className="relative pt-7 pb-2 px-3 overflow-x-hidden select-none">
-                      {/* Маркеры-флажки всех врезок (inserts) */}
                       {scrubberInserts.map(item => {
-                        const leftPct = Math.min(99.2, Math.max(0.8, (item.globalSec / totalSpan) * 100));
+                        const leftPct = Math.min(
+                          99.2,
+                          Math.max(0.8, (item.globalSec / totalSpan) * 100)
+                        );
                         const isSelected =
                           selectedScrubberInsert?.slotIdx === item.slotIdx &&
                           selectedScrubberInsert?.insIdx === item.insIdx;
@@ -6063,15 +5285,14 @@ export default function App() {
                               const el = document.getElementById(
                                 `insert-card-${item.slotIdx}-${item.insIdx}`
                               );
-                              if (el) {
-                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                              }
+                              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }}
                             style={{ left: `${leftPct}%` }}
                             className="group/flag absolute top-0 bottom-1 -translate-x-1/2 z-20 flex flex-col items-center cursor-pointer focus:outline-none"
-                            title={`${item.ins.insert_id} • ${item.timecodeHMS} (${item.ins.file_name || 'без файла'})`}
+                            title={`${item.ins.insert_id} • ${item.timecodeHMS} (${
+                              item.ins.file_name || 'без файла'
+                            })`}
                           >
-                            {/* Флажок маркера */}
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold shadow-md border transition flex items-center gap-0.5 whitespace-nowrap ${
                                 isSelected
@@ -6082,8 +5303,6 @@ export default function App() {
                               <Flag className="w-2.5 h-2.5 fill-current" />
                               {item.ins.insert_id}
                             </span>
-
-                            {/* Вертикальная направляющая линия */}
                             <span
                               className={`w-[2px] flex-1 transition ${
                                 isSelected
@@ -6091,8 +5310,6 @@ export default function App() {
                                   : 'bg-emerald-400/85 group-hover/flag:bg-amber-300'
                               }`}
                             />
-
-                            {/* Всплывающий точный таймкод ЧЧ:ММ:СС при наведении */}
                             <span className="pointer-events-none opacity-0 group-hover/flag:opacity-100 transition-opacity duration-150 absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-amber-400/60 text-amber-300 font-mono text-[10px] px-2 py-0.5 rounded-md shadow-xl whitespace-nowrap z-30">
                               {item.timecodeHMS} • {item.ins.insert_id}
                             </span>
@@ -6100,7 +5317,6 @@ export default function App() {
                         );
                       })}
 
-                      {/* Горизонтальная цветная дорожка актов и зон кроссфейдов */}
                       <div className="relative h-10 w-full rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
                         {scrubberActs.map(act => {
                           const leftPct = (act.startSec / totalSpan) * 100;
@@ -6119,8 +5335,6 @@ export default function App() {
                             </div>
                           );
                         })}
-
-                        {/* Полупрозрачные зоны кроссфейдов между актами */}
                         {scrubberActs.map(act => {
                           if (act.overlapOut <= 0) return null;
                           const xfadeStart = act.startSec + act.effectiveStep;
@@ -6131,7 +5345,7 @@ export default function App() {
                               key={`xfade-zone-${act.slotIdx}`}
                               style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                               className="absolute top-0 bottom-0 z-10 bg-amber-300/35 backdrop-blur-[1px] border-x border-amber-200/80 flex items-center justify-center"
-                              title={`Кроссфейд Акт #${act.slotIdx + 1} → #${act.slotIdx + 2}: ${act.overlapOut}с (${formatTimeHMS(xfadeStart)})`}
+                              title={`Кроссфейд Акт #${act.slotIdx + 1} → #${act.slotIdx + 2}: ${act.overlapOut}с`}
                             >
                               <span className="text-[8px] font-mono font-bold text-slate-950 bg-amber-300/80 px-1 rounded hidden md:inline">
                                 ⇄{act.overlapOut}s
@@ -6141,7 +5355,6 @@ export default function App() {
                         })}
                       </div>
 
-                      {/* Нижняя линейка таймкодов */}
                       <div className="flex justify-between text-[9px] font-mono text-slate-500 mt-1 px-0.5">
                         <span>00:00:00</span>
                         <span>{formatTimeHMS(Math.round(totalSpan * 0.25))}</span>
@@ -6151,7 +5364,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Быстрый редактор выбранного маркера врезки */}
                     {activeEditInsert && (
                       <div className="bg-slate-900/95 border border-amber-500/45 rounded-xl p-3 space-y-2.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -6175,7 +5387,6 @@ export default function App() {
                             ✕ Закрыть
                           </button>
                         </div>
-
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
                           <div className="col-span-2">
                             <label className="text-[9px] text-slate-400 block mb-0.5">
@@ -6185,11 +5396,9 @@ export default function App() {
                               type="text"
                               value={activeEditInsert.ins.file_name}
                               onChange={e =>
-                                updateSlotInsert(
-                                  activeEditInsert.slotIdx,
-                                  activeEditInsert.insIdx,
-                                  { file_name: e.target.value }
-                                )
+                                updateSlotInsert(activeEditInsert.slotIdx, activeEditInsert.insIdx, {
+                                  file_name: e.target.value
+                                })
                               }
                               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-slate-200 outline-none focus:border-amber-500"
                             />
@@ -6204,13 +5413,9 @@ export default function App() {
                               step={10}
                               value={activeEditInsert.ins.trigger_at_sec}
                               onChange={e =>
-                                updateSlotInsert(
-                                  activeEditInsert.slotIdx,
-                                  activeEditInsert.insIdx,
-                                  {
-                                    trigger_at_sec: Math.max(0, Number(e.target.value) || 0)
-                                  }
-                                )
+                                updateSlotInsert(activeEditInsert.slotIdx, activeEditInsert.insIdx, {
+                                  trigger_at_sec: Math.max(0, Number(e.target.value) || 0)
+                                })
                               }
                               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-amber-300 outline-none focus:border-amber-500"
                             />
@@ -6225,13 +5430,9 @@ export default function App() {
                               step={1}
                               value={activeEditInsert.ins.duration_sec}
                               onChange={e =>
-                                updateSlotInsert(
-                                  activeEditInsert.slotIdx,
-                                  activeEditInsert.insIdx,
-                                  {
-                                    duration_sec: Math.max(1, Number(e.target.value) || 10)
-                                  }
-                                )
+                                updateSlotInsert(activeEditInsert.slotIdx, activeEditInsert.insIdx, {
+                                  duration_sec: Math.max(1, Number(e.target.value) || 10)
+                                })
                               }
                               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-slate-200 outline-none focus:border-amber-500"
                             />
@@ -6290,7 +5491,6 @@ export default function App() {
                 );
               })()}
 
-              {/* Список слотов (1..N) */}
               <div className="space-y-4 max-h-[580px] overflow-y-auto custom-scroll pr-1">
                 {timelineSlots.map((slot, sIdx) => {
                   const isLastSlot = sIdx === timelineSlots.length - 1;
@@ -6298,13 +5498,11 @@ export default function App() {
                   const seamSec = slot.internal_loop_crossfade_sec ?? internalLoopCrossfadeSec;
                   const effStep = Math.max(1, slot.source_clip_duration_sec - seamSec);
                   const loopIterations = Math.max(1, Math.ceil(slot.slot_duration_sec / effStep));
-
                   return (
                     <div
                       key={slot.slot_id + '-' + sIdx}
                       className="bg-[#111622] border border-slate-800 hover:border-slate-700 rounded-xl p-4 space-y-3"
                     >
-                      {/* Заголовок слота и основные параметры */}
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-mono font-bold bg-amber-500 text-slate-950 px-2 py-0.5 rounded">
@@ -6319,29 +5517,29 @@ export default function App() {
                             type="text"
                             value={slot.act_title ?? slot.title}
                             placeholder="Название акта / слота"
-                            onChange={e =>
-                              updateTimelineSlotField(sIdx, 'title', e.target.value)
-                            }
+                            onChange={e => updateTimelineSlotField(sIdx, 'title', e.target.value)}
                             className="min-h-[38px] sm:min-h-[32px] bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-100 w-full sm:w-72 outline-none focus:border-amber-500"
                           />
                           <span
                             className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
                               slotMatched
                                 ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                                : 'bg-slate-900 border-slate-700 text-slate-400'
+                                : slot.file_name
+                                  ? 'bg-amber-950/30 border-amber-500/40 text-amber-300'
+                                  : 'bg-rose-950/30 border-rose-500/40 text-rose-300'
                             }`}
                           >
                             {slotMatched
                               ? '✓ Ассет в дропзоне'
                               : slot.file_name
-                              ? `Ожидается: ${slot.file_name}`
-                              : 'Имя файла не задано'}
+                                ? `Ожидается: ${slot.file_name}`
+                                : 'Имя файла не задано'}
                           </span>
                         </div>
-
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-mono text-slate-400">
-                            Петля: {loopIterations}× по {slot.source_clip_duration_sec}с (шов {seamSec.toFixed(1)}с)
+                            Петля: {loopIterations}× по {slot.source_clip_duration_sec}с (шов{' '}
+                            {seamSec.toFixed(1)}с)
                           </span>
                           <button
                             type="button"
@@ -6353,7 +5551,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Параметры слота: file_name, source_clip_duration_sec (10с), internal_loop_crossfade_sec (1.0с), slot_duration_sec, slot_transition_out (90с) */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
@@ -6385,7 +5582,6 @@ export default function App() {
                             </label>
                           </div>
                         </div>
-
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
                             Исходник (сек) / Шов петли (сек):
@@ -6424,7 +5620,6 @@ export default function App() {
                             />
                           </div>
                         </div>
-
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
                             ID ассета (asset_id):
@@ -6432,13 +5627,10 @@ export default function App() {
                           <input
                             type="text"
                             value={slot.asset_id}
-                            onChange={e =>
-                              updateTimelineSlotField(sIdx, 'asset_id', e.target.value)
-                            }
+                            onChange={e => updateTimelineSlotField(sIdx, 'asset_id', e.target.value)}
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 outline-none focus:border-amber-500"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
                             Длительность слота (сек):
@@ -6458,7 +5650,6 @@ export default function App() {
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold outline-none focus:border-amber-500"
                           />
                         </div>
-
                         <div>
                           <label className="text-[10px] text-slate-400 uppercase block mb-1">
                             Стык акта (slot_transition_out):
@@ -6503,24 +5694,24 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* ДИНАМИЧЕСКИЙ МАССИВ АСИММЕТРИЧНЫХ ВСТАВОК (inserts: []) ВНУТРИ СЛОТА */}
                       <div className="bg-[#0b0f17] border border-slate-800/90 rounded-xl p-3 space-y-2.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-bold text-amber-400 uppercase">
-                              Асимметричные вставки <code className="font-mono">inserts: [{slot.inserts.length}]</code>
+                              Асимметричные вставки{' '}
+                              <code className="font-mono">inserts: [{slot.inserts.length}]</code>
                             </span>
                             {slot.inserts.length === 0 ? (
                               <span className="text-[10px] bg-slate-900 border border-slate-700 text-slate-400 px-2 py-0.5 rounded">
-                                Пустой массив [] → Чистый фоновый луп 10с без оверлеев
+                                Пустой массив → чистый фоновый луп без оверлеев
                               </span>
                             ) : (
                               <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded">
-                                Индивидуальные кривые fade_in / fade_out ({slot.inserts.map(i => i.insert_id).join(', ')})
+                                Кривые fade_in / fade_out (
+                                {slot.inserts.map(i => i.insert_id).join(', ')})
                               </span>
                             )}
                           </div>
-
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
@@ -6535,7 +5726,7 @@ export default function App() {
                                 onClick={() => clearSlotInserts(sIdx)}
                                 className="min-h-[40px] sm:min-h-[34px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg text-[11px] transition cursor-pointer"
                               >
-                                Очистить (inserts: [])
+                                Очистить вставки
                               </button>
                             )}
                           </div>
@@ -6572,9 +5763,10 @@ export default function App() {
                                         </span>
                                       )}
                                       <span className="text-slate-400 font-mono text-[10px]">
-                                        Локальный триггер: +{ins.trigger_at_sec}s • in {ins.transition_in.duration_sec}s /{' '}
+                                        Локальный триггер: +{ins.trigger_at_sec}s • in{' '}
+                                        {ins.transition_in.duration_sec}s /{' '}
                                         {isNoFadeOut
-                                          ? 'БЕЗ fade out (до конца хронометража)'
+                                          ? 'БЕЗ fade out'
                                           : `out ${ins.transition_out.duration_sec}s`}
                                       </span>
                                       {ins.audio_soft_compressor && (
@@ -6596,7 +5788,6 @@ export default function App() {
                                       ✕ Удалить
                                     </button>
                                   </div>
-
                                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
                                     <div className="col-span-2">
                                       <label className="text-[9px] text-slate-500 block">
@@ -6634,7 +5825,6 @@ export default function App() {
                                         </label>
                                       </div>
                                     </div>
-
                                     <div>
                                       <label className="text-[9px] text-slate-500 block">
                                         trigger_at_sec (в слоте):
@@ -6646,16 +5836,12 @@ export default function App() {
                                         value={ins.trigger_at_sec}
                                         onChange={e =>
                                           updateSlotInsert(sIdx, insIdx, {
-                                            trigger_at_sec: Math.max(
-                                              0,
-                                              Number(e.target.value) || 0
-                                            )
+                                            trigger_at_sec: Math.max(0, Number(e.target.value) || 0)
                                           })
                                         }
                                         className="w-full bg-[#0b0f17] border border-slate-700 rounded px-2 py-1 text-[11px] font-mono text-amber-400 outline-none focus:border-amber-500"
                                       />
                                     </div>
-
                                     <div>
                                       <label className="text-[9px] text-slate-500 block">
                                         fade_in (сек / тип):
@@ -6697,7 +5883,6 @@ export default function App() {
                                         </select>
                                       </div>
                                     </div>
-
                                     <div>
                                       <label className="text-[9px] text-slate-500 block">
                                         fade_out (режим / сек):
@@ -6751,7 +5936,6 @@ export default function App() {
                                         )}
                                       </div>
                                     </div>
-
                                     <div className="flex flex-col justify-end">
                                       <label className="flex items-center gap-1.5 text-[10px] text-slate-300 cursor-pointer py-1">
                                         <input
@@ -6779,9 +5963,9 @@ export default function App() {
                       {isLastSlot && slot.slot_transition_out.type === 'none' && (
                         <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1.5">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Финальный акт имеет{' '}
-                          <code>slot_transition_out.type === &quot;none&quot;</code> — вставка E3 держится без fade_out до конца хронометража
+                          <code>slot_transition_out.type === &quot;none&quot;</code>
                           {finalBlackScreenEnabled
-                            ? `, затем затухает в ${finalBlackScreenSec.toFixed(1)}-секундный черный экран.`
+                            ? ` — затухание в ${finalBlackScreenSec.toFixed(1)}-секундный черный экран.`
                             : '.'}
                         </div>
                       )}
@@ -6791,7 +5975,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 3. ПРЕСЕТЫ ДЛИТЕЛЬНОСТИ (СТРОГО 3-10 ЧАСОВ) + ПОЛЕ ТОЧНОГО ВВОДА */}
             <div className="space-y-3 pt-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="block text-xs font-semibold text-slate-400 uppercase">
@@ -6801,7 +5984,6 @@ export default function App() {
                   Расчетная сумма слотов с вычетом переходов: {calculatedProjectDurationSec} сек
                 </span>
               </div>
-
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-center">
                 {[
                   { hours: 3, label: '3 Часа (3:00:00)' },
@@ -6811,8 +5993,11 @@ export default function App() {
                 ].map(item => (
                   <button
                     key={item.hours}
+                    type="button"
                     onClick={() =>
-                      item.hours === 3 ? applyBlizzard3HSpecPreset() : syncSlotsToTargetHours(item.hours)
+                      item.hours === 3
+                        ? applyBlizzard3HSpecPreset()
+                        : syncSlotsToTargetHours(item.hours)
                     }
                     className={`loop-h-btn py-3.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
                       loopHours === item.hours
@@ -6823,8 +6008,6 @@ export default function App() {
                     [ {item.label} ]
                   </button>
                 ))}
-
-                {/* Поле точного ввода часов (от 3 до 10) */}
                 <div className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
                   <span className="text-[11px] text-slate-400 font-medium">Точно (3–10ч):</span>
                   <input
@@ -6840,25 +6023,32 @@ export default function App() {
               </div>
             </div>
 
-            {/* 4. АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ FFmpeg FILTER_COMPLEX */}
             <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-500" />
                   <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                    4. Граф FFmpeg <code className="text-amber-400">filter_complex</code> ({videoCodec} CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k • loudnorm I={audioMastering.integrated_lufs})
+                    4. Граф FFmpeg <code className="text-amber-400">filter_complex</code> (
+                    {videoCodec} CRF {videoCrf} • {videoFps}fps • AAC {audioBitrateKbps}k • loudnorm
+                    I={audioMastering.integrated_lufs})
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={!canDispatchLoop}
+                    title={
+                      canDispatchLoop
+                        ? 'Скопировать граф filter_complex'
+                        : 'Заполните file_name всех слотов — граф с пустыми входами не копируется'
+                    }
                     onClick={() => {
                       navigator.clipboard.writeText(
                         `${ffmpegPreview.filterLines.join(';\n')}\n# Кодек: ${ffmpegPreview.encodingFlags}`
                       );
                       showToast('Граф FFmpeg filter_complex скопирован в буфер обмена!', 'success');
                     }}
-                    className="text-[11px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-400 px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-400 px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Copy className="w-3 h-3" /> Копировать filter_complex
                   </button>
@@ -6871,11 +6061,14 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
               {showFilterComplexPreview && (
                 <div className="space-y-2">
                   <div className="text-[11px] text-slate-400">
-                    Входные потоки (<code className="text-amber-300">{ffmpegPreview.inputsArgs.length} входов</code>): 10-сек петли со швом {internalLoopCrossfadeSec.toFixed(1)}с + асимметричные вставки + 90с кроссфейды актов + 2-слойный аудио-микшер + <code className="text-sky-300">loudnorm</code>:
+                    Входные потоки (
+                    <code className="text-amber-300">{ffmpegPreview.inputsArgs.length} входов</code>
+                    ): петли со швом {internalLoopCrossfadeSec.toFixed(1)}с + асимметричные вставки +
+                    кроссфейды актов + 2-слойный аудио-микшер +{' '}
+                    <code className="text-sky-300">loudnorm</code>:
                   </div>
                   <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[10px] font-mono text-emerald-300/90 overflow-x-auto max-h-60 custom-scroll leading-relaxed">
                     {`# Входы FFmpeg:\n${ffmpegPreview.inputsArgs.join(' \\\n  ')}\n\n# filter_complex:\n${ffmpegPreview.filterLines.join(';\n')}\n\n# Кодирование и маппинг:\n-map "[${ffmpegPreview.finalVideoMap}]" -map "[${ffmpegPreview.finalAudioMap}]" ${ffmpegPreview.encodingFlags} -t ${calculatedProjectDurationSec + (finalBlackScreenEnabled ? finalBlackScreenSec : 0)}`}
@@ -6884,7 +6077,6 @@ export default function App() {
               )}
             </div>
 
-            {/* 5. ПАРАМЕТРЫ ЭКСПОРТА И ПИЛЮЛИ-ПЕРЕКЛЮЧАТЕЛИ КОДЕКА (H.264 / H.265) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-1">
               <div className="aether-card rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
@@ -6897,10 +6089,10 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                  {/* Пилюли-переключатели кодека (H.264 против H.265) */}
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-white/55 uppercase block">
-                      Видеокодек (<code className="font-mono text-amber-300">export_settings.video_codec</code>):
+                      Видеокодек (
+                      <code className="font-mono text-amber-300">export_settings.video_codec</code>):
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {[
@@ -6931,7 +6123,11 @@ export default function App() {
                             }`}
                           >
                             <span className="text-xs font-extrabold">{codecOpt.title}</span>
-                            <span className={`text-[10px] ${active ? 'text-slate-900/80 font-medium' : 'text-white/50'}`}>
+                            <span
+                              className={`text-[10px] ${
+                                active ? 'text-slate-900/80 font-medium' : 'text-white/50'
+                              }`}
+                            >
                               {codecOpt.sub}
                             </span>
                           </button>
@@ -6940,7 +6136,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* FPS (пилюли), CRF и Битрейт аудио (пилюли) */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
@@ -6966,7 +6161,6 @@ export default function App() {
                         })}
                       </div>
                     </div>
-
                     <div>
                       <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
                         Качество (CRF):
@@ -6978,13 +6172,18 @@ export default function App() {
                         value={videoCrf}
                         onChange={e =>
                           setVideoCrf(
-                            Math.max(14, Math.min(30, Number(e.target.value) || (videoCodec === 'libx264' ? 20 : 22)))
+                            Math.max(
+                              14,
+                              Math.min(
+                                30,
+                                Number(e.target.value) || (videoCodec === 'libx264' ? 20 : 22)
+                              )
+                            )
                           )
                         }
                         className="w-full min-h-[44px] bg-[#080c14]/90 border border-white/[0.1] rounded-xl px-3 py-2 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-400"
                       />
                     </div>
-
                     <div>
                       <label className="text-[10px] font-semibold text-white/55 uppercase block mb-1.5">
                         Аудио AAC (kbps):
@@ -7011,7 +6210,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Пилюли выбора разрешения + Черновик Draft 720p ultrafast */}
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-[11px] font-semibold text-white/55 uppercase block">
@@ -7033,10 +6231,9 @@ export default function App() {
                           }}
                           className="accent-amber-400 w-3.5 h-3.5"
                         />
-                        <span>⚡ Черновик Draft 720p ultrafast (проверка за 1 мин)</span>
+                        <span>⚡ Черновик Draft 720p ultrafast</span>
                       </label>
                     </div>
-
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {[
                         { id: '720p' as const, label: '720p Draft', dim: '1280×720' },
@@ -7068,15 +6265,20 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ДИНАМИЧЕСКИЙ КАЛЬКУЛЯТОР ИТОГОВОГО ВЕСА */}
                 <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-[#080c14] border border-amber-400/35 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="text-[10px] font-bold uppercase text-amber-300 block">
-                      Динамический калькулятор итогового веса ({videoCodec.toUpperCase()} {videoFps}fps):
+                      Динамический калькулятор итогового веса ({videoCodec.toUpperCase()} {videoFps}
+                      fps):
                     </span>
                     <span className="text-sm font-bold text-[#f8fafc]">
-                      «{getResolutionLabel(loopResolution)} • {loopDraftMode || loopResolution === '720p' ? 'H.264 Ultrafast' : videoCodec === 'libx264' ? 'H.264 Fast' : getPresetShortLabel(bitratePreset)} •{' '}
-                      {loopHours} {loopHours >= 5 ? 'часов' : 'часа'} ~ {estimatedGb} ГБ»
+                      «{getResolutionLabel(loopResolution)} •{' '}
+                      {loopDraftMode || loopResolution === '720p'
+                        ? 'H.264 Ultrafast'
+                        : videoCodec === 'libx264'
+                          ? 'H.264 Fast'
+                          : getPresetShortLabel(bitratePreset)}{' '}
+                      • {loopHours} {loopHours >= 5 ? 'часов' : 'часа'} ~ {estimatedGb} ГБ»
                     </span>
                   </div>
                   <span className="text-[11px] font-mono text-amber-300 bg-[#080c14]/90 px-2.5 py-1 rounded-lg border border-amber-400/30">
@@ -7084,11 +6286,11 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* ГИБКИЕ РЕЖИМЫ СУБТИТРОВ В ЦЕХЕ ЛУПОВ */}
                 <div className="pt-2 border-t border-white/[0.08] space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-                      <Subtitles className="w-3.5 h-3.5 text-indigo-400" /> Настройки субтитров (Hardsub / .SRT):
+                      <Subtitles className="w-3.5 h-3.5 text-indigo-400" /> Настройки субтитров
+                      (Hardsub / .SRT):
                     </span>
                     <div className="flex flex-wrap gap-1">
                       {(['en', 'ru', 'de', 'es', 'fr', 'original'] as const).map(lang => (
@@ -7107,7 +6309,6 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <label className="min-h-[44px] flex items-center gap-2 bg-[#080c14]/80 border border-white/[0.08] rounded-xl px-3 py-2 text-[11px] font-semibold text-indigo-200 cursor-pointer select-none">
                       <input
@@ -7118,7 +6319,6 @@ export default function App() {
                       />
                       <span>Вшить субтитры в видеоряд (Hardsub)</span>
                     </label>
-
                     <label className="min-h-[44px] flex items-center gap-2 bg-[#080c14]/80 border border-white/[0.08] rounded-xl px-3 py-2 text-[11px] font-semibold text-emerald-300 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -7126,10 +6326,9 @@ export default function App() {
                         onChange={e => setLoopUploadSrtToDrive(e.target.checked)}
                         className="accent-emerald-500 w-3.5 h-3.5 shrink-0"
                       />
-                      <span>Выгрузить файл субтитров (.srt) на Google Диск</span>
+                      <span>Выгрузить .srt на Google Диск</span>
                     </label>
                   </div>
-
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[10px] font-mono text-white/55">
                       {loopBurnInSubtitles
@@ -7147,7 +6346,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ПЕРЕКЛЮЧАТЕЛЬ «ГЕНЕРИРОВАТЬ ПАКЕТ ВЕРТИКАЛЬНЫХ SHORTS (9:16)» */}
                 <div className="pt-2 border-t border-white/[0.08] space-y-2">
                   <label className="flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/10 via-[#080c14] to-[#080c14] border border-purple-500/35 hover:border-purple-400/70 rounded-xl px-3.5 py-3 cursor-pointer select-none">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -7162,7 +6360,8 @@ export default function App() {
                           📱 Генерировать пакет вертикальных Shorts (9:16)
                         </span>
                         <span className="text-[10px] text-white/55 block">
-                          Автоматическая нарезка до 4 тизеров 1080×1920 (38с) по таймкодам врезок → папка <code className="font-mono text-purple-300">Shorts/</code> на GDrive
+                          Автоматическая нарезка тизеров 1080×1920 по таймкодам врезок → папка{' '}
+                          <code className="font-mono text-purple-300">Shorts/</code> на GDrive
                         </span>
                       </div>
                     </div>
@@ -7173,22 +6372,23 @@ export default function App() {
                           : 'bg-[#080c14] border-white/[0.1] text-white/50'
                       }`}
                     >
-                      {shortsFactoryEnabled ? '9:16 • 38s ON' : 'OFF'}
+                      {shortsFactoryEnabled ? '9:16 ON' : 'OFF'}
                     </span>
                   </label>
                 </div>
 
-                {/* Быстрое поле ID папки Google Drive прямо в цехе */}
                 <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
-                      <CloudUpload className="w-3.5 h-3.5" /> Целевая папка Google Drive (GDRIVE_FOLDER_ID):
+                      <CloudUpload className="w-3.5 h-3.5" /> Целевая папка Google Drive
+                      (GDRIVE_FOLDER_ID):
                     </label>
                     <button
+                      type="button"
                       onClick={openConfigModal}
                       className="text-[11px] text-white/55 hover:text-amber-300 underline cursor-pointer"
                     >
-                      Настроить Service Account JSON
+                      Настройки раннера (GitHub / Drive)
                     </button>
                   </div>
                   <input
@@ -7204,16 +6404,23 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Правая карточка: Сводка сценария и кнопка запуска облачной сборки (изумрудно-бирюзовый градиент) */}
               <div className="aether-card border border-emerald-500/25 rounded-2xl p-5 flex flex-col justify-between space-y-4">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                   <div className="space-y-1.5">
                     <h4 className="text-xs font-bold text-[#f8fafc] uppercase tracking-wide">
-                      Прямая отправка манифеста в GitHub Actions (manifest_payload Base64)
+                      Прямая отправка манифеста в GitHub Actions
                     </h4>
                     <p className="text-xs text-white/65 leading-relaxed">
-                      При нажатии <strong>«🚀 Запустить облачную сборку»</strong> манифест проекта <strong>«{loopProjectName || 'Ambient Loop 4K'}»</strong> (<code className="font-mono text-amber-300">{videoCodec} CRF {videoCrf} • {videoFps}fps</code>, слоты <code className="font-mono text-amber-300">timeline_slots[]</code>, 2-слойный аудио-микшер, <code className="font-mono text-sky-300">loudnorm</code>) кодируется в UTF-8 Base64 и отправляется напрямую через <code className="font-mono text-emerald-300">workflow_dispatch</code>.
+                      При нажатии <strong>«🚀 Запустить облачную сборку»</strong> манифест проекта{' '}
+                      <strong>«{loopProjectName || 'Ambient Loop 4K'}»</strong> (
+                      <code className="font-mono text-amber-300">
+                        {videoCodec} CRF {videoCrf} • {videoFps}fps
+                      </code>
+                      , слоты <code className="font-mono text-amber-300">timeline_slots[]</code>,
+                      2-слойный аудио-микшер, <code className="font-mono text-sky-300">loudnorm</code>)
+                      отправляется через{' '}
+                      <code className="font-mono text-emerald-300">workflow_dispatch</code>.
                     </p>
                   </div>
                 </div>
@@ -7222,28 +6429,46 @@ export default function App() {
                   <span className="font-mono">
                     Актов: <code className="text-amber-300">{timelineSlots.length}</code> • Вставок:{' '}
                     <code className="text-emerald-300">{totalInsertsCount}</code> • Хронометраж:{' '}
-                    <code className="text-cyan-300">{formatTime(calculatedProjectDurationSec)}</code>
+                    <code className="text-cyan-300">
+                      {formatTimeHMS(calculatedProjectDurationSec)}
+                    </code>
                   </span>
                   <button
+                    type="button"
                     onClick={() => {
                       openConfigModal();
                       setShowYamlPreview(true);
                     }}
                     className="text-amber-300 hover:text-amber-200 font-semibold cursor-pointer"
                   >
-                    Код Python + FFmpeg YAML →
+                    Актуальный workflow раннера →
                   </button>
                 </div>
 
+                {!canDispatchLoop && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-rose-500/50 bg-rose-950/30 px-3.5 py-2.5 text-[11px] text-rose-200 space-y-1"
+                  >
+                    <div className="flex items-center gap-2 font-bold">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                      <span>Запуск заблокирован: не заполнены имена файлов</span>
+                    </div>
+                    <p className="font-mono text-[10.5px] text-rose-300/90">
+                      Слоты без file_name: {emptySlotNumbers.join(', ')}. Загрузите клипы в дропзону
+                      или впишите имена вручную — иначе граф получит пустые входы.
+                    </p>
+                  </div>
+                )}
+
                 <div className="pt-2 border-t border-white/[0.08] flex flex-col gap-2.5">
                   <div className="flex flex-col sm:flex-row items-stretch gap-2">
-                    {/* Основная кнопка запуска облачной сборки (изумрудно-бирюзовый градиент) */}
                     <button
                       type="button"
                       onClick={startLoopRender}
-                      disabled={isRunnerActive || isLoopDispatching}
+                      disabled={isRunnerActive || isLoopDispatching || !canDispatchLoop}
                       className={`min-h-[48px] flex-1 flex items-center justify-center gap-2 font-bold px-5 py-3.5 rounded-xl text-xs ${
-                        isRunnerActive || isLoopDispatching
+                        isRunnerActive || isLoopDispatching || !canDispatchLoop
                           ? 'bg-slate-800/90 border border-amber-500/40 text-amber-300 cursor-not-allowed opacity-90 shadow-none'
                           : 'btn-primary-action cursor-pointer'
                       }`}
@@ -7253,18 +6478,18 @@ export default function App() {
                         {isLoopDispatching
                           ? 'Отправка манифеста в GitHub Actions...'
                           : isRunnerActive
-                          ? `⏳ Сборка ${
-                              terminalRunnerStatus === 'queued' ? 'QUEUED' : 'RUNNING'
-                            } • Таймер: ${formatTerminalTime(renderStatus.seconds)}`
-                          : `🚀 Запустить облачную сборку (${
-                              videoCodec === 'libx264' ? 'H.264' : 'H.265'
-                            } CRF ${videoCrf} • ${videoFps}fps • ${getResolutionLabel(
-                              loopResolution
-                            )} ~ ${estimatedGb} ГБ)`}
+                            ? `⏳ Сборка ${
+                                terminalRunnerStatus === 'queued' ? 'QUEUED' : 'RUNNING'
+                              } • Таймер: ${formatTerminalTime(renderStatus.seconds)}`
+                            : !canDispatchLoop
+                              ? '🔒 Заполните file_name всех слотов'
+                              : `🚀 Запустить облачную сборку (${
+                                  videoCodec === 'libx264' ? 'H.264' : 'H.265'
+                                } CRF ${videoCrf} • ${videoFps}fps • ${getResolutionLabel(
+                                  loopResolution
+                                )} ~ ${estimatedGb} ГБ)`}
                       </span>
                     </button>
-
-                    {/* Прямая ссылка на активный Run в GitHub Actions во время RUNNING/QUEUED */}
                     {isRunnerActive && renderStatus.runUrl && (
                       <a
                         href={renderStatus.runUrl}
@@ -7278,7 +6503,6 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Вторичные кнопки: Preflight-проверка GDrive и добавление в Batch Queue */}
                   <div className="flex flex-col sm:flex-row items-stretch gap-2">
                     <button
                       type="button"
@@ -7292,12 +6516,11 @@ export default function App() {
                     >
                       <span>🔍 Проверить файлы на GDrive (Preflight)</span>
                     </button>
-
                     <button
                       type="button"
                       onClick={enqueueCurrentManifest}
                       className="min-h-[44px] flex items-center justify-center gap-1.5 rounded-xl border border-purple-500/45 bg-purple-500/15 hover:bg-purple-500/25 px-4 py-2.5 text-xs font-semibold text-purple-200 transition cursor-pointer whitespace-nowrap"
-                      title="Поставить текущий манифест в локальную очередь: после завершения текущего run он запустится автоматически"
+                      title="Поставить текущий манифест в локальную очередь"
                     >
                       <ListOrdered className="w-3.5 h-3.5 text-purple-300" />
                       <span>+ В очередь</span>
@@ -7309,13 +6532,12 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Панель локальной очереди сборок (Batch Queue) */}
                   {batchQueue.length > 0 && (
                     <div className="bg-[#080c14] border border-purple-500/35 rounded-xl p-3 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
                         <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1.5">
                           <ListOrdered className="w-3.5 h-3.5" />
-                          Очередь сборок (Batch Queue: {batchQueue.length}) — авто-старт по completed (success)
+                          Очередь сборок (Batch Queue: {batchQueue.length})
                         </span>
                         <div className="flex items-center gap-1.5">
                           {!isRunnerActive && !isLoopDispatching && (
@@ -7336,7 +6558,6 @@ export default function App() {
                           </button>
                         </div>
                       </div>
-
                       <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scroll pr-1">
                         {batchQueue.map((qItem, qIdx) => (
                           <div
@@ -7351,7 +6572,8 @@ export default function App() {
                                 {qItem.projectName}
                               </span>
                               <span className="font-mono text-[10px] text-slate-400 hidden sm:inline">
-                                {qItem.codec} CRF{qItem.crf} • {qItem.resolution} • {qItem.slotsCount} сл.
+                                {qItem.codec} CRF{qItem.crf} • {qItem.resolution} • {qItem.slotsCount}{' '}
+                                сл.
                               </span>
                             </div>
                             <button
@@ -7371,30 +6593,33 @@ export default function App() {
               </div>
             </div>
 
-            {/* СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ */}
             <LiveTerminal
               status={terminalRunnerStatus}
               elapsedSeconds={renderStatus.seconds}
               logs={terminalLogs}
               runUrl={renderStatus.runUrl}
               onClearLogs={clearTerminalLogs}
-              onCopyLogs={() => showToast('Лог терминала скопирован в буфер обмена', 'info')}
+              onCopyLogs={() => {
+                navigator.clipboard.writeText(
+                  terminalLogs.map(l => sanitizeLogText(l.text)).join('\n')
+                );
+                showToast('Лог скопирован (секреты замаскированы)', 'info');
+              }}
               onCancelRun={cancelActiveRenderRun}
             />
 
-            {/* БЫСТРЫЙ ПЕРЕХОД В ОТДЕЛЬНЫЙ ЦЕХ YOUTUBE SEO & УПАКОВКИ */}
             <div className="bg-[#0b0f17] border border-sky-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-2">
-                  <Package className="w-4 h-4" /> Упаковка слотов таймлайна в YouTube SEO (A/B Titles, Description, Chapters, 30 Tags)
+                  <Package className="w-4 h-4" /> Упаковка слотов таймлайна в YouTube SEO
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Вся текстовая мета-упаковка и генерация на базе Gemini вынесены в отдельную вкладку «📦 YouTube SEO»
+                  Вся текстовая мета-упаковка и генерация на базе Gemini вынесены в отдельную вкладку
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setActiveTab('seo')}
+                onClick={() => handleSelectTab('seo')}
                 className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition"
               >
                 <Package className="w-3.5 h-3.5" /> Открыть «📦 YouTube SEO» →
@@ -7403,9 +6628,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* =========================================
-            ЦЕХ 3: 4K ПРЕВЬЮ И АРТ-ЦЕХ (FLUX.1 AI HORDE + A/B ТЕСТЕР + YOUTUBE MOCKUP)
-           ========================================= */}
         <section
           id="view-thumb"
           className={`studio-view space-y-6 ${activeTab === 'thumb' ? '' : 'hidden'}`}
@@ -7420,8 +6642,10 @@ export default function App() {
             externalCoverAImageUrl={editorEditedCoverAUrl}
             onConsumeExternalCoverAImage={() => setEditorEditedCoverAUrl(null)}
             manifestThumbnailSlots={manifestThumbnailSlots}
-            endScreenSafeZone={endScreenSafeZone}
+            endScreenSafeZone={effectiveEndScreenSafeZone}
             manifestDurationBadge={manifestDurationBadge}
+            youtubeMockTitle={loopProjectName}
+            scriptContext={seoScriptText || sourceText}
             onSendToArtEditor={(imageDataUrl, slotLabel) => {
               setArtEditorIncomingAsset({
                 dataUrl: imageDataUrl,
@@ -7434,9 +6658,6 @@ export default function App() {
           />
         </section>
 
-        {/* =========================================
-            ЦЕХ 3.5: АРТ-РЕДАКТОР & ФОН (УДАЛЕНИЕ ФОНА, ВОЛШЕБНАЯ ПАЛОЧКА, РЕСАЙЗ, ЭКСПОРТ)
-           ========================================= */}
         <section
           id="view-editor"
           className={`studio-view space-y-6 ${activeTab === 'editor' ? '' : 'hidden'}`}
@@ -7452,9 +6673,6 @@ export default function App() {
           />
         </section>
 
-        {/* =========================================
-            ЦЕХ 4: VERBAFLOW • СЦЕНАРИИ & ТЕКСТ (АНТИ-ИИ, ХУКИ, ДИКТОР, РЕНТГЕН, СЦЕНЫ)
-           ========================================= */}
         <section
           id="view-verbaflow"
           className={`studio-view space-y-6 ${activeTab === 'verbaflow' ? '' : 'hidden'}`}
@@ -7466,12 +6684,7 @@ export default function App() {
             projectName={loopProjectName}
             narrativeScenes={activeNarrativeScenes}
             onUpdateSceneSubtitle={(sceneIndex, lang, text) =>
-              setExternalSceneSubtitleEdit({
-                sceneIndex,
-                lang,
-                text,
-                nonce: Date.now()
-              })
+              setExternalSceneSubtitleEdit({ sceneIndex, lang, text, nonce: Date.now() })
             }
             strictSceneDurationLock={strictSceneDurationLock}
             onStrictSceneDurationLockChange={setStrictSceneDurationLock}
@@ -7483,17 +6696,12 @@ export default function App() {
             onSelectedSubtitleLanguagesChange={setSelectedSubtitleLanguages}
             onSendToVoiceStudio={ttsReadyText => {
               setTransferredScript(ttsReadyText);
-              showToast(
-                '🎙️ Текст очищен и подготовлен во внутреннем модуле «Дикторский цех» VerbaFlow!',
-                'success'
-              );
+              showToast('🎙️ Текст очищен и подготовлен в «Дикторском цехе» VerbaFlow!', 'success');
             }}
             onSendToYoutubeSeo={(fullScript, newScenes) => {
               setSeoScriptText(fullScript);
               setTransferredScript(fullScript);
-              if (newScenes.length > 0) {
-                setActiveNarrativeScenes(newScenes);
-              }
+              if (newScenes.length > 0) setActiveNarrativeScenes(newScenes);
               handleSelectTab('seo');
               showToast('📈 Сценарий и структура сцен переданы в YouTube SEO!', 'success');
             }}
@@ -7502,7 +6710,7 @@ export default function App() {
               setSeoScriptText(sourceText);
               handleSelectTab('seo');
               showToast(
-                `📑 ${chaptersCount} глав (${totalDurationFormatted}) переданы в output_chapters.txt в модуле YouTube SEO!`,
+                `📑 ${chaptersCount} глав (${totalDurationFormatted}) переданы в output_chapters.txt!`,
                 'success'
               );
             }}
@@ -7513,7 +6721,7 @@ export default function App() {
               setSeoScriptText(fullScript);
               handleSelectTab('combine');
               showToast(
-                `🎬 В Повествовательный монтаж / Ритм-карту передано ${newScenes.length} сцен с точным расчётом duration и векторами камеры!`,
+                `🎬 В Ритм-карту передано ${newScenes.length} сцен с расчётом duration и векторами камеры!`,
                 'success'
               );
             }}
@@ -7521,9 +6729,6 @@ export default function App() {
           />
         </section>
 
-        {/* =========================================
-            ЦЕХ 5: YOUTUBE SEO & УПАКОВКА (SEO HUB — GEMINI US ENGLISH)
-           ========================================= */}
         <section
           id="view-seo"
           className={`studio-view space-y-6 ${activeTab === 'seo' ? '' : 'hidden'}`}
@@ -7536,7 +6741,7 @@ export default function App() {
             externalChaptersTxt={verbaFlowChaptersTxt}
             onClearExternalChapters={() => {
               setVerbaFlowChaptersTxt('');
-              showToast('Переключено обратно на автоматический расчёт глав по Ритм-карте.', 'info');
+              showToast('Переключено на автоматический расчёт глав по Ритм-карте.', 'info');
             }}
             seoState={youtubeSeoState}
             onSeoStateChange={setYoutubeSeoState}
@@ -7544,7 +6749,7 @@ export default function App() {
             onShortsExportChange={setShortsExportConfig}
             renderSpecsSummary={renderSpecsSummary}
             activeSubtitleLanguages={selectedSubtitleLanguages}
-            endScreenSafeZone={endScreenSafeZone}
+            endScreenSafeZone={effectiveEndScreenSafeZone}
             exportOutputChaptersEnabled={exportOutputChaptersEnabled}
             onExportOutputChaptersEnabledChange={setExportOutputChaptersEnabled}
             exportReleaseCardMdEnabled={exportReleaseCardMdEnabled}
@@ -7558,9 +6763,7 @@ export default function App() {
                 .slice(0, 3)
                 .join(' ')
                 .toUpperCase();
-              if (words) {
-                setThumbTitle(words);
-              }
+              if (words) setThumbTitle(words);
               handleSelectTab('thumb');
               showToast(`Хук «${words}» передан на 4K обложку!`, 'success');
             }}
@@ -7568,7 +6771,6 @@ export default function App() {
           />
         </section>
 
-        {/* СТАТУС БАР ОБЛАЧНОГО РЕНДЕРА (НИЖНЯЯ ПЛАШКА С POLLING GITHUB ACTIONS) */}
         {renderStatus.visible && (
           <div
             id="render-status-bar"
@@ -7576,12 +6778,11 @@ export default function App() {
               renderStatus.status === 'success'
                 ? 'border-emerald-400/60 shadow-[0_0_25px_rgba(52,211,153,0.18)]'
                 : renderStatus.status === 'failure'
-                ? 'border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.18)]'
-                : 'border-amber-400/50 shadow-[0_0_25px_rgba(251,191,36,0.14)]'
+                  ? 'border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.18)]'
+                  : 'border-amber-400/50 shadow-[0_0_25px_rgba(251,191,36,0.14)]'
             }`}
           >
             <div className="flex items-center gap-3.5">
-              {/* Цветовой индикатор состояния: янтарно-индиговый пульс при рендере, зеленый при успехе, красный при сбое */}
               <div className="relative flex items-center justify-center w-4 h-4">
                 {renderStatus.status === 'running' && (
                   <>
@@ -7596,15 +6797,14 @@ export default function App() {
                   <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500 shadow-[0_0_12px_#f43f5e]" />
                 )}
               </div>
-
               <div className="space-y-0.5">
                 <p
                   className={`text-xs font-bold ${
                     renderStatus.status === 'success'
                       ? 'text-emerald-300'
                       : renderStatus.status === 'failure'
-                      ? 'text-rose-300'
-                      : 'text-slate-100'
+                        ? 'text-rose-300'
+                        : 'text-slate-100'
                   }`}
                   id="render-status-title"
                 >
@@ -7615,8 +6815,8 @@ export default function App() {
                     renderStatus.status === 'success'
                       ? 'text-emerald-400/90'
                       : renderStatus.status === 'failure'
-                      ? 'text-rose-400/90'
-                      : 'text-amber-300'
+                        ? 'text-rose-400/90'
+                        : 'text-amber-300'
                   }`}
                   id="render-status-step"
                 >
@@ -7629,75 +6829,18 @@ export default function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Быстрый переключатель шагов для предпросмотра/тестирования и ручного обновления */}
-              {renderStatus.status === 'running' && (
-                <div className="hidden xl:flex items-center gap-1 bg-[#090d16] px-2 py-1 rounded-lg border border-slate-800 text-[10px] text-slate-400">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRenderStatus(prev => ({
-                        ...prev,
-                        stepLabel: 'Шаг: Скачивание клипов из Google Drive...'
-                      }))
-                    }
-                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
-                      renderStatus.stepLabel.includes('Скачивание')
-                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/40'
-                        : 'hover:text-slate-200'
-                    }`}
-                  >
-                    1. Скачивание
-                  </button>
-                  <span>→</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRenderStatus(prev => ({
-                        ...prev,
-                        stepLabel: 'Шаг: Рендеринг и сборка таймлайна в FFmpeg...'
-                      }))
-                    }
-                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
-                      renderStatus.stepLabel.includes('FFmpeg')
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
-                        : 'hover:text-slate-200'
-                    }`}
-                  >
-                    2. FFmpeg
-                  </button>
-                  <span>→</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRenderStatus(prev => ({
-                        ...prev,
-                        stepLabel: 'Шаг: Выгрузка готового 4K мастера в Google Drive...'
-                      }))
-                    }
-                    className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
-                      renderStatus.stepLabel.includes('Выгрузка')
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                        : 'hover:text-slate-200'
-                    }`}
-                  >
-                    3. Выгрузка GDrive
-                  </button>
-                </div>
-              )}
-
               <span
                 id="render-timer"
                 className={`text-xs font-mono px-3 py-1.5 rounded-lg border ${
                   renderStatus.status === 'success'
                     ? 'text-emerald-300 bg-emerald-950/40 border-emerald-500/40'
                     : renderStatus.status === 'failure'
-                    ? 'text-rose-300 bg-rose-950/40 border-rose-500/40'
-                    : 'text-amber-300 bg-[#090d16] border-slate-800'
+                      ? 'text-rose-300 bg-rose-950/40 border-rose-500/40'
+                      : 'text-amber-300 bg-[#090d16] border-slate-800'
                 }`}
               >
                 {formatTime(renderStatus.seconds)}
               </span>
-
               <button
                 type="button"
                 onClick={() => setIsRenderLogPanelOpen(prev => !prev)}
@@ -7711,7 +6854,6 @@ export default function App() {
                 <Terminal className="w-3.5 h-3.5 text-amber-400" />
                 <span>{isRenderLogPanelOpen ? 'Свернуть лог' : 'Открыть лог'}</span>
               </button>
-
               <a
                 id="gh-run-link"
                 href={renderStatus.runUrl}
@@ -7731,6 +6873,12 @@ export default function App() {
                   logs={terminalLogs}
                   runUrl={renderStatus.runUrl}
                   onClearLogs={clearTerminalLogs}
+                  onCopyLogs={() => {
+                    navigator.clipboard.writeText(
+                      terminalLogs.map(l => sanitizeLogText(l.text)).join('\n')
+                    );
+                    showToast('Лог скопирован (секреты замаскированы)', 'info');
+                  }}
                   onCancelRun={cancelActiveRenderRun}
                 />
               </div>
@@ -7739,7 +6887,6 @@ export default function App() {
         )}
       </main>
 
-      {/* МОДАЛКА ПОДТВЕРЖДЕНИЯ СБРОСА ПРОЕКТА («Сбросить проект») */}
       {isResetProjectModalOpen && (
         <div
           role="dialog"
@@ -7758,7 +6905,8 @@ export default function App() {
                     Сбросить проект?
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Очистка локального черновика <code className="font-mono text-rose-300">aether_workspace_draft</code>
+                    Очистка локального черновика{' '}
+                    <code className="font-mono text-rose-300">aether_workspace_draft</code>
                   </p>
                 </div>
               </div>
@@ -7771,11 +6919,10 @@ export default function App() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-
             <p className="text-xs text-slate-300 leading-relaxed">
-              Будут сброшены название проекта, сценарий VerbaFlow, сцены (с датами и локациями), оверлеи и настройки рендера. Подключения Google Auth, GitHub Token и Google Drive Folder ID сохранятся.
+              Будут сброшены название проекта, сценарий VerbaFlow, сцены, оверлеи и настройки
+              рендера. Подключения Google Auth, GitHub Token и Google Drive Folder ID сохранятся.
             </p>
-
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 type="button"
@@ -7796,9 +6943,6 @@ export default function App() {
         </div>
       )}
 
-      {/* =========================================
-          МОДАЛКА НАСТРОЕК GITHUB ACTIONS & GOOGLE DRIVE
-         ========================================= */}
       {isConfigOpen && (
         <div
           id="gh-modal"
@@ -7807,18 +6951,20 @@ export default function App() {
           <div className="bg-[#111622] border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                <Github className="text-amber-500 w-5 h-5" /> Подключение GitHub Раннера &amp; Прямая выгрузка в Google Drive
+                <Github className="text-amber-500 w-5 h-5" /> Подключение GitHub Раннера &amp;
+                выгрузка в Google Drive
               </h3>
               <button
+                type="button"
                 onClick={closeConfigModal}
                 className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                aria-label="Закрыть"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Секция 1: GitHub Actions */}
               <div className="space-y-3 bg-[#0b0f17] p-4 rounded-xl border border-slate-800">
                 <div className="text-xs font-bold text-amber-400 uppercase flex items-center gap-1.5">
                   <Github className="w-4 h-4" /> 1. Параметры GitHub Actions
@@ -7833,10 +6979,11 @@ export default function App() {
                     value={modalToken}
                     onChange={e => setModalToken(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
-                    placeholder="ghp_xxxxxxxxxxxx"
+                    placeholder="github_pat_..."
                   />
                   <span className="text-[10px] text-slate-500">
-                    Требуются права: `repo` и `workflow`.
+                    Fine-grained: Actions (read/write) на репозиторий раннера. Хранится только в
+                    sessionStorage текущей вкладки.
                   </span>
                 </div>
                 <div>
@@ -7849,7 +6996,7 @@ export default function App() {
                     value={modalRepo}
                     onChange={e => setModalRepo(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-amber-500"
-                    placeholder="myusername/aether-render"
+                    placeholder="ZermeXX/aetherflow-render"
                   />
                 </div>
                 <div>
@@ -7864,7 +7011,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Секция 2: Интеграция Google Drive для тяжелых лупов */}
               <div className="space-y-3 bg-[#0b0f17] p-4 rounded-xl border border-slate-800">
                 <div className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-1.5">
                   <HardDrive className="w-4 h-4" /> 2. Выгрузка в Google Drive (Rclone)
@@ -7882,53 +7028,38 @@ export default function App() {
                     placeholder="1A2b3C4d5E6f7G8h9I0jKlMnOpQrStUv"
                   />
                   <span className="text-[10px] text-slate-500">
-                    Передается в `inputs.gdrive_folder_id` для обхода лимита 2 ГБ.
+                    Передаётся в манифесте как cloud_export.target_folder_id.
                   </span>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">
-                    GDRIVE_SA_KEY (JSON ключ Service Account / Rclone Config):
-                  </label>
-                  <textarea
-                    id="gdrive-sa-key"
-                    rows={4}
-                    value={modalGdriveSaKey}
-                    onChange={e => setModalGdriveSaKey(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-[11px] text-slate-200 outline-none focus:border-amber-500 font-mono custom-scroll"
-                    placeholder='{"type": "service_account", "project_id": "...", "private_key": "..."}'
-                  />
-                  <span className="text-[10px] text-slate-500">
-                    Сохраните этот JSON также в GitHub Secrets как `GDRIVE_SERVICE_ACCOUNT_JSON`.
-                  </span>
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 text-[11px] text-emerald-200 leading-relaxed">
+                  🔐 Ключ Service Account / rclone.conf хранится <b>только в GitHub Secrets</b>{' '}
+                  раннера (<code className="font-mono">RCLONE_CONFIG</code>). В браузер он не
+                  попадает. Загрузка файлов идёт через ваш OAuth-вход Google.
                 </div>
               </div>
             </div>
 
-            {/* Секция 3: Telegram-уведомления о завершении или сбое рендера */}
             <div className="bg-[#0b0f17] p-4 rounded-xl border border-sky-500/30 space-y-3">
               <div className="text-xs font-bold text-sky-400 uppercase flex items-center gap-1.5">
-                <Send className="w-4 h-4" /> 3. Уведомления в Telegram (Telegram Bot API)
+                <Send className="w-4 h-4" /> 3. Уведомления в Telegram (Bot API)
               </div>
               <p className="text-[11px] text-slate-400">
-                Мгновенная отправка сообщения в ваш Telegram при успешной выгрузке 4K-файла в Google Drive или при сбое облачной сборки.
+                Мгновенное сообщение при успешной выгрузке мастера или при сбое сборки. Значения
+                хранятся в sessionStorage; для раннера продублируйте их в GitHub Secrets.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">
-                    Telegram Bot Token:
-                  </label>
+                  <label className="text-xs text-slate-400 block mb-1">Telegram Bot Token:</label>
                   <input
                     type="password"
                     value={modalTelegramBotToken}
                     onChange={e => setModalTelegramBotToken(e.target.value)}
-                    placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    placeholder="123456789:ABCdef..."
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-sky-400 font-mono"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">
-                    Telegram Chat ID:
-                  </label>
+                  <label className="text-xs text-slate-400 block mb-1">Telegram Chat ID:</label>
                   <input
                     type="text"
                     value={modalTelegramChatId}
@@ -7940,27 +7071,27 @@ export default function App() {
               </div>
             </div>
 
-            {/* Переключатель предпросмотра YAML кода */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <button
+                  type="button"
                   onClick={() => setShowYamlPreview(prev => !prev)}
                   className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer"
                 >
                   {showYamlPreview
-                    ? '▼ Скрыть шаблон .github/workflows/render_loop.yml'
-                    : '▶ Показать код .github/workflows/render_loop.yml (FFmpeg + Rclone Google Drive)'}
+                    ? '▼ Скрыть примечание о workflow раннера'
+                    : '▶ Где лежит актуальный .github/workflows/render_loop.yml'}
                 </button>
                 <button
+                  type="button"
                   onClick={copyWorkflowTemplate}
                   className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Copy className="w-3.5 h-3.5" /> Копировать YAML
+                  <ExternalLink className="w-3.5 h-3.5" /> Открыть актуальный YAML
                 </button>
               </div>
-
               {showYamlPreview && (
-                <pre className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-56 custom-scroll">
+                <pre className="bg-[#0b0f17] border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-56 custom-scroll whitespace-pre-wrap">
                   {WORKFLOW_LOOP_YAML}
                 </pre>
               )}
@@ -7968,23 +7099,24 @@ export default function App() {
 
             <div className="pt-3 border-t border-slate-800 flex flex-wrap gap-3">
               <button
+                type="button"
                 onClick={saveGitHubConfig}
                 className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition cursor-pointer"
               >
                 Сохранить конфигурацию
               </button>
               <button
+                type="button"
                 onClick={copyWorkflowTemplate}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
               >
-                <Copy className="w-4 h-4" /> Код workflow YAML
+                <ExternalLink className="w-4 h-4" /> Workflow раннера
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ДИНАМИЧЕСКАЯ КАПСУЛА СТАТУСОВ (DYNAMIC ISLAND STATUS PILL — не перекрывает шапку на мобильных и десктопе) */}
       <div
         aria-live="polite"
         className="fixed bottom-4 left-1/2 -translate-x-1/2 md:bottom-auto md:top-3.5 md:right-4 md:left-auto md:translate-x-0 z-[60] pointer-events-none flex flex-col items-center md:items-end gap-1.5 px-3 max-w-[calc(100vw-24px)] md:max-w-md"
@@ -8004,8 +7136,8 @@ export default function App() {
                 t.type === 'error'
                   ? 'bg-[#1a0b12]/90 border-rose-400/50 text-rose-100'
                   : t.type === 'success'
-                  ? 'bg-[#091512]/90 border-emerald-400/50 text-emerald-100'
-                  : 'bg-[#090D16]/90 border-amber-400/45 text-slate-100'
+                    ? 'bg-[#091512]/90 border-emerald-400/50 text-emerald-100'
+                    : 'bg-[#090D16]/90 border-amber-400/45 text-slate-100'
               }`}
             >
               {t.type === 'success' ? (
@@ -8034,10 +7166,9 @@ export default function App() {
       </div>
 
       <footer className="relative z-10 border-t border-white/[0.08] bg-[#080c14]/90 backdrop-blur-md py-3.5 px-6 text-center text-xs text-white/55 font-mono">
-        AetherCombine Studio • Cloud 4K Production Pipeline (GitHub Actions FFmpeg + Rclone Google Drive)
+        AetherCombine Studio • Cloud 4K Production Pipeline (GitHub Actions FFmpeg + Rclone Google
+        Drive)
       </footer>
     </div>
   );
 }
-
-
