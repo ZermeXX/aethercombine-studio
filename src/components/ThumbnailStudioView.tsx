@@ -759,6 +759,13 @@ const DEFAULT_HOOK_LAYOUT: HookTextLayout = {
 };
 
 export type ThumbnailSlotId = 'A' | 'B' | 'C';
+export type BadgePosition = 'left' | 'right';
+
+const DEFAULT_BADGE_POSITIONS: [BadgePosition, BadgePosition, BadgePosition] = [
+  'left',
+  'left',
+  'left'
+];
 
 export interface ThumbnailSlotConfig {
   topText: string;
@@ -771,6 +778,7 @@ export interface ThumbnailSlotConfig {
   splashShadowPct: number;
   badgesEnabled: boolean;
   badgeTexts: [string, string, string];
+  badgePositions: [BadgePosition, BadgePosition, BadgePosition];
   badgeScalePct: number;
   hookLayout: HookTextLayout;
   bgAdjust: SlotBgAdjustConfig;
@@ -787,6 +795,7 @@ interface PersistedSlotState {
   splashShadowPct?: number;
   badgesEnabled?: boolean;
   badgeTexts?: string[];
+  badgePositions?: BadgePosition[];
   badgeScalePct?: number;
   hookLayout?: Partial<HookTextLayout>;
   bgAdjust?: Partial<SlotBgAdjustConfig>;
@@ -845,6 +854,7 @@ const createDefaultSlotConfig = (
     splashShadowPct: 100,
     badgesEnabled: true,
     badgeTexts: [...DEFAULT_BADGE_CAPSULES],
+    badgePositions: [...DEFAULT_BADGE_POSITIONS],
     badgeScalePct: 100,
     hookLayout: { ...DEFAULT_HOOK_LAYOUT },
     bgAdjust: { ...DEFAULT_BG_ADJUST }
@@ -876,6 +886,13 @@ const hydrateSlotConfig = (
     typeof raw.badgeTexts?.[0] === 'string' ? raw.badgeTexts[0] : base.badgeTexts[0],
     typeof raw.badgeTexts?.[1] === 'string' ? raw.badgeTexts[1] : base.badgeTexts[1],
     typeof raw.badgeTexts?.[2] === 'string' ? raw.badgeTexts[2] : base.badgeTexts[2]
+  ];
+
+  const normalizeBadgePos = (pos: unknown): BadgePosition => (pos === 'right' ? 'right' : 'left');
+  const normalizedBadgePositions: [BadgePosition, BadgePosition, BadgePosition] = [
+    normalizeBadgePos(raw.badgePositions?.[0]),
+    normalizeBadgePos(raw.badgePositions?.[1]),
+    normalizeBadgePos(raw.badgePositions?.[2])
   ];
 
   const resolvedShape: SplashShapeId =
@@ -916,6 +933,7 @@ const hydrateSlotConfig = (
         : base.splashShadowPct,
     badgesEnabled: typeof raw.badgesEnabled === 'boolean' ? raw.badgesEnabled : base.badgesEnabled,
     badgeTexts: normalizedBadges,
+    badgePositions: normalizedBadgePositions,
     badgeScalePct:
       typeof raw.badgeScalePct === 'number'
         ? Math.max(60, Math.min(150, raw.badgeScalePct))
@@ -1268,6 +1286,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const clonedCfg: ThumbnailSlotConfig = {
       ...sourceCfg,
       badgeTexts: [...sourceCfg.badgeTexts] as [string, string, string],
+      badgePositions: [
+        ...(sourceCfg.badgePositions || DEFAULT_BADGE_POSITIONS)
+      ] as [BadgePosition, BadgePosition, BadgePosition],
       hookLayout: { ...sourceCfg.hookLayout },
       bgAdjust: { ...sourceCfg.bgAdjust }
     };
@@ -1481,12 +1502,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillRect(0, 0, w, h);
       }
 
-      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (Правый верхний угол)
-      const activeBadges = cfg.badgesEnabled
-        ? cfg.badgeTexts.map(t => (t || '').trim().toUpperCase()).filter(Boolean)
+      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (Слева / Справа — отдельно для каждого активного бейджа)
+      const activeBadgeItems = cfg.badgesEnabled
+        ? cfg.badgeTexts
+            .map((t, idx) => ({
+              label: (t || '').trim().toUpperCase(),
+              position: (cfg.badgePositions?.[idx] === 'right' ? 'right' : 'left') as BadgePosition
+            }))
+            .filter(item => item.label.length > 0)
         : [];
 
-      if (activeBadges.length > 0) {
+      if (activeBadgeItems.length > 0) {
         const badgeUserScale = Math.max(0.6, Math.min(1.5, (cfg.badgeScalePct ?? 100) / 100));
         const bScale = scale * badgeUserScale;
         const badgeFontPx = 14 * bScale;
@@ -1522,16 +1548,32 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
         ctx.font = `800 ${Math.max(1, Math.round(badgeFontPx))}px ${badgeFontFamily}`;
 
+        const paddingX = 32 * scale;
         const horizontalPad = 36 * bScale;
         const badgeGap = 12 * bScale;
         const badgeH = 42 * bScale;
-        const rawWidths = activeBadges.map(lbl =>
-          Math.max(106 * bScale, measureTrackedWidth(lbl, baseTrackingPx) + horizontalPad)
-        );
-        const totalRawW =
-          rawWidths.reduce((sum, bw) => sum + bw, 0) +
-          badgeGap * Math.max(0, activeBadges.length - 1);
-        const maxAvailableW = w - 64 * scale;
+
+        const measuredItems = activeBadgeItems.map(item => ({
+          ...item,
+          rawW: Math.max(
+            106 * bScale,
+            measureTrackedWidth(item.label, baseTrackingPx) + horizontalPad
+          )
+        }));
+
+        const leftItems = measuredItems.filter(item => item.position === 'left');
+        const rightItems = measuredItems.filter(item => item.position === 'right');
+
+        const leftRawW =
+          leftItems.reduce((sum, item) => sum + item.rawW, 0) +
+          badgeGap * Math.max(0, leftItems.length - 1);
+        const rightRawW =
+          rightItems.reduce((sum, item) => sum + item.rawW, 0) +
+          badgeGap * Math.max(0, rightItems.length - 1);
+        const interGroupGap = leftItems.length > 0 && rightItems.length > 0 ? badgeGap : 0;
+        const totalRawW = leftRawW + rightRawW + interGroupGap;
+
+        const maxAvailableW = w - paddingX * 2;
         const fitFactor = totalRawW > maxAvailableW ? maxAvailableW / totalRawW : 1;
 
         if (fitFactor < 1) {
@@ -1541,15 +1583,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const effectiveH = badgeH * fitFactor;
         const effectiveGap = badgeGap * fitFactor;
         const effectiveTracking = baseTrackingPx * fitFactor;
-        const widths = rawWidths.map(bw => bw * fitFactor);
         const topY = 28 * scale;
 
-        let cursorX = w - 32 * scale;
-        for (let i = activeBadges.length - 1; i >= 0; i--) {
-          const bw = widths[i];
-          const bx = cursorX - bw;
-          const label = activeBadges[i];
-
+        const drawBadgeCapsule = (label: string, bx: number, bw: number) => {
           ctx.save();
           ctx.fillStyle = 'rgba(10, 14, 24, 0.85)';
           ctx.strokeStyle = '#F59E0B';
@@ -1562,8 +1598,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.fillStyle = '#FACC15';
           drawTrackedCenteredText(label, bx + bw / 2, topY + effectiveH * 0.52, effectiveTracking);
           ctx.restore();
+        };
 
-          cursorX = bx - effectiveGap;
+        let leftCursorX = paddingX;
+        for (let i = 0; i < leftItems.length; i++) {
+          const item = leftItems[i];
+          const bw = item.rawW * fitFactor;
+          drawBadgeCapsule(item.label, leftCursorX, bw);
+          leftCursorX += bw + effectiveGap;
+        }
+
+        let rightEdgeX = w - paddingX;
+        for (let i = rightItems.length - 1; i >= 0; i--) {
+          const item = rightItems[i];
+          const bw = item.rawW * fitFactor;
+          const bx = rightEdgeX - bw;
+          drawBadgeCapsule(item.label, bx, bw);
+          rightEdgeX = bx - effectiveGap;
         }
       }
 
@@ -3662,7 +3713,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (ПРАВЫЙ ВЕРХНИЙ УГОЛ) */}
+            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (СЛЕВА / СПРАВА) */}
             <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
@@ -3689,28 +3740,82 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
               {activeConfig.badgesEnabled && (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[0, 1, 2].map(badgeIdx => (
-                      <input
-                        key={`badge-input-${activeSlot}-${badgeIdx}`}
-                        type="text"
-                        value={activeConfig.badgeTexts[badgeIdx]}
-                        onChange={e => {
-                          const val = e.target.value.toUpperCase();
-                          updateSlotConfig(activeSlot, prev => {
-                            const nextTexts: [string, string, string] = [...prev.badgeTexts] as [
-                              string,
-                              string,
-                              string
-                            ];
-                            nextTexts[badgeIdx] = val;
-                            return { ...prev, badgeTexts: nextTexts };
-                          });
-                        }}
-                        placeholder={`Бейдж #${badgeIdx + 1}`}
-                        className="w-full min-h-[36px] bg-[#0b0f19] border border-amber-400/35 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
-                      />
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
+                    {[0, 1, 2].map(badgeIdx => {
+                      const badgeText = activeConfig.badgeTexts[badgeIdx];
+                      const isBadgeActive = badgeText.trim().length > 0;
+                      const badgePos: BadgePosition =
+                        activeConfig.badgePositions?.[badgeIdx] === 'right' ? 'right' : 'left';
+                      return (
+                        <div
+                          key={`badge-input-${activeSlot}-${badgeIdx}`}
+                          className="space-y-1.5"
+                        >
+                          <input
+                            type="text"
+                            value={badgeText}
+                            onChange={e => {
+                              const val = e.target.value.toUpperCase();
+                              updateSlotConfig(activeSlot, prev => {
+                                const nextTexts: [string, string, string] = [...prev.badgeTexts] as [
+                                  string,
+                                  string,
+                                  string
+                                ];
+                                nextTexts[badgeIdx] = val;
+                                return { ...prev, badgeTexts: nextTexts };
+                              });
+                            }}
+                            placeholder={`Бейдж #${badgeIdx + 1}`}
+                            className="w-full min-h-[36px] bg-[#0b0f19] border border-amber-400/35 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
+                          />
+
+                          {isBadgeActive && (
+                            <div
+                              role="group"
+                              aria-label={`Позиция бейджа #${badgeIdx + 1}`}
+                              className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#090D16] border border-white/[0.08]"
+                            >
+                              {(
+                                [
+                                  { value: 'left', label: 'Слева' },
+                                  { value: 'right', label: 'Справа' }
+                                ] as const
+                              ).map(opt => {
+                                const isSelected = badgePos === opt.value;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    aria-pressed={isSelected}
+                                    onClick={() =>
+                                      updateSlotConfig(activeSlot, prev => {
+                                        const nextPositions: [
+                                          BadgePosition,
+                                          BadgePosition,
+                                          BadgePosition
+                                        ] = [
+                                          ...(prev.badgePositions || DEFAULT_BADGE_POSITIONS)
+                                        ] as [BadgePosition, BadgePosition, BadgePosition];
+                                        nextPositions[badgeIdx] = opt.value;
+                                        return { ...prev, badgePositions: nextPositions };
+                                      })
+                                    }
+                                    className={`min-h-[26px] px-1.5 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                      isSelected
+                                        ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
+                                        : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className="space-y-1 pt-0.5">
