@@ -1,43 +1,14 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
+ @license
+ SPDX-License-Identifier: Apache-2.0
+*/
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
-  Sparkles,
-  Download,
-  RefreshCw,
-  Camera,
-  Eye,
-  Copy,
-  Check,
-  Columns,
-  Smartphone,
-  Film,
-  Contrast,
-  Layers,
-  Wand2,
-  ZoomIn,
-  X,
-  Grid,
-  CheckCircle2,
-  AlertTriangle,
-  Link2,
-  Upload,
-  Zap,
-  KeyRound,
-  SlidersHorizontal,
-  Type,
-  RotateCcw,
-  Move,
-  ChevronDown,
-  Image as ImageIcon,
-  ArrowRight,
-  Sun,
-  AlignCenterHorizontal,
-  Tag
+  Sparkles, Download, RefreshCw, Camera, Eye, Copy, Check, Columns, Smartphone,
+  Film, Contrast, Layers, Wand2, ZoomIn, X, Grid, CheckCircle2, AlertTriangle,
+  Link2, Upload, Zap, KeyRound, SlidersHorizontal, Type, RotateCcw, Move,
+  ChevronDown, Image as ImageIcon, ArrowRight, Sun, AlignCenterHorizontal, Tag
 } from 'lucide-react';
 import {
   CornerPositionPresetId,
@@ -78,13 +49,30 @@ interface ThumbnailStudioViewProps {
 }
 
 const CF_ACCOUNT_ID_STORAGE_KEY = 'aether_cf_account_id';
-const CF_API_TOKEN_STORAGE_KEY = 'aether_cf_api_token';
+const CF_API_TOKEN_SESSION_KEY = 'aether_cf_api_token_session';
+const CF_API_TOKEN_LEGACY_KEY = 'aether_cf_api_token';
 const AI_HORDE_BASE_URL = 'https://aihorde.net/api/v2';
 const AI_HORDE_ANON_KEY = '0000000000';
 
+/** P0: API-токен живёт только в sessionStorage; legacy-запись из localStorage мигрирует и стирается. */
+const readCfToken = (): string => {
+  try {
+    const session = sessionStorage.getItem(CF_API_TOKEN_SESSION_KEY);
+    if (session) return session;
+    const legacy = localStorage.getItem(CF_API_TOKEN_LEGACY_KEY);
+    if (legacy) {
+      sessionStorage.setItem(CF_API_TOKEN_SESSION_KEY, legacy);
+      localStorage.removeItem(CF_API_TOKEN_LEGACY_KEY);
+      return legacy;
+    }
+  } catch {
+    /* storage недоступен — работаем в памяти */
+  }
+  return '';
+};
+
 export class FluxGenerationError extends Error {
   status: number;
-
   constructor(message: string, status: number = 500) {
     super(message);
     this.name = 'FluxGenerationError';
@@ -93,41 +81,30 @@ export class FluxGenerationError extends Error {
 }
 
 /**
- * Загружает изображение через fetch -> blob -> URL.createObjectURL (с автоматическим прокси-fallback),
- * чтобы HTML5 Canvas 4K экспорт (3840x2160) никогда не падал с ошибкой CORS tainted canvas.
+ Загружает изображение через fetch -> blob -> URL.createObjectURL (с прокси-fallback),
+ чтобы Canvas 4K экспорт (3840x2160) не падал с CORS tainted canvas.
  */
 async function fetchImageAsBlobObjectUrl(
   rawUrl: string,
   cropTo16x9: boolean = false
 ): Promise<string> {
   let blob: Blob;
-
   if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {
     const res = await fetch(rawUrl);
     blob = await res.blob();
   } else {
     try {
       const directRes = await fetch(rawUrl, { mode: 'cors' });
-      if (!directRes.ok) {
-        throw new Error(`HTTP ${directRes.status}`);
-      }
+      if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
       blob = await directRes.blob();
     } catch {
-      const proxyRes = await fetch(
-        `/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
-      );
-      if (!proxyRes.ok) {
-        throw new Error(`Не удалось загрузить изображение (${proxyRes.status})`);
-      }
+      const proxyRes = await fetch(`/api/proxy-image?url=${encodeURIComponent(rawUrl)}`);
+      if (!proxyRes.ok) throw new Error(`Не удалось загрузить изображение (${proxyRes.status})`);
       blob = await proxyRes.blob();
     }
   }
-
   const rawObjectUrl = URL.createObjectURL(blob);
-  if (!cropTo16x9) {
-    return rawObjectUrl;
-  }
-
+  if (!cropTo16x9) return rawObjectUrl;
   try {
     const img = new Image();
     await new Promise<void>((resolve, reject) => {
@@ -135,7 +112,6 @@ async function fetchImageAsBlobObjectUrl(
       img.onerror = () => reject(new Error('Ошибка декодирования изображения'));
       img.src = rawObjectUrl;
     });
-
     const targetW = 1344;
     const targetH = 768;
     const canvas = document.createElement('canvas');
@@ -143,19 +119,11 @@ async function fetchImageAsBlobObjectUrl(
     canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return rawObjectUrl;
-
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     drawCoverImageToCanvas(
-      ctx,
-      img,
-      img.naturalWidth || targetW,
-      img.naturalHeight || targetH,
-      targetW,
-      targetH,
-      1
+      ctx, img, img.naturalWidth || targetW, img.naturalHeight || targetH, targetW, targetH, 1
     );
-
     const croppedBlob = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(b => resolve(b), 'image/jpeg', 0.94)
     );
@@ -170,10 +138,8 @@ async function fetchImageAsBlobObjectUrl(
 }
 
 /**
- * Генерация 4 чистых 16:9 обложек без водяных знаков через бесплатный AI Horde API (Flux.1-Schnell)
- * 1) POST /api/v2/generate/async (apikey: 0000000000, Flux.1-Schnell, n: 4, 1344x768; авто-адаптация 704x384 при KudosUpfront)
- * 2) Polling GET /api/v2/generate/check/{id} каждые 3 секунды до done === true
- * 3) GET /api/v2/generate/status/{id} -> generations[].img -> fetch -> blob -> URL.createObjectURL
+ AI Horde Flux.1-Schnell: POST /generate/async -> polling /generate/check -> /generate/status.
+ Авто-даунгрейд 1344x768 -> 704x384 при KudosUpfront.
  */
 export async function generateViaAiHordeFlux(
   promptText: string,
@@ -192,14 +158,7 @@ export async function generateViaAiHordeFlux(
       },
       body: JSON.stringify({
         prompt: promptText,
-        params: {
-          sampler_name: 'k_euler',
-          cfg_scale: 1,
-          steps: 4,
-          width,
-          height,
-          n: 4
-        },
+        params: { sampler_name: 'k_euler', cfg_scale: 1, steps: 4, width, height, n: 4 },
         models: ['Flux.1-Schnell', 'Flux.1-Schnell fp8 (Compact)'],
         nsfw: false,
         censor_nsfw: true,
@@ -207,7 +166,6 @@ export async function generateViaAiHordeFlux(
       }),
       signal: options?.signal
     });
-
     const data = (await res.json().catch(() => ({}))) as {
       id?: string;
       message?: string;
@@ -222,7 +180,9 @@ export async function generateViaAiHordeFlux(
 
   if (
     (!submitRes.ok || !submitData.id) &&
-    (submitRes.status === 403 || submitData.rc === 'KudosUpfront' || /kudos/i.test(submitData.message || ''))
+    (submitRes.status === 403 ||
+      submitData.rc === 'KudosUpfront' ||
+      /kudos/i.test(submitData.message || ''))
   ) {
     requestedWidth = 704;
     requestedHeight = 384;
@@ -250,7 +210,6 @@ export async function generateViaAiHordeFlux(
 
   const maxWaitMs = 5 * 60 * 1000;
   const startedAt = Date.now();
-
   while (true) {
     if (options?.signal?.aborted) {
       throw new FluxGenerationError('Генерация отменена пользователем', 499);
@@ -261,104 +220,81 @@ export async function generateViaAiHordeFlux(
         504
       );
     }
-
     await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        options?.signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, 3000);
       const onAbort = () => {
         window.clearTimeout(timer);
         reject(new FluxGenerationError('Генерация отменена пользователем', 499));
       };
+      const timer = window.setTimeout(() => {
+        options?.signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, 3000);
       options?.signal?.addEventListener('abort', onAbort, { once: true });
     });
 
-    const checkRes = await fetch(`${AI_HORDE_BASE_URL}/generate/check/${encodeURIComponent(jobId)}`, {
-      headers: {
-        'Client-Agent': 'AetherCombine:1.0:studio'
-      },
-      signal: options?.signal
-    });
-
+    const checkRes = await fetch(
+      `${AI_HORDE_BASE_URL}/generate/check/${encodeURIComponent(jobId)}`,
+      { headers: { 'Client-Agent': 'AetherCombine:1.0:studio' }, signal: options?.signal }
+    );
     if (!checkRes.ok) {
-      throw new FluxGenerationError(`Ошибка проверки статуса AI Horde (${checkRes.status})`, checkRes.status);
+      throw new FluxGenerationError(
+        `Ошибка проверки статуса AI Horde (${checkRes.status})`,
+        checkRes.status
+      );
     }
-
     const checkData = (await checkRes.json().catch(() => ({}))) as {
       done?: boolean;
       faulted?: boolean;
       is_possible?: boolean;
       finished?: number;
-      processing?: number;
-      waiting?: number;
       queue_position?: number;
       wait_time?: number;
     };
-
     if (checkData.faulted) {
       throw new FluxGenerationError('AI Horde воркер вернул faulted при генерации.', 502);
     }
-
     if (checkData.is_possible === false) {
       throw new FluxGenerationError('Сейчас нет свободных воркеров Flux.1-Schnell на AI Horde.', 503);
     }
-
-    const qPos = typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
+    const qPos =
+      typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
     const eta = typeof checkData.wait_time === 'number' ? `~${checkData.wait_time}с` : '...';
     const doneCnt = checkData.finished ?? 0;
     options?.onProgress?.(
       `AI Horde (Flux.1-Schnell) • Очередь: ${qPos} • Осталось: ${eta} • Готово ${doneCnt}/4`,
       `Очередь ${qPos} • ${eta} (${doneCnt}/4)`
     );
-
-    if (checkData.done === true) {
-      break;
-    }
+    if (checkData.done === true) break;
   }
 
-  options?.onProgress?.(
-    'Забираем 4 готовых кадра (1344×768) из AI Horde...',
-    'Загрузка 4 кадров...'
+  options?.onProgress?.('Забираем 4 готовых кадра (1344×768) из AI Horde...', 'Загрузка 4 кадров...');
+  const statusRes = await fetch(
+    `${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`,
+    { headers: { 'Client-Agent': 'AetherCombine:1.0:studio' }, signal: options?.signal }
   );
-
-  const statusRes = await fetch(`${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`, {
-    headers: {
-      'Client-Agent': 'AetherCombine:1.0:studio'
-    },
-    signal: options?.signal
-  });
-
   if (!statusRes.ok) {
-    throw new FluxGenerationError(`Ошибка получения результатов AI Horde (${statusRes.status})`, statusRes.status);
+    throw new FluxGenerationError(
+      `Ошибка получения результатов AI Horde (${statusRes.status})`,
+      statusRes.status
+    );
   }
-
   const statusData = (await statusRes.json().catch(() => ({}))) as {
     generations?: Array<{ img?: string; model?: string }>;
   };
-
   const rawUrls = (statusData.generations || [])
     .map(g => g.img)
     .filter((u): u is string => Boolean(u && u.trim()));
-
   if (!rawUrls.length) {
     throw new FluxGenerationError('AI Horde завершился без изображений.', 502);
   }
-
   const needsUpscaleTo1344 = requestedWidth < 1344;
   const blobUrls = await Promise.all(
     rawUrls.slice(0, 4).map(url => fetchImageAsBlobObjectUrl(url, needsUpscaleTo1344))
   );
-
-  return {
-    images: blobUrls,
-    modelUsed: 'Flux.1 AI Horde (2×2) • 16:9'
-  };
+  return { images: blobUrls, modelUsed: 'Flux.1 AI Horde (2×2) • 16:9' };
 }
 
-/**
- * Генерация 4 обложек без очереди через Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)
- */
+/** Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell) через серверный прокси. */
 export async function generateViaCloudflareFlux(
   promptText: string,
   accountId: string,
@@ -367,18 +303,10 @@ export async function generateViaCloudflareFlux(
 ): Promise<{ images: string[]; modelUsed: string }> {
   const response = await fetch('/api/cloudflare/flux', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      accountId,
-      apiToken,
-      prompt: promptText,
-      count: 4
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId, apiToken, prompt: promptText, count: 4 }),
     signal
   });
-
   const result = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
     statusCode?: number;
@@ -386,27 +314,22 @@ export async function generateViaCloudflareFlux(
     images?: string[];
     error?: string;
   };
-
   if (!response.ok || !result.ok || !Array.isArray(result.images) || !result.images.length) {
     throw new FluxGenerationError(
       result.error || `Ошибка Cloudflare Workers AI (${response.status})`,
       result.statusCode || response.status
     );
   }
-
   const blobUrls = await Promise.all(
     result.images.slice(0, 4).map(imgUrl => fetchImageAsBlobObjectUrl(imgUrl, true))
   );
-
   return {
     images: blobUrls,
     modelUsed: 'Cloudflare Workers AI • @cf/black-forest-labs/flux-1-schnell'
   };
 }
 
-/**
- * 2. Императивная функция рендеринга сетки 2x2 и логики выбора кадра (доступна для вызова с DOM-контейнером)
- */
+/** Императивный рендер сетки 2x2 в произвольный DOM-контейнер. */
 export function renderThumbnailsGrid(
   imagesArray: string[],
   containerElement: HTMLElement | null,
@@ -414,50 +337,37 @@ export function renderThumbnailsGrid(
 ): void {
   if (!containerElement) return;
   containerElement.innerHTML = '';
-
   const grid = document.createElement('div');
   grid.className = 'grid grid-cols-2 gap-3 w-full my-4';
-
   imagesArray.forEach((imgSrc, index) => {
     const card = document.createElement('div');
     card.className =
       'relative group rounded-xl overflow-hidden border-2 border-slate-700/60 bg-slate-900 cursor-pointer transition-all duration-200 hover:border-cyan-400/80 hover:scale-[1.02]';
     card.dataset.index = String(index);
-
     card.innerHTML = `
       <img src="${imgSrc}" alt="Вариант превью ${index + 1}" class="w-full aspect-video object-cover" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2">
         <span class="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded">Вариант #${index + 1}</span>
         <a href="${imgSrc}" download="thumbnail_${index + 1}.jpg" class="text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-2 py-1 rounded shadow">Скачать</a>
       </div>
-      <div class="selection-indicator hidden absolute top-2 right-2 bg-cyan-500 text-black text-xs font-bold rounded-full p-1 shadow-lg">
-        ✓
-      </div>
+      <div class="selection-indicator hidden absolute top-2 right-2 bg-cyan-500 text-black text-xs font-bold rounded-full p-1 shadow-lg">✓</div>
     `;
-
     card.addEventListener('click', e => {
       const target = e.target as HTMLElement | null;
       if (target && target.tagName.toLowerCase() === 'a') return;
-
       grid.querySelectorAll('.grid > div').forEach(c => {
         c.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400/50');
         c.classList.add('border-slate-700/60');
         c.querySelector('.selection-indicator')?.classList.add('hidden');
       });
-
       card.classList.remove('border-slate-700/60');
       card.classList.add('border-cyan-400', 'ring-2', 'ring-cyan-400/50');
       card.querySelector('.selection-indicator')?.classList.remove('hidden');
-
       window.selectedMasterThumbnail = imgSrc;
-      if (onSelectCallback) {
-        onSelectCallback(imgSrc, index);
-      }
+      if (onSelectCallback) onSelectCallback(imgSrc, index);
     });
-
     grid.appendChild(card);
   });
-
   containerElement.appendChild(grid);
 }
 
@@ -489,7 +399,32 @@ function drawCoverImageToCanvas(
   ctx.drawImage(source, x, y, drawW, drawH);
 }
 
-// Генерация 4 кинематографических 16:9 фонов (1920x1080) средствами HTML5 Canvas
+/** roundRect с фолбэком для Safari < 16 / старых WebView. */
+function pathRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  const native = (ctx as CanvasRenderingContext2D & { roundRect?: (...a: number[]) => void })
+    .roundRect;
+  if (typeof native === 'function') {
+    native.call(ctx, x, y, w, h, rr);
+    return;
+  }
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+/** 4 кинематографических 16:9 фона (1920x1080) средствами Canvas. */
 function renderProcedural16x9ArtworkDataUrl(
   stylePreset: string,
   promptText: string,
@@ -500,14 +435,12 @@ function renderProcedural16x9ArtworkDataUrl(
   c.height = 1080;
   const ctx = c.getContext('2d');
   if (!ctx) return '';
-
   const seed = Array.from(promptText || 'aether').reduce(
     (acc, ch, i) => acc + ch.charCodeAt(0) * (i + 3),
     17
   );
   const themeIdx = variantIndex % 4;
 
-  // Хелпер горного хребта на горизонте
   const drawMountainLayer = (
     baseY: number,
     amplitude: number,
@@ -531,25 +464,20 @@ function renderProcedural16x9ArtworkDataUrl(
   };
 
   if (themeIdx === 0) {
-    // 1. Глубокая ночная метель с частицами
     const sky = ctx.createLinearGradient(0, 0, c.width * 0.3, c.height);
     sky.addColorStop(0, '#020612');
     sky.addColorStop(0.5, '#0b1830');
     sky.addColorStop(1, '#040a16');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, c.width, c.height);
-
     const moonGlow = ctx.createRadialGradient(1320, 310, 20, 1320, 310, 720);
     moonGlow.addColorStop(0, 'rgba(56, 189, 248, 0.36)');
     moonGlow.addColorStop(0.45, 'rgba(14, 165, 233, 0.14)');
     moonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = moonGlow;
     ctx.fillRect(0, 0, c.width, c.height);
-
     drawMountainLayer(890, 210, 0.0032, 0.8, '#081326');
     drawMountainLayer(970, 150, 0.0046, 2.4, '#050c1a');
-
-    // Полосы ветра и метели
     ctx.save();
     ctx.strokeStyle = 'rgba(186, 230, 253, 0.16)';
     for (let i = 0; i < 160; i++) {
@@ -562,7 +490,6 @@ function renderProcedural16x9ArtworkDataUrl(
       ctx.lineTo(sx + len * 1.4, sy + len * 0.45);
       ctx.stroke();
     }
-    // Боке-снежинки
     for (let i = 0; i < 110; i++) {
       const px = (i * 173 + seed * 7) % c.width;
       const py = (i * 131 + seed * 5) % c.height;
@@ -574,14 +501,12 @@ function renderProcedural16x9ArtworkDataUrl(
     }
     ctx.restore();
   } else if (themeIdx === 1) {
-    // 2. Тёплое янтарное свечение очага
     const bg = ctx.createLinearGradient(0, 0, c.width, c.height);
     bg.addColorStop(0, '#0a0504');
     bg.addColorStop(0.5, '#1c0d07');
     bg.addColorStop(1, '#080403');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, c.width, c.height);
-
     const hearthX = c.width * 0.65;
     const hearthY = c.height * 0.62;
     const core = ctx.createRadialGradient(hearthX, hearthY, 30, hearthX, hearthY, 820);
@@ -591,47 +516,35 @@ function renderProcedural16x9ArtworkDataUrl(
     core.addColorStop(1, 'transparent');
     ctx.fillStyle = core;
     ctx.fillRect(0, 0, c.width, c.height);
-
-    // Холодный контрастный отблеск слева (окно/метель снаружи)
     const rim = ctx.createRadialGradient(180, 260, 10, 180, 260, 560);
     rim.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
     rim.addColorStop(1, 'transparent');
     ctx.fillStyle = rim;
     ctx.fillRect(0, 0, c.width, c.height);
-
-    // Силуэт уступа/оконной рамы
     ctx.fillStyle = 'rgba(8, 4, 3, 0.78)';
     ctx.fillRect(0, 880, c.width, 200);
-
-    // Восходящие искры очага
     for (let i = 0; i < 140; i++) {
       const px = hearthX + Math.sin(i * 1.9 + seed) * (120 + (i % 7) * 85);
       const py = c.height - ((i * 89 + seed * 3) % 920);
       const r = 1.5 + (i % 5);
-      ctx.fillStyle =
-        i % 3 === 0 ? 'rgba(253, 224, 71, 0.75)' : 'rgba(251, 146, 60, 0.52)';
+      ctx.fillStyle = i % 3 === 0 ? 'rgba(253, 224, 71, 0.75)' : 'rgba(251, 146, 60, 0.52)';
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
     }
   } else if (themeIdx === 2) {
-    // 3. Ледяное северное сияние
     const polar = ctx.createLinearGradient(0, 0, 0, c.height);
     polar.addColorStop(0, '#020813');
     polar.addColorStop(0.55, '#071d2c');
     polar.addColorStop(1, '#030b14');
     ctx.fillStyle = polar;
     ctx.fillRect(0, 0, c.width, c.height);
-
-    // Звёздное небо
     for (let i = 0; i < 160; i++) {
       const sx = (i * 229 + seed * 11) % c.width;
       const sy = (i * 71 + seed * 7) % (c.height * 0.65);
       ctx.fillStyle = `rgba(226, 232, 240, ${0.25 + (i % 4) * 0.18})`;
       ctx.fillRect(sx, sy, (i % 3) + 1, (i % 3) + 1);
     }
-
-    // Волны северного сияния
     const auroraBands = [
       { y: 270, c1: 'rgba(16, 185, 129, 0.48)', c2: 'rgba(6, 182, 212, 0.08)', amp: 95 },
       { y: 360, c1: 'rgba(34, 211, 238, 0.42)', c2: 'rgba(139, 92, 246, 0.08)', amp: 120 },
@@ -656,11 +569,9 @@ function renderProcedural16x9ArtworkDataUrl(
       ctx.closePath();
       ctx.fill();
     });
-
     drawMountainLayer(930, 175, 0.0038, 1.2, '#05101c');
     drawMountainLayer(1015, 95, 0.0052, 3.1, '#030811');
   } else {
-    // 4. Холодный рассветный туман
     const dawn = ctx.createLinearGradient(0, 0, c.width * 0.4, c.height);
     dawn.addColorStop(0, '#070d19');
     dawn.addColorStop(0.45, '#16283f');
@@ -668,17 +579,13 @@ function renderProcedural16x9ArtworkDataUrl(
     dawn.addColorStop(1, '#09111d');
     ctx.fillStyle = dawn;
     ctx.fillRect(0, 0, c.width, c.height);
-
-    // Рассветный холодный луч света
     const sunGlow = ctx.createRadialGradient(1380, 420, 30, 1380, 420, 920);
     sunGlow.addColorStop(0, 'rgba(186, 230, 253, 0.42)');
     sunGlow.addColorStop(0.35, 'rgba(148, 163, 184, 0.18)');
     sunGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = sunGlow;
     ctx.fillRect(0, 0, c.width, c.height);
-
     drawMountainLayer(810, 190, 0.0029, 0.4, '#132238');
-    // Слои стелющегося утреннего тумана
     for (let m = 0; m < 4; m++) {
       const fogY = 660 + m * 95;
       const fog = ctx.createLinearGradient(0, fogY - 90, 0, fogY + 120);
@@ -691,32 +598,32 @@ function renderProcedural16x9ArtworkDataUrl(
     drawMountainLayer(970, 135, 0.0044, 2.2, '#08101c');
   }
 
-  // Стилевой оттенок под пресет проекта
   if (stylePreset === 'truecrime_contrast') {
-    const crimeGlow = ctx.createRadialGradient(c.width * 0.72, c.height * 0.35, 40, c.width * 0.72, c.height * 0.35, 760);
+    const crimeGlow = ctx.createRadialGradient(
+      c.width * 0.72, c.height * 0.35, 40, c.width * 0.72, c.height * 0.35, 760
+    );
     crimeGlow.addColorStop(0, 'rgba(239, 68, 68, 0.18)');
     crimeGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = crimeGlow;
     ctx.fillRect(0, 0, c.width, c.height);
   } else if (stylePreset === 'scifi_neon') {
-    const neonGlow = ctx.createRadialGradient(c.width * 0.65, c.height * 0.5, 40, c.width * 0.65, c.height * 0.5, 700);
+    const neonGlow = ctx.createRadialGradient(
+      c.width * 0.65, c.height * 0.5, 40, c.width * 0.65, c.height * 0.5, 700
+    );
     neonGlow.addColorStop(0, 'rgba(16, 185, 129, 0.18)');
     neonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = neonGlow;
     ctx.fillRect(0, 0, c.width, c.height);
   }
 
-  // Кинематографическая виньетка (улучшает читаемость белого текста слева внизу)
   const vignette = ctx.createLinearGradient(0, 0, c.width * 0.65, c.height);
   vignette.addColorStop(0, 'rgba(2, 6, 14, 0.42)');
   vignette.addColorStop(0.6, 'rgba(2, 6, 14, 0.1)');
   vignette.addColorStop(1, 'rgba(2, 6, 14, 0.75)');
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, c.width, c.height);
-
   return c.toDataURL('image/jpeg', 0.94);
 }
-
 
 export type ThumbnailFontStyleId =
   | 'cinematic_sans'
@@ -763,7 +670,6 @@ export interface BadgePresetConfig {
 }
 
 export const BADGE_PRESETS_CONFIG: BadgePresetConfig[] = [
-  // Группа «База» (8)
   { id: '4k_ultra_hd', text: '4K ULTRA HD', group: 'base' },
   { id: 'documentary', text: 'DOCUMENTARY', group: 'base' },
   { id: 'true_story', text: 'TRUE STORY', group: 'base' },
@@ -772,7 +678,6 @@ export const BADGE_PRESETS_CONFIG: BadgePresetConfig[] = [
   { id: 'history', text: 'HISTORY', group: 'base' },
   { id: 'archive', text: 'ARCHIVE', group: 'base' },
   { id: 'full_story', text: 'FULL STORY', group: 'base' },
-  // Группа «Ambience · 3 часа» (12)
   { id: '3_hours', text: '3 HOURS', group: 'ambience_3h' },
   { id: 'rain_sounds', text: 'RAIN SOUNDS', group: 'ambience_3h' },
   { id: 'thunderstorm', text: 'THUNDERSTORM', group: 'ambience_3h' },
@@ -795,13 +700,9 @@ export interface BadgeItemState {
 const createDefaultPresetBadgesState = (): Record<string, BadgeItemState> => {
   const map: Record<string, BadgeItemState> = {};
   for (const preset of BADGE_PRESETS_CONFIG) {
-    if (preset.id === '3_hours') {
-      map[preset.id] = { enabled: true, position: 'left' };
-    } else if (preset.id === 'no_ads') {
-      map[preset.id] = { enabled: true, position: 'right' };
-    } else {
-      map[preset.id] = { enabled: false, position: 'left' };
-    }
+    if (preset.id === '3_hours') map[preset.id] = { enabled: true, position: 'left' };
+    else if (preset.id === 'no_ads') map[preset.id] = { enabled: true, position: 'right' };
+    else map[preset.id] = { enabled: false, position: 'left' };
   }
   return map;
 };
@@ -844,7 +745,6 @@ interface PersistedSlotState {
   badgeScalePct?: number;
   hookLayout?: Partial<HookTextLayout>;
   bgAdjust?: Partial<SlotBgAdjustConfig>;
-  // Обратная совместимость миграции v1/v2
   title?: string;
   bottomLine?: string;
   splashPreset?: SplashColorPresetId;
@@ -853,16 +753,6 @@ interface PersistedSlotState {
 
 const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v2';
 const THUMB_ABC_SLOTS_LEGACY_KEY = 'aether_thumb_abc_slots_v1';
-
-const VALID_SPLASH_SHAPES = new Set<SplashShapeId>([
-  'monolith_bristle',
-  'jagged_splash',
-  'bottom_slash',
-  'double_strokes',
-  'distressed_grunge',
-  'tapered_speed',
-  'none'
-]);
 
 const clampBgAdjust = (raw?: Partial<SlotBgAdjustConfig> | null): SlotBgAdjustConfig => ({
   contrastPct:
@@ -884,15 +774,13 @@ const createDefaultSlotConfig = (
   projectTitleSeed: string
 ): ThumbnailSlotConfig => {
   const split = splitProjectTitleIntoTwoLines(projectTitleSeed);
-  const defaultSplashColor =
-    slot === 'B' ? '#18181B' : slot === 'C' ? '#D97706' : '#E10613';
-  const defaultSplashShape: SplashShapeId = 'none';
+  const defaultSplashColor = slot === 'B' ? '#18181B' : slot === 'C' ? '#D97706' : '#E10613';
   return {
     topText: split.line1,
     topColor: '#FFFFFF',
     bottomText: split.line2,
     bottomColor: '#FFD600',
-    splashShape: defaultSplashShape,
+    splashShape: 'none',
     splashColor: defaultSplashColor,
     splashPaddingPct: 100,
     splashShadowPct: 100,
@@ -915,25 +803,26 @@ const hydrateSlotConfig = (
   const base = createDefaultSlotConfig(slot, projectTitleSeed);
   if (!raw || typeof raw !== 'object') return base;
 
+  let source = raw;
   const migratedTop =
-    typeof raw.topText === 'string'
-      ? raw.topText
-      : typeof raw.title === 'string'
-        ? raw.title.toUpperCase()
+    typeof source.topText === 'string'
+      ? source.topText
+      : typeof source.title === 'string'
+        ? source.title.toUpperCase()
         : base.topText;
   const migratedBottom =
-    typeof raw.bottomText === 'string'
-      ? raw.bottomText
-      : typeof raw.bottomLine === 'string'
-        ? raw.bottomLine.toUpperCase()
+    typeof source.bottomText === 'string'
+      ? source.bottomText
+      : typeof source.bottomLine === 'string'
+        ? source.bottomLine.toUpperCase()
         : base.bottomText;
 
   const normalizeBadgePos = (pos: unknown): BadgePosition => (pos === 'right' ? 'right' : 'left');
   const hydratedPresetBadges = createDefaultPresetBadgesState();
 
-  if (raw.presetBadges && typeof raw.presetBadges === 'object') {
+  if (source.presetBadges && typeof source.presetBadges === 'object') {
     for (const preset of BADGE_PRESETS_CONFIG) {
-      const savedItem = raw.presetBadges[preset.id];
+      const savedItem = source.presetBadges[preset.id];
       if (savedItem && typeof savedItem === 'object') {
         hydratedPresetBadges[preset.id] = {
           enabled: Boolean(savedItem.enabled),
@@ -941,27 +830,26 @@ const hydrateSlotConfig = (
         };
       }
     }
-  } else if (Array.isArray(raw.badgeTexts)) {
+  } else if (Array.isArray(source.badgeTexts)) {
     for (const preset of BADGE_PRESETS_CONFIG) {
       hydratedPresetBadges[preset.id] = { enabled: false, position: 'left' };
     }
     let leftoverCustom = '';
     let leftoverCustomPos: BadgePosition = 'left';
-    raw.badgeTexts.forEach((rawTxt, i) => {
+    source.badgeTexts.forEach((rawTxt, i) => {
       const upper = String(rawTxt || '').trim().toUpperCase();
       if (!upper || /^(UNCENSORED|18\+)$/.test(upper)) return;
-      const pos = normalizeBadgePos(raw.badgePositions?.[i]);
+      const pos = normalizeBadgePos(source.badgePositions?.[i]);
       const matched = BADGE_PRESETS_CONFIG.find(p => p.text === upper);
-      if (matched) {
-        hydratedPresetBadges[matched.id] = { enabled: true, position: pos };
-      } else if (!leftoverCustom) {
+      if (matched) hydratedPresetBadges[matched.id] = { enabled: true, position: pos };
+      else if (!leftoverCustom) {
         leftoverCustom = upper;
         leftoverCustomPos = pos;
       }
     });
-    if (leftoverCustom && typeof raw.customBadgeText !== 'string') {
-      raw = {
-        ...raw,
+    if (leftoverCustom && typeof source.customBadgeText !== 'string') {
+      source = {
+        ...source,
         customBadgeText: leftoverCustom,
         customBadgeEnabled: true,
         customBadgePosition: leftoverCustomPos
@@ -969,60 +857,57 @@ const hydrateSlotConfig = (
     }
   }
 
-  const resolvedShape: SplashShapeId = 'none';
-
   const resolvedColor =
-    typeof raw.splashColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.splashColor)
-      ? raw.splashColor.toUpperCase()
-      : raw.splashPreset || raw.splashCustomColor
-        ? legacyPresetToSplashColor(raw.splashPreset, raw.splashCustomColor)
+    typeof source.splashColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(source.splashColor)
+      ? source.splashColor.toUpperCase()
+      : source.splashPreset || source.splashCustomColor
+        ? legacyPresetToSplashColor(source.splashPreset, source.splashCustomColor)
         : base.splashColor;
 
-  const hl = raw.hookLayout || {};
+  const hl = source.hookLayout || {};
+  const customTextRaw = typeof source.customBadgeText === 'string' ? source.customBadgeText : '';
+  const customTextClean = /^(UNCENSORED|18\+)$/.test(customTextRaw.trim().toUpperCase())
+    ? ''
+    : customTextRaw;
+
   return {
     ...base,
     topText: migratedTop,
-    topColor: typeof raw.topColor === 'string' && raw.topColor.trim() ? raw.topColor : base.topColor,
+    topColor:
+      typeof source.topColor === 'string' && source.topColor.trim()
+        ? source.topColor
+        : base.topColor,
     bottomText: migratedBottom,
     bottomColor:
-      typeof raw.bottomColor === 'string' && raw.bottomColor.trim()
-        ? raw.bottomColor
+      typeof source.bottomColor === 'string' && source.bottomColor.trim()
+        ? source.bottomColor
         : base.bottomColor,
-    splashShape: resolvedShape,
+    splashShape: 'none',
     splashColor: resolvedColor,
     splashPaddingPct:
-      typeof raw.splashPaddingPct === 'number'
-        ? Math.max(50, Math.min(160, raw.splashPaddingPct))
+      typeof source.splashPaddingPct === 'number'
+        ? Math.max(50, Math.min(160, source.splashPaddingPct))
         : base.splashPaddingPct,
     splashShadowPct:
-      typeof raw.splashShadowPct === 'number'
-        ? Math.max(0, Math.min(160, raw.splashShadowPct))
+      typeof source.splashShadowPct === 'number'
+        ? Math.max(0, Math.min(160, source.splashShadowPct))
         : base.splashShadowPct,
-    badgesEnabled: typeof raw.badgesEnabled === 'boolean' ? raw.badgesEnabled : base.badgesEnabled,
+    badgesEnabled:
+      typeof source.badgesEnabled === 'boolean' ? source.badgesEnabled : base.badgesEnabled,
     presetBadges: hydratedPresetBadges,
-    customBadgeText:
-      typeof raw.customBadgeText === 'string' &&
-      !/^(UNCENSORED|18\+)$/.test(raw.customBadgeText.trim().toUpperCase())
-        ? raw.customBadgeText
-        : base.customBadgeText,
+    customBadgeText: customTextClean,
     customBadgeEnabled:
-      typeof raw.customBadgeEnabled === 'boolean'
-        ? raw.customBadgeEnabled
+      typeof source.customBadgeEnabled === 'boolean'
+        ? source.customBadgeEnabled && customTextClean.trim().length > 0
         : base.customBadgeEnabled,
-    customBadgePosition: normalizeBadgePos(raw.customBadgePosition),
+    customBadgePosition: normalizeBadgePos(source.customBadgePosition),
     badgeScalePct:
-      typeof raw.badgeScalePct === 'number'
-        ? Math.max(60, Math.min(150, raw.badgeScalePct))
+      typeof source.badgeScalePct === 'number'
+        ? Math.max(60, Math.min(150, source.badgeScalePct))
         : base.badgeScalePct,
     hookLayout: {
-      xPct:
-        typeof hl.xPct === 'number'
-          ? Math.max(6, Math.min(94, hl.xPct))
-          : DEFAULT_HOOK_LAYOUT.xPct,
-      yPct:
-        typeof hl.yPct === 'number'
-          ? Math.max(8, Math.min(92, hl.yPct))
-          : DEFAULT_HOOK_LAYOUT.yPct,
+      xPct: typeof hl.xPct === 'number' ? Math.max(6, Math.min(94, hl.xPct)) : DEFAULT_HOOK_LAYOUT.xPct,
+      yPct: typeof hl.yPct === 'number' ? Math.max(8, Math.min(92, hl.yPct)) : DEFAULT_HOOK_LAYOUT.yPct,
       topScalePct:
         typeof hl.topScalePct === 'number'
           ? Math.max(40, Math.min(180, hl.topScalePct))
@@ -1044,15 +929,13 @@ const hydrateSlotConfig = (
           ? Math.max(70, Math.min(160, hl.lineSpacingPct))
           : DEFAULT_HOOK_LAYOUT.lineSpacingPct
     },
-    bgAdjust: clampBgAdjust(raw.bgAdjust)
+    bgAdjust: clampBgAdjust(source.bgAdjust)
   };
 };
 
 const formatBytesLabel = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 КБ';
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(2)} МБ`;
-  }
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} МБ`;
   return `${Math.round(bytes / 1024)} КБ`;
 };
 
@@ -1065,6 +948,34 @@ const buildImpactCanvasFont = (fontSizePx: number): string => {
     return `400 ${safePx}px "Anton", "Montserrat", Impact, "Arial Black", sans-serif`;
   }
   return `900 ${safePx}px "Montserrat", "Anton", Impact, "Arial Black", sans-serif`;
+};
+
+/** Парсит "3:00:00" / "1:04" / "180:00" / "10800" в секунды. */
+const parseDurationLabelToSeconds = (label?: string | null): number => {
+  const raw = String(label || '').trim();
+  if (!raw) return 0;
+  const parts = raw.split(':').map(p => Number(p.replace(/[^\d.]/g, '')));
+  if (!parts.length || parts.some(n => !Number.isFinite(n))) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+};
+
+const formatClockLabel = (totalSec: number): string => {
+  const s = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+};
+
+/** YouTube разрешает End Screen только в последние 5–20 секунд ролика. */
+const computeEndScreenWindow = (durationSec: number): string => {
+  if (!Number.isFinite(durationSec) || durationSec < 25) return '—';
+  const start = Math.max(0, durationSec - 20);
+  const end = Math.max(start + 5, durationSec - 5);
+  return `${formatClockLabel(start)}-${formatClockLabel(end)}`;
 };
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
@@ -1080,19 +991,27 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   youtubeMockTitle,
   scriptContext,
   manifestThumbnailSlots,
-  endScreenSafeZone = '05:14-05:24',
+  endScreenSafeZone,
   manifestDurationBadge,
   onNotify
 }) => {
   const [showEndScreenSafeZone, setShowEndScreenSafeZone] = useState<boolean>(true);
+
   useEffect(() => {
     setShowEndScreenSafeZone(true);
-  }, [manifestThumbnailSlots?.A, manifestThumbnailSlots?.B, manifestThumbnailSlots?.C, endScreenSafeZone]);
+  }, [
+    manifestThumbnailSlots?.A,
+    manifestThumbnailSlots?.B,
+    manifestThumbnailSlots?.C,
+    endScreenSafeZone
+  ]);
+
   const slotFilenames: Record<ThumbnailSlotId, string> = {
     A: manifestThumbnailSlots?.A || 'thumbnail_4k_3840x2160_A.jpg',
     B: manifestThumbnailSlots?.B || 'thumbnail_4k_3840x2160_B.jpg',
     C: manifestThumbnailSlots?.C || 'thumbnail_4k_3840x2160_C.jpg'
   };
+
   const mainCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mobileCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const feedCanvasARef = useRef<HTMLCanvasElement | null>(null);
@@ -1128,32 +1047,24 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     } catch {
       parsed = null;
     }
-
     const cfgA = hydrateSlotConfig('A', projectTitleSeed, parsed?.A);
     const cfgB = hydrateSlotConfig('B', projectTitleSeed, parsed?.B);
     const cfgC = hydrateSlotConfig('C', projectTitleSeed, parsed?.C);
-
     if (!parsed?.A?.topText && thumbTitle.trim()) {
       const split = splitProjectTitleIntoTwoLines(thumbTitle);
       cfgA.topText = split.line1;
       cfgA.bottomText = split.line2;
     }
-
     return { A: cfgA, B: cfgB, C: cfgC };
   });
 
-  // Односторонняя безопасная синхронизация при внешнем изменении thumbTitle (без цикла ввода)
   useEffect(() => {
     if (thumbTitle === lastSyncedExternalTitleRef.current) return;
     lastSyncedExternalTitleRef.current = thumbTitle;
     const split = splitProjectTitleIntoTwoLines(thumbTitle);
     setSlotConfigs(prev => ({
       ...prev,
-      A: {
-        ...prev.A,
-        topText: split.line1,
-        bottomText: split.line2
-      }
+      A: { ...prev.A, topText: split.line1, bottomText: split.line2 }
     }));
   }, [thumbTitle]);
 
@@ -1161,16 +1072,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     try {
       localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(slotConfigs));
     } catch {
-      // ignore quota errors
+      /* quota */
     }
   }, [slotConfigs]);
 
   const updateSlotConfig = useCallback(
     (slot: ThumbnailSlotId, updater: (prev: ThumbnailSlotConfig) => ThumbnailSlotConfig) => {
-      setSlotConfigs(prev => ({
-        ...prev,
-        [slot]: updater(prev[slot])
-      }));
+      setSlotConfigs(prev => ({ ...prev, [slot]: updater(prev[slot]) }));
     },
     []
   );
@@ -1179,9 +1087,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const imgA = slotImages.A;
 
   useEffect(() => {
-    if (externalFontStyle) {
-      onConsumeExternalFontStyle?.();
-    }
+    if (externalFontStyle) onConsumeExternalFontStyle?.();
   }, [externalFontStyle, onConsumeExternalFontStyle]);
 
   useEffect(() => {
@@ -1200,7 +1106,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [hoveredSlot, setHoveredSlot] = useState<ThumbnailSlotId | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
 
-  // Локальная подготовка разрешения, 3x3 резкости базового кадра и мультиформатный экспорт
   const [baseSharpenPct, setBaseSharpenPct] = useState<number>(0);
   const [baseResolutionPreset, setBaseResolutionPreset] = useState<
     'original' | '1920x1080' | '2560x1440' | '3840x2160'
@@ -1208,14 +1113,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [isExportingFormat, setIsExportingFormat] = useState<string | null>(null);
   const [batchExportStatus, setBatchExportStatus] = useState<string>('');
   const [lastExportReport, setLastExportReport] = useState<
-    Record<
-      ThumbnailSlotId,
-      { formatLabel: string; filename: string; sizeText: string } | null
-    >
+    Record<ThumbnailSlotId, { formatLabel: string; filename: string; sizeText: string } | null>
   >({ A: null, B: null, C: null });
   const [showCopyMenu, setShowCopyMenu] = useState<boolean>(false);
 
-  // Сетка 2x2 (4 чистых 16:9 варианта обложки без водяных знаков: AI Horde / Cloudflare Flux.1-Schnell)
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_0', 0),
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_1', 1),
@@ -1236,7 +1137,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const activeBlobUrlsRef = useRef<string[]>([]);
   const generationAbortRef = useRef<AbortController | null>(null);
 
-  // Опциональные настройки Cloudflare Workers AI (сохраняются в localStorage)
   const [cfAccountId, setCfAccountId] = useState<string>(() => {
     try {
       return localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) || '';
@@ -1244,24 +1144,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       return '';
     }
   });
-  const [cfApiToken, setCfApiToken] = useState<string>(() => {
-    try {
-      return localStorage.getItem(CF_API_TOKEN_STORAGE_KEY) || '';
-    } catch {
-      return '';
-    }
-  });
+  const [cfApiToken, setCfApiToken] = useState<string>(() => readCfToken());
   const [showCfSettings, setShowCfSettings] = useState<boolean>(() => {
     try {
       return Boolean(
         localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) ||
-          localStorage.getItem(CF_API_TOKEN_STORAGE_KEY)
+          sessionStorage.getItem(CF_API_TOKEN_SESSION_KEY)
       );
     } catch {
       return false;
     }
   });
-
   const isCloudflareConfigured = Boolean(cfAccountId.trim() && cfApiToken.trim());
 
   const updateBatchVariantsSafely = useCallback((nextUrls: string[]) => {
@@ -1281,15 +1174,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     try {
       localStorage.setItem(CF_ACCOUNT_ID_STORAGE_KEY, cfAccountId.trim());
     } catch {
-      // ignore storage quota errors
+      /* quota */
     }
   }, [cfAccountId]);
 
   useEffect(() => {
+    const v = cfApiToken.trim();
     try {
-      localStorage.setItem(CF_API_TOKEN_STORAGE_KEY, cfApiToken.trim());
+      if (v) sessionStorage.setItem(CF_API_TOKEN_SESSION_KEY, v);
+      else sessionStorage.removeItem(CF_API_TOKEN_SESSION_KEY);
+      localStorage.removeItem(CF_API_TOKEN_LEGACY_KEY);
     } catch {
-      // ignore storage quota errors
+      /* storage недоступен */
     }
   }, [cfApiToken]);
 
@@ -1302,33 +1198,38 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     };
   }, []);
 
-  // Режим сравнения A/B/C в ленте YouTube и Ч/Б контрастный фильтр силуэтов
   const [compareFeedEnabled, setCompareFeedEnabled] = useState<boolean>(false);
   const [feedViewportMode, setFeedViewportMode] = useState<'both' | 'desktop' | 'mobile'>('both');
   const [bwContrastFilter, setBwContrastFilter] = useState<boolean>(false);
-
-  // Оверлей интерфейса YouTube (таймкод, аватарка, мобильный масштаб 160x90)
   const [showYoutubeOverlay, setShowYoutubeOverlay] = useState<boolean>(true);
-  const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>('3:00:00');
+  const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>(
+    (manifestDurationBadge || '').trim() || '3:00:00'
+  );
   const [youtubeChannelName] = useState<string>('Aether Documentary 4K');
   const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(
     youtubeMockTitle || thumbTitle || '4K Documentary Release'
   );
 
   useEffect(() => {
-    if (youtubeMockTitle) {
-      setYoutubeVideoHeading(youtubeMockTitle);
-    }
+    const next = (manifestDurationBadge || '').trim();
+    if (next) setYoutubeDurationBadge(next);
+  }, [manifestDurationBadge]);
+
+  const derivedDurationSec =
+    parseDurationLabelToSeconds(manifestDurationBadge || youtubeDurationBadge) || 10800;
+  const effectiveEndScreenSafeZone =
+    (endScreenSafeZone || '').trim() || computeEndScreenWindow(derivedDurationSec);
+
+  useEffect(() => {
+    if (youtubeMockTitle) setYoutubeVideoHeading(youtubeMockTitle);
   }, [youtubeMockTitle]);
 
-  // 1. Авто-экстрактор лучшего кадра в честном 4K (3840x2160) по секунде
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [videoFileName, setVideoFileName] = useState<string>('');
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
 
-  // 2. Генерация 16:9 без водяных знаков (AI Horde Flux.1-Schnell 1344x768 / Cloudflare Workers AI)
   const [promptStylePreset, setPromptStylePreset] = useState<
     'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
   >('mystery_dark');
@@ -1338,7 +1239,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [showVideoExtractor, setShowVideoExtractor] = useState<boolean>(false);
   const [showPromptGenerator, setShowPromptGenerator] = useState<boolean>(false);
 
-  // Предзагрузка Google Fonts Anton + Montserrat:wght@900 для 100% идентичности Canvas и UI
   useEffect(() => {
     let cancelled = false;
     if (typeof document !== 'undefined' && document.fonts) {
@@ -1347,9 +1247,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         document.fonts.load('900 72px "Montserrat"'),
         document.fonts.load('800 24px "Montserrat"')
       ]).then(() => {
-        if (!cancelled) {
-          setFontsReadyTick(t => t + 1);
-        }
+        if (!cancelled) setFontsReadyTick(t => t + 1);
       });
     }
     return () => {
@@ -1379,23 +1277,17 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       lastSyncedExternalTitleRef.current = combined;
       onThumbTitleChange(combined);
     }
-    setSlotConfigs(prev => ({
-      ...prev,
-      [targetSlot]: clonedCfg
-    }));
+    setSlotConfigs(prev => ({ ...prev, [targetSlot]: clonedCfg }));
     const sourceImg = slotImages[activeSlot] || slotImages.A;
-    if (sourceImg) {
-      setSlotImages(prev => ({
-        ...prev,
-        [targetSlot]: sourceImg
-      }));
-    }
+    if (sourceImg) setSlotImages(prev => ({ ...prev, [targetSlot]: sourceImg }));
     setShowCopyMenu(false);
     setActiveSlot(targetSlot);
-    onNotify(`📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`, 'success');
+    onNotify(
+      `📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`,
+      'success'
+    );
   };
 
-  // Автогенератор визуального промпта на английском языке
   const generatedCoverPrompt = (() => {
     const rawContext = (
       scriptContext ||
@@ -1410,7 +1302,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       rawContext.length > 5
         ? rawContext.slice(0, 110)
         : 'cinematic historical documentary mystery, dramatic lighting';
-
     const styleMap = {
       mystery_dark:
         'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, dramatic chiaroscuro, volumetric fog, shadowy silhouette in background, negative space for bold typography, 35mm f/1.4 lens, 8k photorealistic',
@@ -1421,7 +1312,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       scifi_neon:
         'Anomalous signal documentary thumbnail, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k realism'
     };
-
     const hookWords = [activeConfig.topText, activeConfig.bottomText]
       .filter(Boolean)
       .join(' ')
@@ -1429,26 +1319,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       .split(/\s+/)
       .slice(0, 3)
       .join(' ');
-
     const hookClause = hookWords
       ? `Composition focus for hook: "${hookWords.toUpperCase()}" | `
       : 'Pure clean artwork without embedded text overlays | ';
-
     return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | ${hookClause}Clean 16:9 composition without text or watermarks, clear silhouette readability on mobile 160x90px`;
   })();
 
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
-  const updateSlotLines = (
-    slot: ThumbnailSlotId,
-    nextTop: string,
-    nextBottom: string
-  ) => {
-    updateSlotConfig(slot, prev => ({
-      ...prev,
-      topText: nextTop,
-      bottomText: nextBottom
-    }));
+  const updateSlotLines = (slot: ThumbnailSlotId, nextTop: string, nextBottom: string) => {
+    updateSlotConfig(slot, prev => ({ ...prev, topText: nextTop, bottomText: nextBottom }));
     if (slot === 'A') {
       const combined = [nextTop.trim(), nextBottom.trim()].filter(Boolean).join(' ').trim();
       lastSyncedExternalTitleRef.current = combined;
@@ -1456,23 +1336,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // Интерактивное перетаскивание мышкой и пальцем для 2-строчного блока заголовка
   const startHookDrag = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, slot: ThumbnailSlotId) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       const canvasEl = mainCanvasRef.current;
       if (!canvasEl) return;
-
       e.preventDefault();
       e.stopPropagation();
-
       const rect = canvasEl.getBoundingClientRect();
       const startX = e.clientX;
       const startY = e.clientY;
       const initialLayout = slotConfigs[slot].hookLayout;
-
       setDraggingSlot(slot);
-
       const onPointerMove = (moveEv: PointerEvent) => {
         const dxPct = ((moveEv.clientX - startX) / Math.max(1, rect.width)) * 100;
         const dyPct = ((moveEv.clientY - startY) / Math.max(1, rect.height)) * 100;
@@ -1483,14 +1358,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           hookLayout: { ...prev.hookLayout, xPct: nextX, yPct: nextY }
         }));
       };
-
       const onPointerUp = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
         window.removeEventListener('pointercancel', onPointerUp);
         setDraggingSlot(null);
       };
-
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerUp);
@@ -1498,7 +1371,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     [slotConfigs, updateSlotConfig]
   );
 
-  // Отрисовка обложки «Documentary Impact + Grunge Splash» на Canvas (320x180, 1280x720 или 3840x2160)
   const drawCoverOnCanvas = useCallback(
     (
       canvas: HTMLCanvasElement | null,
@@ -1514,7 +1386,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const w = canvas.width;
       const h = canvas.height;
       const scale = w / 1280;
-
       ctx.clearRect(0, 0, w, h);
 
       if (image) {
@@ -1534,21 +1405,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         bgGrad.addColorStop(1, '#060911');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, w, h);
-
         const radial = ctx.createRadialGradient(
-          w * 0.62,
-          h * 0.42,
-          20 * scale,
-          w * 0.62,
-          h * 0.42,
-          440 * scale
+          w * 0.62, h * 0.42, 20 * scale, w * 0.62, h * 0.42, 440 * scale
         );
         radial.addColorStop(0, 'rgba(245, 158, 11, 0.24)');
         radial.addColorStop(0.6, 'rgba(56, 189, 248, 0.08)');
         radial.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = radial;
         ctx.fillRect(0, 0, w, h);
-
         ctx.fillStyle = '#64748b';
         ctx.font = `600 ${Math.round(20 * scale)}px Inter, sans-serif`;
         ctx.textAlign = 'center';
@@ -1565,18 +1429,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const bottomUpper = (cfg.bottomText || '').trim().toUpperCase();
       const hasHeadline = topUpper.length > 0 || bottomUpper.length > 0;
 
-      // Лёгкая кинематографическая виньетка под зоной заголовка для контраста
       if (hasHeadline) {
         const rawVx = (cfg.hookLayout.xPct / 100) * w;
         const rawVy = (cfg.hookLayout.yPct / 100) * h;
-        const vignette = ctx.createRadialGradient(
-          rawVx,
-          rawVy,
-          40 * scale,
-          rawVx,
-          rawVy,
-          560 * scale
-        );
+        const vignette = ctx.createRadialGradient(rawVx, rawVy, 40 * scale, rawVx, rawVy, 560 * scale);
         vignette.addColorStop(0, 'rgba(4, 7, 15, 0.46)');
         vignette.addColorStop(0.65, 'rgba(4, 7, 15, 0.16)');
         vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -1584,7 +1440,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.fillRect(0, 0, w, h);
       }
 
-      // 1. ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (20 пресетов + 21-й кастомный, перенос строк и авто-масштаб)
       const activeBadgeItems: Array<{ label: string; position: BadgePosition }> = [];
       if (cfg.badgesEnabled) {
         for (const preset of BADGE_PRESETS_CONFIG) {
@@ -1659,7 +1514,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           const gapX = 12 * effScale;
           const gapY = 10 * effScale;
           const badgeH = 42 * effScale;
-
           ctx.font = `800 ${Math.max(1, Math.round(fontPx))}px ${badgeFontFamily}`;
 
           const measured: MeasuredBadge[] = activeBadgeItems.map(item => ({
@@ -1673,20 +1527,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
           const leftList = measured.filter(m => m.position === 'left');
           const rightList = measured.filter(m => m.position === 'right');
-
           const rows: BadgeRowLayout[] = [];
           const ensureRow = (idx: number): BadgeRowLayout => {
-            while (rows.length <= idx) {
-              rows.push({ left: [], right: [], y: 0 });
-            }
+            while (rows.length <= idx) rows.push({ left: [], right: [], y: 0 });
             return rows[idx];
           };
-
           const rowUsedWidth = (r: BadgeRowLayout): number => {
-            const lw =
-              r.left.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.left.length - 1);
-            const rw =
-              r.right.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.right.length - 1);
+            const lw = r.left.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.left.length - 1);
+            const rw = r.right.reduce((s, b) => s + b.w, 0) + gapX * Math.max(0, r.right.length - 1);
             const midGap = r.left.length > 0 && r.right.length > 0 ? gapX : 0;
             return lw + rw + midGap;
           };
@@ -1694,11 +1542,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           let leftRowIdx = 0;
           for (const item of leftList) {
             let row = ensureRow(leftRowIdx);
-            const currentW = rowUsedWidth(row);
-            const addedW = currentW > 0 ? gapX + item.w : item.w;
-            if (currentW > 0 && currentW + addedW > maxAvailableW) {
+            let currentW = rowUsedWidth(row);
+            let addedW = currentW > 0 ? gapX + item.w : item.w;
+            while (currentW > 0 && currentW + addedW > maxAvailableW) {
               leftRowIdx += 1;
               row = ensureRow(leftRowIdx);
+              currentW = rowUsedWidth(row);
+              addedW = currentW > 0 ? gapX + item.w : item.w;
             }
             row.left.push(item);
           }
@@ -1706,8 +1556,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           let rightRowIdx = 0;
           for (const item of rightList) {
             let row = ensureRow(rightRowIdx);
-            const currentW = rowUsedWidth(row);
-            const addedW = currentW > 0 ? gapX + item.w : item.w;
+            let currentW = rowUsedWidth(row);
+            let addedW = currentW > 0 ? gapX + item.w : item.w;
             while (currentW > 0 && currentW + addedW > maxAvailableW) {
               rightRowIdx += 1;
               row = ensureRow(rightRowIdx);
@@ -1720,10 +1570,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           rows.forEach((r, idx) => {
             r.y = topY + idx * (badgeH + gapY);
           });
-
-          const totalH =
-            rows.length > 0 ? rows.length * badgeH + (rows.length - 1) * gapY : 0;
-
+          const totalH = rows.length > 0 ? rows.length * badgeH + (rows.length - 1) * gapY : 0;
           return { rows, totalH, badgeH, gapX, trackingPx, effScale };
         };
 
@@ -1739,18 +1586,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.fillStyle = 'rgba(10, 14, 24, 0.88)';
           ctx.strokeStyle = '#F59E0B';
           ctx.lineWidth = Math.max(1.5, 2 * layout.effScale);
-          ctx.beginPath();
-          ctx.roundRect(bx, by, bw, layout.badgeH, 8 * layout.effScale);
+          pathRoundRect(ctx, bx, by, bw, layout.badgeH, 8 * layout.effScale);
           ctx.fill();
           ctx.stroke();
-
           ctx.fillStyle = '#FACC15';
-          drawTrackedCenteredText(
-            label,
-            bx + bw / 2,
-            by + layout.badgeH * 0.52,
-            layout.trackingPx
-          );
+          drawTrackedCenteredText(label, bx + bw / 2, by + layout.badgeH * 0.52, layout.trackingPx);
           ctx.restore();
         };
 
@@ -1760,7 +1600,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             drawBadgeCapsule(item.label, leftCursorX, row.y, item.w);
             leftCursorX += item.w + layout.gapX;
           }
-
           let rightEdgeX = w - paddingX;
           for (let i = row.right.length - 1; i >= 0; i--) {
             const item = row.right[i];
@@ -1771,16 +1610,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
       }
 
-      if (!hasHeadline) {
-        return null;
-      }
+      if (!hasHeadline) return null;
 
-      // 2. ЕДИНЫЙ СТИЛЬ «DOCUMENTARY IMPACT + GRUNGE SPLASH» (2 независимые строки)
       const hl = cfg.hookLayout;
       const maxSafeW = w * 0.82;
       let fontSize1 = topUpper ? 88 * scale * (hl.topScalePct / 100) : 0;
       let line1W = 0;
-
       if (topUpper) {
         ctx.font = buildImpactCanvasFont(fontSize1);
         line1W = ctx.measureText(topUpper).width;
@@ -1793,7 +1628,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       let fontSize2 = bottomUpper ? 88 * scale * (hl.bottomScalePct / 100) : 0;
       let line2W = 0;
-
       if (bottomUpper) {
         if (hl.autoFitBottomToTop && topUpper && line1W > 0) {
           const refSize = 100 * scale;
@@ -1812,17 +1646,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
 
       const capH1 = topUpper ? fontSize1 * 0.78 : 0;
       const capH2 = bottomUpper ? fontSize2 * 0.78 : 0;
-      const avgFs = topUpper && bottomUpper ? (fontSize1 + fontSize2) * 0.5 : Math.max(fontSize1, fontSize2);
+      const avgFs =
+        topUpper && bottomUpper ? (fontSize1 + fontSize2) * 0.5 : Math.max(fontSize1, fontSize2);
       const lineGap =
-        topUpper && bottomUpper
-          ? Math.max(8 * scale, avgFs * 0.16 * (hl.lineSpacingPct / 100))
-          : 0;
+        topUpper && bottomUpper ? Math.max(8 * scale, avgFs * 0.16 * (hl.lineSpacingPct / 100)) : 0;
       const totalTextH = capH1 + lineGap + capH2;
       const skewOverhang = Math.max(fontSize1, fontSize2) * 0.16;
       const contentW = Math.max(line1W, line2W) + skewOverhang;
       const estBoxW = contentW + 40 * scale;
       const estBoxH = totalTextH + 30 * scale;
-
       const rawCx = (Math.max(6, Math.min(94, hl.xPct)) / 100) * w;
       const rawCy = (Math.max(8, Math.min(92, hl.yPct)) / 100) * h;
       const edgeMargin = 24 * scale;
@@ -1834,18 +1666,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         estBoxH + edgeMargin * 2 < h
           ? Math.max(estBoxH / 2 + edgeMargin, Math.min(h - estBoxH / 2 - edgeMargin, rawCy))
           : h / 2;
-
       const tiltRad = (Math.max(-6, Math.min(6, hl.blockTiltDeg)) * Math.PI) / 180;
       const skewXSlope = Math.tan((-10 * Math.PI) / 180);
       const topYCenter = -totalTextH / 2 + capH1 / 2;
-      const bottomYCenter = topUpper
-        ? -totalTextH / 2 + capH1 + lineGap + capH2 / 2
-        : 0;
+      const bottomYCenter = topUpper ? -totalTextH / 2 + capH1 + lineGap + capH2 / 2 : 0;
 
       ctx.save();
       ctx.translate(drawCx, drawCy);
       ctx.rotate(tiltRad);
-
       const finalW = estBoxW;
       const finalH = estBoxH;
 
@@ -1860,7 +1688,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const strokeWidth = Math.max(3, fontSizePx * 0.135);
         const hardShadowOffX = Math.max(2, fontSizePx * 0.055);
         const hardShadowOffY = Math.max(3, fontSizePx * 0.08);
-
         ctx.save();
         ctx.translate(0, lineCenterY);
         ctx.transform(1, 0, skewXSlope, 1, 0, 0);
@@ -1870,15 +1697,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.miterLimit = 2;
-
-        // 1. Жёсткая смещённая тень (Hard Offset Drop Shadow)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.92)';
         ctx.lineWidth = strokeWidth;
         ctx.strokeText(text, hardShadowOffX, hardShadowOffY);
         ctx.fillText(text, hardShadowOffX, hardShadowOffY);
-
-        // 2. Плотная чёрная обводка с мягким контуром подъёма
         ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
         ctx.shadowBlur = 10 * scale;
         ctx.shadowOffsetX = 0;
@@ -1886,8 +1709,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.strokeStyle = '#05070C';
         ctx.lineWidth = strokeWidth;
         ctx.strokeText(text, 0, 0);
-
-        // 3. Чистая заливка (верх — насыщенный плотный цвет, низ — с лёгким 3D градиентом)
         ctx.shadowBlur = 0;
         ctx.shadowOffsetY = 0;
         ctx.fillStyle = buildVertical3DFill(
@@ -1913,14 +1734,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           true
         );
       }
-
       ctx.restore();
 
       const rawLeft = Math.max(0, drawCx - finalW / 2);
       const rawTop = Math.max(0, drawCy - finalH / 2);
       const rawRight = Math.min(w, drawCx + finalW / 2);
       const rawBottom = Math.min(h, drawCy + finalH / 2);
-
       return {
         leftPct: (rawLeft / w) * 100,
         topPct: (rawTop / h) * 100,
@@ -1945,11 +1764,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   );
 
   const renderAllCanvases = useCallback(() => {
-    const nextBox = renderSlotToCanvas(
-      mainCanvasRef.current,
-      activeSlot,
-      `Вариант ${activeSlot}`
-    );
+    const nextBox = renderSlotToCanvas(mainCanvasRef.current, activeSlot, `Вариант ${activeSlot}`);
     setActiveHookBox(prev => {
       if (!prev && !nextBox) return prev;
       if (
@@ -1964,9 +1779,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       }
       return nextBox;
     });
-
     renderSlotToCanvas(mobileCanvasRef.current, activeSlot);
-
     if (compareFeedEnabled) {
       renderSlotToCanvas(feedCanvasARef.current, 'A', 'Вариант A');
       renderSlotToCanvas(feedCanvasBRef.current, 'B', 'Вариант B');
@@ -1981,7 +1794,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     renderAllCanvases();
   }, [renderAllCanvases]);
 
-  // Загружаем первый мастер-кадр из 2x2 сетки при старте и сохраняем в window.selectedMasterThumbnail
   useEffect(() => {
     if (!imgA && batchVariants[0]) {
       window.selectedMasterThumbnail = batchVariants[0];
@@ -1991,25 +1803,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   }, [imgA, batchVariants]);
 
-  // Выбор любого из 4-х вариантов сетки 2x2 как «Выбранный мастер-кадр»
   const handleSelectBatchVariant = (idx: number, targetSlot: ThumbnailSlotId = activeSlot) => {
     const url = batchVariants[idx];
     if (!url) return;
     setSelectedMasterVariantIdx(idx);
     window.selectedMasterThumbnail = url;
-
     const selectedImage = new Image();
     selectedImage.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: selectedImage }));
-      onNotify(
-        `✨ Вариант #${idx + 1} установлен на Вариант ${targetSlot}!`,
-        'success'
-      );
+      onNotify(`✨ Вариант #${idx + 1} установлен на Вариант ${targetSlot}!`, 'success');
     };
     selectedImage.src = url;
   };
 
-  // Кнопка «📥 Скачать мастер-кадр» (экспорт в честном 4K PNG со стилем активного слота)
   const handleDownloadVariantFromGrid = (idx: number) => {
     const url = batchVariants[idx];
     if (!url) return;
@@ -2024,14 +1830,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       link.download = `thumbnail_4k_${idx + 1}.png`;
       link.href = offscreen.toDataURL('image/png');
       link.click();
-      onNotify(`📥 Вариант #${idx + 1} (4K PNG thumbnail_4k_${idx + 1}.png) скачан на устройство!`, 'success');
+      onNotify(
+        `📥 Вариант #${idx + 1} (4K PNG thumbnail_4k_${idx + 1}.png) скачан на устройство!`,
+        'success'
+      );
     };
     tempImg.src = url;
   };
 
-
-
-  // Кнопка «Привязать к YouTube релизу»
   const handleAttachToYoutubeRelease = (idx: number) => {
     const url = batchVariants[idx];
     if (!url) return;
@@ -2049,9 +1855,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             .trim(),
           badges: slotConfigs.A.badgesEnabled
             ? [
-                ...BADGE_PRESETS_CONFIG.filter(p => slotConfigs.A.presetBadges?.[p.id]?.enabled).map(
-                  p => p.text
-                ),
+                ...BADGE_PRESETS_CONFIG.filter(
+                  p => slotConfigs.A.presetBadges?.[p.id]?.enabled
+                ).map(p => p.text),
                 ...(slotConfigs.A.customBadgeEnabled && slotConfigs.A.customBadgeText.trim()
                   ? [slotConfigs.A.customBadgeText.trim().toUpperCase()]
                   : [])
@@ -2061,7 +1867,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         })
       );
     } catch {
-      // ignore storage quota errors
+      /* quota */
     }
     handleSelectBatchVariant(idx, activeSlot);
     onNotify(
@@ -2070,7 +1876,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     );
   };
 
-  // Автономная генерация 4-х 4K кадров на Canvas (локальный бесплатный генератор)
   const handleGenerateProceduralBatchFallback = (targetSlot: ThumbnailSlotId = activeSlot) => {
     const fallbackUrls = [0, 1, 2, 3].map(idx =>
       renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, idx)
@@ -2081,7 +1886,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setLastModelUsed('HTML5 Canvas 4K (локальный генератор)');
     setGenerationError(null);
     window.selectedMasterThumbnail = fallbackUrls[0];
-
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: fallbackImg }));
@@ -2090,38 +1894,29 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     fallbackImg.src = fallbackUrls[0];
   };
 
-  // Нарезка 4 вариантов 16:9 превью из загруженного пользователем видео (.mp4/.mov/.webm) или арта (.png/.jpg)
   const handleSliceLocalMediaToGrid = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-
-    const isVideo =
-      file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name);
-    const isImage =
-      file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
-
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name);
+    const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
     if (!isVideo && !isImage) {
       onNotify('Поддерживаются видео (.mp4, .mov, .webm) и изображения (.png, .jpg, .webp).', 'error');
       return;
     }
-
     setIsSlicingLocalMedia(true);
     setGenerationError(null);
-
     try {
       if (isVideo) {
         const objectUrl = URL.createObjectURL(file);
         if (videoUrl) URL.revokeObjectURL(videoUrl);
         setVideoUrl(objectUrl);
         setVideoFileName(file.name);
-
         const tempVideo = document.createElement('video');
         tempVideo.muted = true;
         tempVideo.playsInline = true;
         tempVideo.preload = 'auto';
         tempVideo.src = objectUrl;
-
         await new Promise<void>((resolve, reject) => {
           const timer = window.setTimeout(() => reject(new Error('Таймаут загрузки видео')), 15000);
           tempVideo.onloadedmetadata = () => {
@@ -2133,12 +1928,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             reject(new Error('Не удалось декодировать видеофайл в браузере'));
           };
         });
-
-        const dur = Number.isFinite(tempVideo.duration) && tempVideo.duration > 0 ? tempVideo.duration : 8;
+        const dur =
+          Number.isFinite(tempVideo.duration) && tempVideo.duration > 0 ? tempVideo.duration : 8;
         const fractions = [0.12, 0.36, 0.62, 0.85];
         const slicedUrls: string[] = [];
         const slicedLabels: string[] = [];
-
         for (let i = 0; i < 4; i++) {
           const targetSec = Math.min(Math.max(0.1, dur * fractions[i]), Math.max(0.2, dur - 0.1));
           await new Promise<void>(resolve => {
@@ -2149,7 +1943,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             };
             tempVideo.currentTime = targetSec;
           });
-
           const offscreen = document.createElement('canvas');
           offscreen.width = 1920;
           offscreen.height = 1080;
@@ -2170,27 +1963,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             slicedLabels.push(`Кадр @ ${targetSec.toFixed(1)}с`);
           }
         }
-
-        if (!slicedUrls.length) {
-          throw new Error('Не удалось извлечь кадры из видео');
-        }
-
+        if (!slicedUrls.length) throw new Error('Не удалось извлечь кадры из видео');
         while (slicedUrls.length < 4) {
           slicedUrls.push(slicedUrls[0]);
           slicedLabels.push(`Кадр #${slicedUrls.length}`);
         }
-
         updateBatchVariantsSafely(slicedUrls);
         setVariantLabels(slicedLabels);
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Видео-нарезка (${file.name})`);
         window.selectedMasterThumbnail = slicedUrls[0];
-
         const firstImg = new Image();
         firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
-
-        onNotify(`🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+        onNotify(
+          `🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`,
+          'success'
+        );
       } else {
         const objectUrl = URL.createObjectURL(file);
         const srcImg = new Image();
@@ -2199,14 +1988,33 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           srcImg.onerror = () => reject(new Error('Не удалось прочитать изображение'));
           srcImg.src = objectUrl;
         });
-
         const crops = [
           { label: 'Оригинальный кадр 16:9', zoom: 1.0, ox: 0, oy: 0, filter: 'none', tint: '' },
-          { label: 'Крупный фокус (1.24×)', zoom: 1.24, ox: -0.04, oy: -0.02, filter: 'contrast(1.12) saturate(1.1)', tint: '' },
-          { label: 'Холодный Mystery-грейд', zoom: 1.14, ox: 0.05, oy: 0.02, filter: 'contrast(1.18) brightness(0.92)', tint: 'rgba(14, 165, 233, 0.16)' },
-          { label: 'Янтарный драматик HDR', zoom: 1.18, ox: 0, oy: 0.03, filter: 'contrast(1.22) saturate(1.2)', tint: 'rgba(245, 158, 11, 0.16)' }
+          {
+            label: 'Крупный фокус (1.24×)',
+            zoom: 1.24,
+            ox: -0.04,
+            oy: -0.02,
+            filter: 'contrast(1.12) saturate(1.1)',
+            tint: ''
+          },
+          {
+            label: 'Холодный Mystery-грейд',
+            zoom: 1.14,
+            ox: 0.05,
+            oy: 0.02,
+            filter: 'contrast(1.18) brightness(0.92)',
+            tint: 'rgba(14, 165, 233, 0.16)'
+          },
+          {
+            label: 'Янтарный драматик HDR',
+            zoom: 1.18,
+            ox: 0,
+            oy: 0.03,
+            filter: 'contrast(1.22) saturate(1.2)',
+            tint: 'rgba(245, 158, 11, 0.16)'
+          }
         ];
-
         const slicedUrls = crops.map(cfg => {
           const offscreen = document.createElement('canvas');
           offscreen.width = 1920;
@@ -2239,20 +2047,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ctx.fillRect(0, 0, 1920, 1080);
           return offscreen.toDataURL('image/jpeg', 0.94);
         });
-
         URL.revokeObjectURL(objectUrl);
-
         updateBatchVariantsSafely(slicedUrls);
         setVariantLabels(crops.map(c => c.label));
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Арт-нарезка (${file.name})`);
         window.selectedMasterThumbnail = slicedUrls[0];
-
         const firstImg = new Image();
         firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
-
-        onNotify(`🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+        onNotify(
+          `🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`,
+          'success'
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Ошибка обработки локального файла';
@@ -2262,14 +2069,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // ============================================================================
-  // ПАКЕТНАЯ ГЕНЕРАЦИЯ 4 ЧИСТЫХ 16:9 ОБЛОЖЕК БЕЗ ВОДЯНЫХ ЗНАКОВ
-  // ============================================================================
   const handleGenerateFluxCover = async (targetSlot: ThumbnailSlotId = activeSlot) => {
     generationAbortRef.current?.abort();
     const controller = new AbortController();
     generationAbortRef.current = controller;
-
     setIsGeneratingCovers(true);
     setGeneratingTargetSlot(targetSlot);
     setGenerationError(null);
@@ -2279,7 +2082,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ? 'Мгновенная генерация 4 вариантов через Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell)...'
         : 'Отправка задачи в AI Horde (Flux.1-Schnell • 1344×768)...'
     );
-
     try {
       const result = isCloudflareConfigured
         ? await generateViaCloudflareFlux(
@@ -2295,7 +2097,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               if (shortText) setButtonQueueStatus(shortText);
             }
           });
-
       const paddedUrls: string[] = [];
       for (let i = 0; i < 4; i++) {
         paddedUrls.push(
@@ -2304,13 +2105,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             renderProcedural16x9ArtworkDataUrl(promptStylePreset, activePromptText, i)
         );
       }
-
       updateBatchVariantsSafely(paddedUrls);
-      setVariantLabels(['Flux #1 (1344×768)', 'Flux #2 (1344×768)', 'Flux #3 (1344×768)', 'Flux #4 (1344×768)']);
+      setVariantLabels([
+        'Flux #1 (1344×768)',
+        'Flux #2 (1344×768)',
+        'Flux #3 (1344×768)',
+        'Flux #4 (1344×768)'
+      ]);
       setSelectedMasterVariantIdx(0);
       setLastModelUsed(result.modelUsed);
       window.selectedMasterThumbnail = paddedUrls[0];
-
       const generatedImg = new Image();
       generatedImg.onload = () => {
         setSlotImages(prev => ({ ...prev, [targetSlot]: generatedImg }));
@@ -2327,19 +2131,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           ? err.message
           : 'Не удалось сгенерировать обложки через Flux.1-Schnell.';
       setGenerationError(msg);
-      if (err instanceof FluxGenerationError && err.status === 499) {
-        onNotify(msg, 'info');
-      } else {
-        onNotify(msg, 'error');
-      }
+      if (err instanceof FluxGenerationError && err.status === 499) onNotify(msg, 'info');
+      else onNotify(msg, 'error');
     } finally {
       setIsGeneratingCovers(false);
       setGeneratingTargetSlot(null);
       setGenerationStatusText('');
       setButtonQueueStatus('');
-      if (generationAbortRef.current === controller) {
-        generationAbortRef.current = null;
-      }
+      if (generationAbortRef.current === controller) generationAbortRef.current = null;
     }
   };
 
@@ -2360,9 +2159,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const img = new Image();
         img.onload = () => {
           setSlotImages(prev => ({ ...prev, [slot]: img }));
-          if (slot === 'A') {
-            window.selectedMasterThumbnail = result;
-          }
+          if (slot === 'A') window.selectedMasterThumbnail = result;
           onNotify(`Изображение загружено в Вариант ${slot}!`, 'success');
         };
         img.src = result;
@@ -2372,7 +2169,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     e.target.value = '';
   };
 
-  // Авто-экстрактор стоп-кадра из готового видео в честном 4K по таймкоду секунды
   const handleSelectVideoForExtraction = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2388,9 +2184,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const handleSeekVideo = (sec: number) => {
     const clamped = Math.max(0, Math.min(videoDuration || 3600, sec));
     setSeekTimeSec(clamped);
-    if (videoRef.current) {
-      videoRef.current.currentTime = clamped;
-    }
+    if (videoRef.current) videoRef.current.currentTime = clamped;
   };
 
   const capture4KKeyframe = (targetSlot: ThumbnailSlotId | 'download') => {
@@ -2399,19 +2193,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       onNotify('Сначала выберите видеофайл для захвата 4K стоп-кадра!', 'error');
       return;
     }
-
     const offscreen4K = document.createElement('canvas');
     offscreen4K.width = 3840;
     offscreen4K.height = 2160;
     const ctx = offscreen4K.getContext('2d');
     if (!ctx) return;
-
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(video, 0, 0, 3840, 2160);
-
     const dataUrl = offscreen4K.toDataURL('image/jpeg', 0.96);
-
     if (targetSlot === 'download') {
       const a = document.createElement('a');
       a.href = dataUrl;
@@ -2423,14 +2213,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       );
       return;
     }
-
     const capturedImg = new Image();
     capturedImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: capturedImg }));
       setActiveSlot(targetSlot);
-      if (targetSlot === 'A') {
-        window.selectedMasterThumbnail = dataUrl;
-      }
+      if (targetSlot === 'A') window.selectedMasterThumbnail = dataUrl;
       onNotify(
         `📸 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) установлен на Вариант ${targetSlot}!`,
         'success'
@@ -2439,7 +2226,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     capturedImg.src = dataUrl;
   };
 
-  // Локальное приведение базового изображения к целевому разрешению (1920x1080, 2560x1440, 3840x2160)
   const resampleBaseSlotToResolution = (targetW: number, targetH: number) => {
     const presetKey = `${targetW}x${targetH}` as '1920x1080' | '2560x1440' | '3840x2160';
     const resampleSingleImage = (
@@ -2468,19 +2254,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       nextImg.onload = () => onDone(nextImg, dataUrl);
       nextImg.src = dataUrl;
     };
-
     const targetImg = slotImages[activeSlot] || slotImages.A;
     if (!targetImg) {
       onNotify('Сначала выберите или загрузите базовый кадр для изменения разрешения.', 'info');
       return;
     }
-
     const slotToUpdate: ThumbnailSlotId = slotImages[activeSlot] ? activeSlot : 'A';
     resampleSingleImage(targetImg, (nextImg, url) => {
       setSlotImages(prev => ({ ...prev, [slotToUpdate]: nextImg }));
-      if (slotToUpdate === 'A') {
-        window.selectedMasterThumbnail = url;
-      }
+      if (slotToUpdate === 'A') window.selectedMasterThumbnail = url;
       setBaseResolutionPreset(presetKey);
       onNotify(
         `🔍 Кадр Варианта ${slotToUpdate} приведён к ${targetW}×${targetH} px (High-Quality Canvas)`,
@@ -2489,7 +2271,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     });
   };
 
-  // Сборка полноразмерного 4K Canvas (3840x2160) с резкой базой + векторными титрами и бейджами
   const buildFullResThumbnailCanvas = (slot: ThumbnailSlotId): HTMLCanvasElement => {
     const offscreen = document.createElement('canvas');
     offscreen.width = 3840;
@@ -2498,7 +2279,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     return offscreen;
   };
 
-  // Пересэмплирование собранного 4K Canvas на 1280x720 с высоким сглаживанием (imageSmoothingQuality = 'high')
   const buildDownsampled720pCanvas = (
     source4K: HTMLCanvasElement,
     quantizeForCompactPng: boolean = false
@@ -2511,8 +2291,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(source4K, 0, 0, 1280, 720);
-
-    // Лёгкое 6-битное квантование каналов для максимально компактного PNG без потери резкости контуров
     if (quantizeForCompactPng) {
       try {
         const imgData = ctx.getImageData(0, 0, 1280, 720);
@@ -2524,7 +2302,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         }
         ctx.putImageData(imgData, 0, 0);
       } catch {
-        // ignore if unavailable
+        /* unavailable */
       }
     }
     return hd;
@@ -2539,16 +2317,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       canvas.toBlob(blob => resolve(blob), mime, quality);
     });
 
-  // Бинарный подбор JPEG-качества строго <= 1.95 МБ для требований YouTube
   const compressCanvasToYouTubeJpeg = async (
     canvas: HTMLCanvasElement,
     initialQuality: number = 0.95
   ): Promise<{ blob: Blob; quality: number } | null> => {
     const MAX_YT_THUMB_BYTES = Math.floor(1.95 * 1024 * 1024);
-
     let bestBlob = await canvasToBlobAsync(canvas, 'image/jpeg', initialQuality);
     let bestQ = initialQuality;
-
     if (!bestBlob || bestBlob.size > MAX_YT_THUMB_BYTES) {
       let low = 0.2;
       let high = Math.min(0.94, initialQuality);
@@ -2570,7 +2345,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         bestQ = 0.15;
       }
     }
-
     return bestBlob ? { blob: bestBlob, quality: bestQ } : null;
   };
 
@@ -2585,11 +2359,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     window.setTimeout(() => URL.revokeObjectURL(url), 1800);
   };
 
-  // Мультиформатный экспорт для слотов A, B, C:
-  // 1) 4k_jpg (3840x2160 JPEG q=0.95)
-  // 2) 4k_png (3840x2160 PNG lossless)
-  // 3) 720p_jpg (1280x720 JPEG high smoothing <= 1.95 МБ)
-  // 4) 720p_png (1280x720 PNG high smoothing + лёгкое квантование)
   const exportSlotInFormat = async (
     slot: ThumbnailSlotId,
     format: '4k_jpg' | '4k_png' | '720p_jpg' | '720p_png'
@@ -2599,11 +2368,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     try {
       await new Promise(resolve => window.setTimeout(resolve, 16));
       const full4K = buildFullResThumbnailCanvas(slot);
-
       let blob: Blob | null = null;
       let filename = '';
       let formatLabel = '';
-
       if (format === '4k_jpg') {
         filename = `thumbnail_4k_3840x2160_${slot}.jpg`;
         formatLabel = '4K JPEG';
@@ -2624,37 +2391,29 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const hdQuant = buildDownsampled720pCanvas(full4K, true);
         blob = await canvasToBlobAsync(hdQuant, 'image/png');
       }
-
       if (!blob) {
         onNotify(`Не удалось экспортировать ${formatLabel} для слота ${slot}.`, 'error');
         return;
       }
-
       const sizeText = formatBytesLabel(blob.size);
       triggerBlobDownload(blob, filename);
-      setLastExportReport(prev => ({
-        ...prev,
-        [slot]: { formatLabel, filename, sizeText }
-      }));
+      setLastExportReport(prev => ({ ...prev, [slot]: { formatLabel, filename, sizeText } }));
       onNotify(`✅ ${filename} скачан • ${sizeText}`, 'success');
     } finally {
       setIsExportingFormat(null);
     }
   };
 
-  // Пакетный экспорт всех 3 вариантов (< 2 МБ YouTube JPEG)
   const downloadAll3CoversYouTube2Mb = async () => {
     if (isExportingFormat) return;
     setIsExportingFormat('batch_all');
     const slots: ThumbnailSlotId[] = ['A', 'B', 'C'];
     const summaryParts: string[] = [];
-
     try {
       for (let i = 0; i < slots.length; i++) {
         const slot = slots[i];
         setBatchExportStatus(`Рендер 4K и сжатие ${slot} (${i + 1}/3)...`);
         await new Promise(resolve => window.setTimeout(resolve, 25));
-
         const offscreen = buildFullResThumbnailCanvas(slot);
         const result = await compressCanvasToYouTubeJpeg(offscreen);
         if (result) {
@@ -2665,7 +2424,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           }
         }
       }
-
       if (summaryParts.length === 3) {
         onNotify(
           `📦 Все 3 обложки A/B/C скачаны для YouTube (${summaryParts.join(' • ')})`,
@@ -2680,7 +2438,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
   };
 
-  // Передача чистого арта или скомпонованного кадра в модуль «🖼️ Арт-Редактор & Фон»
   const handleOpenSlotInArtEditor = (slot: ThumbnailSlotId) => {
     if (!onSendToArtEditor) return;
     const rawImg = slotImages[slot] || slotImages.A;
@@ -2706,7 +2463,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     onSendToArtEditor(exportDataUrl, `Вариант ${slot} (4K Превью)`);
   };
 
-  // Кнопка «📋 Скопировать промпт для веб-генератора»
   const copyCoverPromptForWebGenerator = () => {
     navigator.clipboard.writeText(activePromptText);
     setCopiedPrompt(true);
@@ -2714,12 +2470,118 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       '📋 Промпт скопирован для вставки в веб-генератор (Leonardo.ai / Midjourney / Kling)!',
       'success'
     );
-    setTimeout(() => setCopiedPrompt(false), 2000);
+    window.setTimeout(() => setCopiedPrompt(false), 2000);
+  };
+
+  const enabledPresetsCount = BADGE_PRESETS_CONFIG.filter(
+    p => activeConfig.presetBadges?.[p.id]?.enabled
+  ).length;
+  const normalizedFilter = badgeFilterQuery.trim().toUpperCase();
+  const baseGroupPresets = BADGE_PRESETS_CONFIG.filter(
+    p => p.group === 'base' && (!normalizedFilter || p.text.includes(normalizedFilter))
+  );
+  const ambienceGroupPresets = BADGE_PRESETS_CONFIG.filter(
+    p => p.group === 'ambience_3h' && (!normalizedFilter || p.text.includes(normalizedFilter))
+  );
+
+  const renderPresetCard = (preset: BadgePresetConfig) => {
+    const itemState = activeConfig.presetBadges?.[preset.id] || {
+      enabled: false,
+      position: 'left' as BadgePosition
+    };
+    const isEnabled = Boolean(itemState.enabled);
+    const pos: BadgePosition = itemState.position === 'right' ? 'right' : 'left';
+    return (
+      <div
+        key={`badge-preset-${activeSlot}-${preset.id}`}
+        className={`rounded-xl p-2 bg-[#090D16] border transition space-y-1.5 ${
+          isEnabled
+            ? 'border-[#F59E0B] shadow-[0_0_12px_rgba(245,158,11,0.14)]'
+            : 'border-white/[0.08] opacity-85 hover:opacity-100'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-1.5">
+          <span
+            className={`text-[10px] font-extrabold uppercase tracking-wider truncate ${
+              isEnabled ? 'text-[#FACC15]' : 'text-white/75'
+            }`}
+            title={preset.text}
+          >
+            {preset.text}
+          </span>
+          <button
+            type="button"
+            aria-pressed={isEnabled}
+            onClick={() =>
+              updateSlotConfig(activeSlot, prev => {
+                const cur = prev.presetBadges?.[preset.id] || {
+                  enabled: false,
+                  position: 'left' as BadgePosition
+                };
+                return {
+                  ...prev,
+                  presetBadges: {
+                    ...prev.presetBadges,
+                    [preset.id]: { ...cur, enabled: !cur.enabled }
+                  }
+                };
+              })
+            }
+            className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold shrink-0 cursor-pointer transition ${
+              isEnabled
+                ? 'bg-amber-400/20 border-amber-400/70 text-[#FACC15]'
+                : 'bg-[#0b0f19] border-white/[0.1] text-white/50 hover:text-white'
+            }`}
+          >
+            {isEnabled ? 'Вкл' : 'Выкл'}
+          </button>
+        </div>
+        <div
+          role="group"
+          aria-label={`Позиция бейджа ${preset.text}`}
+          className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#0b0f19] border border-white/[0.06]"
+        >
+          {([{ value: 'left', label: 'Слева' }, { value: 'right', label: 'Справа' }] as const).map(
+            opt => {
+              const isSelected = pos === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() =>
+                    updateSlotConfig(activeSlot, prev => {
+                      const cur = prev.presetBadges?.[preset.id] || {
+                        enabled: false,
+                        position: 'left' as BadgePosition
+                      };
+                      return {
+                        ...prev,
+                        presetBadges: {
+                          ...prev.presetBadges,
+                          [preset.id]: { ...cur, position: opt.value }
+                        }
+                      };
+                    })
+                  }
+                  className={`min-h-[24px] px-1.5 py-0.5 rounded-md text-[9.5px] font-bold cursor-pointer transition ${
+                    isSelected
+                      ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
+                      : 'border border-transparent text-white/50 hover:text-white hover:bg-white/[0.04]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            }
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* МОДАЛЬНОЕ ОКНО УВЕЛИЧЕНИЯ ВАРИАНТА ОБЛОЖКИ («🔍 Увеличить») */}
       {zoomedVariantIdx !== null && batchVariants[zoomedVariantIdx] && (
         <div
           className="fixed inset-0 z-50 bg-[#080c14]/90 backdrop-blur-xl flex items-center justify-center p-4"
@@ -2749,7 +2611,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-
             <div className="aether-preview-frame">
               <div className="aspect-video w-full rounded-[15px] overflow-hidden bg-[#080c14]">
                 <img
@@ -2759,7 +2620,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 />
               </div>
             </div>
-
             <div className="flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
@@ -2785,9 +2645,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         </div>
       )}
 
-      {/* ВЕРХНЯЯ ПАНЕЛЬ: НАСТРОЙКИ 4K ПРЕВЬЮ + ХОЛСТ ПРЕДПРОСМОТРА С YOUTUBE UI OVERLAY И A/B ТЕСТЕРОМ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Левая колонка (5/12): Переключатель A / B / C, настройки активного слота и пакетный экспорт */}
         <div className="lg:col-span-5 aether-surface rounded-2xl p-4 sm:p-6 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3.5">
             <div>
@@ -2808,7 +2666,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </span>
           </div>
 
-          {/* 1. КОМПАКТНАЯ ГРУППА ТРЁХ СЛОТОВ (🅰️ Вариант A / 🅱️ Вариант B / 🅲 Вариант C) + КОПИРОВАНИЕ */}
           <div className="aether-card rounded-2xl p-3 space-y-2.5 border border-white/[0.1] bg-[#080c14]/75">
             <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label="Слоты A/B/C тестирования">
               {(
@@ -2876,13 +2733,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 );
               })}
             </div>
-
             <div className="relative flex flex-wrap items-center justify-between gap-2 pt-0.5">
               <span className="text-[10.5px] font-mono text-white/55 truncate">
                 Слот <strong className="text-[#f8fafc]">{activeSlot}</strong> •{' '}
                 <code className="text-amber-300">{slotFilenames[activeSlot]}</code>
               </span>
-
               <div className="relative">
                 <button
                   type="button"
@@ -2895,7 +2750,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className={`w-3.5 h-3.5 transition-transform ${showCopyMenu ? 'rotate-180' : ''}`}
                   />
                 </button>
-
                 {showCopyMenu && (
                   <div className="absolute right-0 mt-1.5 z-30 w-52 rounded-xl bg-[#0b0f19]/95 backdrop-blur-xl border border-white/[0.14] shadow-2xl p-1.5 space-y-1">
                     {(['A', 'B', 'C'] as const)
@@ -2917,7 +2771,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
 
-          {/* Пакетная генерация 2x2 (4 варианта 16:9 без водяных знаков) */}
           <div className="aether-card rounded-2xl p-4 space-y-3 border border-emerald-500/25 bg-gradient-to-br from-emerald-500/[0.08] via-[#0f1623]/90 to-cyan-500/[0.05]">
             <div className="flex items-center justify-between text-[11px] gap-2">
               <span className="font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-1.5">
@@ -2926,15 +2779,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 ) : (
                   <Wand2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 )}
-                {isCloudflareConfigured
-                  ? 'Cloudflare Flux (2×2)'
-                  : 'Flux.1 AI Horde (2×2)'}
+                {isCloudflareConfigured ? 'Cloudflare Flux (2×2)' : 'Flux.1 AI Horde (2×2)'}
               </span>
-              <span className="font-mono text-[10px] text-white/55">
-                1344×768 → 4K UHD
-              </span>
+              <span className="font-mono text-[10px] text-white/55">1344×768 → 4K UHD</span>
             </div>
-
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -2953,7 +2801,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     : `Flux.1 (2×2) → Слот ${activeSlot}`}
                 </span>
               </button>
-
               {(['A', 'B', 'C'] as const).map(target => (
                 <button
                   key={`flux-slot-${target}`}
@@ -2971,7 +2818,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </button>
               ))}
             </div>
-
             {isGeneratingCovers && (
               <div className="bg-[#080c14]/90 border border-cyan-500/35 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
                 <span className="text-[11px] font-mono text-cyan-300 truncate">
@@ -2987,7 +2833,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             )}
 
-            {/* Аккордеон настроек Cloudflare Workers AI (localStorage) */}
             <div className="pt-1.5 border-t border-white/[0.08]">
               <button
                 type="button"
@@ -3007,7 +2852,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   />
                 </span>
               </button>
-
               {showCfSettings && (
                 <div className="mt-2 space-y-2.5 bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-3.5">
                   <div>
@@ -3036,7 +2880,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-0.5">
                     <span className="text-[10px] text-white/55 leading-tight font-mono">
-                      localStorage • @cf/black-forest-labs/flux-1-schnell
+                      sessionStorage • токен стирается при закрытии вкладки
                     </span>
                     {(cfAccountId || cfApiToken) && (
                       <button
@@ -3090,7 +2934,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             )}
           </div>
 
-          {/* Кнопки режимов предпросмотра: YouTube UI, Сравнить A/B/C в ленте, Ч/Б контраст */}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -3109,7 +2952,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 {showYoutubeOverlay ? 'ON' : 'OFF'}
               </span>
             </button>
-
             <button
               type="button"
               onClick={() => setCompareFeedEnabled(prev => !prev)}
@@ -3127,7 +2969,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 {compareFeedEnabled ? 'FEED' : '1x'}
               </span>
             </button>
-
             <button
               type="button"
               onClick={() => setBwContrastFilter(prev => !prev)}
@@ -3147,14 +2988,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </button>
           </div>
 
-          {/* ЕДИНЫЙ ART-EDITOR: DOCUMENTARY IMPACT + GRUNGE SPLASH (Слот A / B / C) */}
           <div className="aether-card rounded-2xl p-4 space-y-4 border border-white/[0.08] bg-[#0b0f19]/90 backdrop-blur-md">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3">
               <div className="flex items-center gap-2 min-w-0">
                 <Type className="w-4 h-4 text-amber-400 shrink-0" />
                 <div className="min-w-0">
                   <span className="text-xs font-bold uppercase tracking-wider text-[#f8fafc] block truncate">
-                    Documentary Impact + Grunge Splash
+                    Documentary Impact
                   </span>
                   <span className="text-[10px] font-mono text-white/50 block">
                     Anton / Montserrat 900 • 3840×2160 Canvas • Слот {activeSlot}
@@ -3169,14 +3009,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   onNotify(`Заголовок слота ${activeSlot} обновлён из названия проекта.`, 'info');
                 }}
                 className="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#111827]/90 hover:bg-white/[0.08] border border-white/[0.08] text-[10.5px] font-semibold text-amber-300 flex items-center gap-1 cursor-pointer transition"
-                title="Разделить текущее название проекта из студии на Строку 1 и Строку 2"
+                title="Разделить текущее название проекта на Строку 1 и Строку 2"
               >
                 <RotateCcw className="w-3 h-3 shrink-0" />
                 <span>Из проекта</span>
               </button>
             </div>
 
-            {/* Загрузка собственного фона слота */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-[11px] text-white/60">
@@ -3187,7 +3026,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     type="button"
                     onClick={() => {
                       setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
-                      onNotify(`Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`, 'info');
+                      onNotify(
+                        `Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`,
+                        'info'
+                      );
                     }}
                     className="text-[10px] text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
                   >
@@ -3203,7 +3045,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
 
-            {/* БЛОК «СТРОКА 1 (ВЕРХНЯЯ)» */}
             <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#f8fafc]">
@@ -3219,7 +3060,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </button>
                 )}
               </div>
-
               <input
                 type="text"
                 value={activeConfig.topText}
@@ -3229,7 +3069,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 placeholder="ВЕРХНЯЯ СТРОКА (UPPERCASE)"
                 className="w-full min-h-[40px] bg-[#0b0f19] border border-white/[0.08] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide text-[#f8fafc] outline-none"
               />
-
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {LINE_COLOR_SWATCHES.map(swatch => {
@@ -3241,10 +3080,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         type="button"
                         whileTap={{ scale: 0.94 }}
                         onClick={() =>
-                          updateSlotConfig(activeSlot, prev => ({
-                            ...prev,
-                            topColor: swatch.id
-                          }))
+                          updateSlotConfig(activeSlot, prev => ({ ...prev, topColor: swatch.id }))
                         }
                         title={swatch.label}
                         className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
@@ -3267,10 +3103,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     type="color"
                     value={activeConfig.topColor}
                     onChange={e =>
-                      updateSlotConfig(activeSlot, prev => ({
-                        ...prev,
-                        topColor: e.target.value
-                      }))
+                      updateSlotConfig(activeSlot, prev => ({ ...prev, topColor: e.target.value }))
                     }
                     aria-label="Цвет Строки 1"
                     className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
@@ -3278,7 +3111,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <span className="font-mono">{activeConfig.topColor.toUpperCase()}</span>
                 </label>
               </div>
-
               <div className="space-y-1 pt-0.5">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-white/75 font-semibold">Размер Строки 1</span>
@@ -3304,7 +3136,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            {/* БЛОК «СТРОКА 2 (НИЖНЯЯ)» */}
             <div className="rounded-xl p-3.5 space-y-2.5 bg-[#111827]/80 border border-white/[0.08]">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#FFD600]">
@@ -3320,7 +3151,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </button>
                 )}
               </div>
-
               <input
                 type="text"
                 value={activeConfig.bottomText}
@@ -3330,7 +3160,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 placeholder="НИЖНЯЯ СТРОКА (UPPERCASE)"
                 className="w-full min-h-[40px] bg-[#0b0f19] border border-white/[0.08] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide text-[#FFD600] outline-none"
               />
-
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {[
@@ -3339,35 +3168,37 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     LINE_COLOR_SWATCHES[2],
                     LINE_COLOR_SWATCHES[3],
                     LINE_COLOR_SWATCHES[4]
-                  ].map(swatch => {
-                    const isSelected =
-                      activeConfig.bottomColor.toUpperCase() === swatch.id.toUpperCase();
-                    return (
-                      <motion.button
-                        key={`bottom-swatch-${swatch.id}`}
-                        type="button"
-                        whileTap={{ scale: 0.94 }}
-                        onClick={() =>
-                          updateSlotConfig(activeSlot, prev => ({
-                            ...prev,
-                            bottomColor: swatch.id
-                          }))
-                        }
-                        title={swatch.label}
-                        className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
-                          isSelected
-                            ? 'border-amber-400 bg-amber-500/15 text-[#f8fafc]'
-                            : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/65 hover:text-white'
-                        }`}
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
-                          style={{ backgroundColor: swatch.id }}
-                        />
-                        <span>{swatch.label}</span>
-                      </motion.button>
-                    );
-                  })}
+                  ]
+                    .filter(Boolean)
+                    .map(swatch => {
+                      const isSelected =
+                        activeConfig.bottomColor.toUpperCase() === swatch.id.toUpperCase();
+                      return (
+                        <motion.button
+                          key={`bottom-swatch-${swatch.id}`}
+                          type="button"
+                          whileTap={{ scale: 0.94 }}
+                          onClick={() =>
+                            updateSlotConfig(activeSlot, prev => ({
+                              ...prev,
+                              bottomColor: swatch.id
+                            }))
+                          }
+                          title={swatch.label}
+                          className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
+                            isSelected
+                              ? 'border-amber-400 bg-amber-500/15 text-[#f8fafc]'
+                              : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/65 hover:text-white'
+                          }`}
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
+                            style={{ backgroundColor: swatch.id }}
+                          />
+                          <span>{swatch.label}</span>
+                        </motion.button>
+                      );
+                    })}
                 </div>
                 <label className="min-h-[28px] px-2 py-0.5 rounded-lg border border-white/[0.08] bg-[#0b0f19]/90 flex items-center gap-1.5 cursor-pointer text-[10px] text-white/75">
                   <input
@@ -3385,7 +3216,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <span className="font-mono">{activeConfig.bottomColor.toUpperCase()}</span>
                 </label>
               </div>
-
               <div className="space-y-2 pt-0.5">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-[11px]">
@@ -3419,7 +3249,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.98 }}
@@ -3449,7 +3278,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
 
-            {/* ПОЗИЦИОНИРОВАНИЕ НА КАДРЕ, НАКЛОН И ЕДИНАЯ ГРАНЖ-ПОДЛОЖКА (SPLASH) */}
             <div className="rounded-xl p-3.5 space-y-3 bg-[#111827]/80 border border-white/[0.08]">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
@@ -3469,8 +3297,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   Сбросить позицию
                 </button>
               </div>
-
-              {/* Быстрый переключатель угла размещения заголовка */}
               <div className="space-y-1.5">
                 <span className="text-[10px] uppercase tracking-wider text-white/55 font-semibold block">
                   Угол размещения заголовка:
@@ -3499,11 +3325,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         onClick={() =>
                           updateSlotConfig(activeSlot, prev => ({
                             ...prev,
-                            hookLayout: {
-                              ...prev.hookLayout,
-                              xPct: corner.x,
-                              yPct: corner.y
-                            }
+                            hookLayout: { ...prev.hookLayout, xPct: corner.x, yPct: corner.y }
                           }))
                         }
                         className={`min-h-[38px] px-2 py-1.5 rounded-xl border text-[10px] font-bold leading-tight text-center cursor-pointer transition ${
@@ -3518,8 +3340,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   })}
                 </div>
               </div>
-
-              {/* Слайдеры сдвига X, Y, наклона блока (-6..+6 deg) и межстрочного интервала */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
                   <div className="flex items-center justify-between text-[10.5px]">
@@ -3544,7 +3364,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
                   <div className="flex items-center justify-between text-[10.5px]">
                     <span className="text-white/75 font-semibold">Сдвиг по Y</span>
@@ -3568,7 +3387,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
                   <div className="flex items-center justify-between text-[10.5px]">
                     <span className="text-white/75 font-semibold">Угол наклона блока</span>
@@ -3593,7 +3411,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
                   <div className="flex items-center justify-between text-[10.5px]">
                     <span className="text-white/75 font-semibold">Межстрочный интервал</span>
@@ -3618,329 +3435,201 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   />
                 </div>
               </div>
-
             </div>
 
-            {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (20 ПРЕСЕТОВ В 2 ГРУППАХ + 21-Й КАСТОМНЫЙ) */}
-            {(() => {
-              const enabledPresetsCount = BADGE_PRESETS_CONFIG.filter(
-                p => activeConfig.presetBadges?.[p.id]?.enabled
-              ).length;
-              const normalizedFilter = badgeFilterQuery.trim().toUpperCase();
-              const baseGroupPresets = BADGE_PRESETS_CONFIG.filter(
-                p =>
-                  p.group === 'base' &&
-                  (!normalizedFilter || p.text.includes(normalizedFilter))
-              );
-              const ambienceGroupPresets = BADGE_PRESETS_CONFIG.filter(
-                p =>
-                  p.group === 'ambience_3h' &&
-                  (!normalizedFilter || p.text.includes(normalizedFilter))
-              );
-
-              const renderPresetCard = (preset: BadgePresetConfig) => {
-                const itemState = activeConfig.presetBadges?.[preset.id] || {
-                  enabled: false,
-                  position: 'left' as BadgePosition
-                };
-                const isEnabled = Boolean(itemState.enabled);
-                const pos: BadgePosition = itemState.position === 'right' ? 'right' : 'left';
-
-                return (
-                  <div
-                    key={`badge-preset-${activeSlot}-${preset.id}`}
-                    className={`rounded-xl p-2 bg-[#090D16] border transition space-y-1.5 ${
-                      isEnabled
-                        ? 'border-[#F59E0B] shadow-[0_0_12px_rgba(245,158,11,0.14)]'
-                        : 'border-white/[0.08] opacity-85 hover:opacity-100'
+            <div className="rounded-xl p-3.5 space-y-3 bg-[#111827]/80 border border-white/[0.08]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Верхние капсулы-бейджи ({activeSlot})</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10.5px] font-mono font-bold text-[#FACC15] bg-[#090D16] border border-amber-400/35 px-2 py-0.5 rounded-md tabular-nums">
+                    Включено: {enabledPresetsCount} / 20
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        badgesEnabled: !prev.badgesEnabled
+                      }))
+                    }
+                    className={`min-h-[30px] px-3 py-1 rounded-lg border text-[10.5px] font-bold cursor-pointer transition ${
+                      activeConfig.badgesEnabled
+                        ? 'bg-[#090D16] border-[#F59E0B] text-[#FACC15]'
+                        : 'bg-[#0b0f19] border-white/[0.08] text-white/55 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span
-                        className={`text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                          isEnabled ? 'text-[#FACC15]' : 'text-white/75'
-                        }`}
-                        title={preset.text}
-                      >
-                        {preset.text}
+                    {activeConfig.badgesEnabled ? 'Вкл' : 'Выкл'}
+                  </button>
+                </div>
+              </div>
+
+              {activeConfig.badgesEnabled && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={badgeFilterQuery}
+                      onChange={e => setBadgeFilterQuery(e.target.value)}
+                      placeholder="Фильтр бейджей…"
+                      className="flex-1 min-h-[34px] bg-[#0b0f19] border border-white/[0.1] focus:border-amber-400 rounded-lg px-2.5 py-1 text-xs text-[#f8fafc] placeholder:text-white/40 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSlotConfig(activeSlot, prev => {
+                          const cleared: Record<string, BadgeItemState> = {};
+                          for (const p of BADGE_PRESETS_CONFIG) {
+                            const oldItem = prev.presetBadges?.[p.id];
+                            cleared[p.id] = {
+                              enabled: false,
+                              position: oldItem?.position === 'right' ? 'right' : 'left'
+                            };
+                          }
+                          return {
+                            ...prev,
+                            presetBadges: cleared,
+                            customBadgeEnabled: false
+                          };
+                        })
+                      }
+                      className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#0b0f19] hover:bg-rose-950/35 border border-white/[0.1] hover:border-rose-500/45 text-[10.5px] font-bold text-white/75 hover:text-rose-200 shrink-0 cursor-pointer transition"
+                    >
+                      Выключить все
+                    </button>
+                  </div>
+
+                  {baseGroupPresets.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-white/55">
+                        База
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {baseGroupPresets.map(renderPresetCard)}
+                      </div>
+                    </div>
+                  )}
+
+                  {ambienceGroupPresets.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300/80">
+                        Ambience · 3 часа
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {ambienceGroupPresets.map(renderPresetCard)}
+                      </div>
+                    </div>
+                  )}
+
+                  {baseGroupPresets.length === 0 && ambienceGroupPresets.length === 0 && (
+                    <div className="text-center py-3 text-[11px] text-white/45 bg-[#090D16] rounded-xl border border-white/[0.06]">
+                      Нет бейджей, подходящих под «{badgeFilterQuery}»
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
+                        Свой кастомный бейдж
                       </span>
                       <button
                         type="button"
-                        aria-pressed={isEnabled}
+                        aria-pressed={activeConfig.customBadgeEnabled}
                         onClick={() =>
-                          updateSlotConfig(activeSlot, prev => {
-                            const cur = prev.presetBadges?.[preset.id] || {
-                              enabled: false,
-                              position: 'left' as BadgePosition
-                            };
-                            return {
-                              ...prev,
-                              presetBadges: {
-                                ...prev.presetBadges,
-                                [preset.id]: { ...cur, enabled: !cur.enabled }
-                              }
-                            };
-                          })
+                          updateSlotConfig(activeSlot, prev => ({
+                            ...prev,
+                            customBadgeEnabled: !prev.customBadgeEnabled
+                          }))
                         }
-                        className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold shrink-0 cursor-pointer transition ${
-                          isEnabled
+                        className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold cursor-pointer transition ${
+                          activeConfig.customBadgeEnabled
                             ? 'bg-amber-400/20 border-amber-400/70 text-[#FACC15]'
                             : 'bg-[#0b0f19] border-white/[0.1] text-white/50 hover:text-white'
                         }`}
                       >
-                        {isEnabled ? 'Вкл' : 'Выкл'}
+                        {activeConfig.customBadgeEnabled ? 'Вкл' : 'Выкл'}
                       </button>
                     </div>
-
-                    <div
-                      role="group"
-                      aria-label={`Позиция бейджа ${preset.text}`}
-                      className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#0b0f19] border border-white/[0.06]"
-                    >
-                      {(
-                        [
-                          { value: 'left', label: 'Слева' },
-                          { value: 'right', label: 'Справа' }
-                        ] as const
-                      ).map(opt => {
-                        const isSelected = pos === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            aria-pressed={isSelected}
-                            onClick={() =>
-                              updateSlotConfig(activeSlot, prev => {
-                                const cur = prev.presetBadges?.[preset.id] || {
-                                  enabled: false,
-                                  position: 'left' as BadgePosition
-                                };
-                                return {
-                                  ...prev,
-                                  presetBadges: {
-                                    ...prev.presetBadges,
-                                    [preset.id]: { ...cur, position: opt.value }
-                                  }
-                                };
-                              })
-                            }
-                            className={`min-h-[24px] px-1.5 py-0.5 rounded-md text-[9.5px] font-bold cursor-pointer transition ${
-                              isSelected
-                                ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
-                                : 'border border-transparent text-white/50 hover:text-white hover:bg-white/[0.04]'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              };
-
-              return (
-                <div className="rounded-xl p-3.5 space-y-3 bg-[#111827]/80 border border-white/[0.08]">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Верхние капсулы-бейджи ({activeSlot})</span>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10.5px] font-mono font-bold text-[#FACC15] bg-[#090D16] border border-amber-400/35 px-2 py-0.5 rounded-md tabular-nums">
-                        Включено: {enabledPresetsCount} / 20
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        type="text"
+                        value={activeConfig.customBadgeText}
+                        onChange={e => {
+                          const val = e.target.value.toUpperCase();
                           updateSlotConfig(activeSlot, prev => ({
                             ...prev,
-                            badgesEnabled: !prev.badgesEnabled
-                          }))
-                        }
-                        className={`min-h-[30px] px-3 py-1 rounded-lg border text-[10.5px] font-bold cursor-pointer transition ${
-                          activeConfig.badgesEnabled
-                            ? 'bg-[#090D16] border-[#F59E0B] text-[#FACC15]'
-                            : 'bg-[#0b0f19] border-white/[0.08] text-white/55 hover:text-white'
-                        }`}
+                            customBadgeText: val,
+                            customBadgeEnabled:
+                              val.trim().length > 0 ? true : prev.customBadgeEnabled
+                          }));
+                        }}
+                        placeholder="СВОЙ ТЕКСТ КАПСУЛЫ..."
+                        className="flex-1 min-h-[34px] bg-[#090D16] border border-[#F59E0B]/45 focus:border-[#F59E0B] rounded-lg px-2.5 py-1 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
+                      />
+                      <div
+                        role="group"
+                        aria-label="Позиция кастомного бейджа"
+                        className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#090D16] border border-white/[0.08] shrink-0 sm:w-36"
                       >
-                        {activeConfig.badgesEnabled ? 'Вкл' : 'Выкл'}
-                      </button>
+                        {(
+                          [
+                            { value: 'left', label: 'Слева' },
+                            { value: 'right', label: 'Справа' }
+                          ] as const
+                        ).map(opt => {
+                          const isSelected = activeConfig.customBadgePosition === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() =>
+                                updateSlotConfig(activeSlot, prev => ({
+                                  ...prev,
+                                  customBadgePosition: opt.value
+                                }))
+                              }
+                              className={`min-h-[26px] px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                isSelected
+                                  ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
+                                  : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  {activeConfig.badgesEnabled && (
-                    <>
-                      {/* Строка поиска и кнопка «Выключить все» */}
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={badgeFilterQuery}
-                          onChange={e => setBadgeFilterQuery(e.target.value)}
-                          placeholder="Фильтр бейджей…"
-                          className="flex-1 min-h-[34px] bg-[#0b0f19] border border-white/[0.1] focus:border-amber-400 rounded-lg px-2.5 py-1 text-xs text-[#f8fafc] placeholder:text-white/40 outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateSlotConfig(activeSlot, prev => {
-                              const cleared: Record<string, BadgeItemState> = {};
-                              for (const p of BADGE_PRESETS_CONFIG) {
-                                const oldItem = prev.presetBadges?.[p.id];
-                                cleared[p.id] = {
-                                  enabled: false,
-                                  position: oldItem?.position === 'right' ? 'right' : 'left'
-                                };
-                              }
-                              return {
-                                ...prev,
-                                presetBadges: cleared,
-                                customBadgeEnabled: false
-                              };
-                            })
-                          }
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#0b0f19] hover:bg-rose-950/35 border border-white/[0.1] hover:border-rose-500/45 text-[10.5px] font-bold text-white/75 hover:text-rose-200 shrink-0 cursor-pointer transition"
-                        >
-                          Выключить все
-                        </button>
-                      </div>
-
-                      {/* Группа «База» (8) */}
-                      {baseGroupPresets.length > 0 && (
-                        <div className="space-y-1.5">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-white/55">
-                            База
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {baseGroupPresets.map(renderPresetCard)}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Группа «Ambience · 3 часа» (12) */}
-                      {ambienceGroupPresets.length > 0 && (
-                        <div className="space-y-1.5">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300/80">
-                            Ambience · 3 часа
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {ambienceGroupPresets.map(renderPresetCard)}
-                          </div>
-                        </div>
-                      )}
-
-                      {baseGroupPresets.length === 0 && ambienceGroupPresets.length === 0 && (
-                        <div className="text-center py-3 text-[11px] text-white/45 bg-[#090D16] rounded-xl border border-white/[0.06]">
-                          Нет бейджей, подходящих под «{badgeFilterQuery}»
-                        </div>
-                      )}
-
-                      {/* Кастомный бейдж (21-я капсула, вне счётчика 20) */}
-                      <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
-                            Свой кастомный бейдж
-                          </span>
-                          <button
-                            type="button"
-                            aria-pressed={activeConfig.customBadgeEnabled}
-                            onClick={() =>
-                              updateSlotConfig(activeSlot, prev => ({
-                                ...prev,
-                                customBadgeEnabled: !prev.customBadgeEnabled
-                              }))
-                            }
-                            className={`min-h-[24px] px-2 py-0.5 rounded-md border text-[9.5px] font-bold cursor-pointer transition ${
-                              activeConfig.customBadgeEnabled
-                                ? 'bg-amber-400/20 border-amber-400/70 text-[#FACC15]'
-                                : 'bg-[#0b0f19] border-white/[0.1] text-white/50 hover:text-white'
-                            }`}
-                          >
-                            {activeConfig.customBadgeEnabled ? 'Вкл' : 'Выкл'}
-                          </button>
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <input
-                            type="text"
-                            value={activeConfig.customBadgeText}
-                            onChange={e => {
-                              const val = e.target.value.toUpperCase();
-                              updateSlotConfig(activeSlot, prev => ({
-                                ...prev,
-                                customBadgeText: val,
-                                customBadgeEnabled: val.trim().length > 0 ? true : prev.customBadgeEnabled
-                              }));
-                            }}
-                            placeholder="СВОЙ ТЕКСТ КАПСУЛЫ..."
-                            className="flex-1 min-h-[34px] bg-[#090D16] border border-[#F59E0B]/45 focus:border-[#F59E0B] rounded-lg px-2.5 py-1 text-[10.5px] font-extrabold tracking-wider uppercase text-[#FACC15] outline-none"
-                          />
-                          <div
-                            role="group"
-                            aria-label="Позиция кастомного бейджа"
-                            className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[#090D16] border border-white/[0.08] shrink-0 sm:w-36"
-                          >
-                            {(
-                              [
-                                { value: 'left', label: 'Слева' },
-                                { value: 'right', label: 'Справа' }
-                              ] as const
-                            ).map(opt => {
-                              const isSelected = activeConfig.customBadgePosition === opt.value;
-                              return (
-                                <button
-                                  key={opt.value}
-                                  type="button"
-                                  aria-pressed={isSelected}
-                                  onClick={() =>
-                                    updateSlotConfig(activeSlot, prev => ({
-                                      ...prev,
-                                      customBadgePosition: opt.value
-                                    }))
-                                  }
-                                  className={`min-h-[26px] px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
-                                    isSelected
-                                      ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
-                                      : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Общий слайдер размера бейджей */}
-                      <div className="space-y-1 pt-0.5">
-                        <div className="flex items-center justify-between text-[10.5px]">
-                          <span className="text-white/70 font-semibold">Размер бейджей</span>
-                          <span className="font-mono font-bold text-[#FACC15] tabular-nums">
-                            {activeConfig.badgeScalePct}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={60}
-                          max={150}
-                          step={2}
-                          value={activeConfig.badgeScalePct}
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
-                          }}
-                          className="w-full accent-amber-400 cursor-pointer"
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-white/70 font-semibold">Размер бейджей</span>
+                      <span className="font-mono font-bold text-[#FACC15] tabular-nums">
+                        {activeConfig.badgeScalePct}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={60}
+                      max={150}
+                      step={2}
+                      value={activeConfig.badgeScalePct}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        updateSlotConfig(activeSlot, prev => ({ ...prev, badgeScalePct: val }));
+                      }}
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* ЛОКАЛЬНЫЙ КОНТРОЛЬ КОНТРАСТА И «СОЧНОСТИ» КАДРА + РЕСАЙЗ И ЧЁТКОСТЬ (100% HTML5 Canvas) */}
           <div className="aether-card rounded-2xl p-4 space-y-3.5 border border-cyan-400/25 bg-[#0b0f19]/85">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-cyan-200 flex items-center gap-1.5">
@@ -3949,7 +3638,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </span>
               <span className="text-[10px] font-mono text-white/55">100% локально Canvas</span>
             </div>
-
             <div className="grid grid-cols-3 gap-1.5">
               {(
                 [
@@ -3970,13 +3658,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         : 'bg-[#111827] border-white/[0.08] text-white/75 hover:text-white hover:border-cyan-400/40'
                     }`}
                   >
-                    <span className="tabular-nums">{res.w}×{res.h}</span>
+                    <span className="tabular-nums">
+                      {res.w}×{res.h}
+                    </span>
                     <span className="text-[9px] font-sans text-white/50">{res.tag}</span>
                   </button>
                 );
               })}
             </div>
-
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-white/80 font-semibold">
@@ -3997,18 +3686,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
 
-            {/* Блок «☀️ Контраст и яркость кадра» (YouTube Contrast & Punch Engine) */}
             <div className="pt-3 border-t border-white/[0.08] space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
                   <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>☀️ Контраст и яркость кадра</span>
                 </span>
-                <span className="text-[10px] font-mono text-amber-300/90">
-                  Слот {activeSlot}
-                </span>
+                <span className="text-[10px] font-mono text-amber-300/90">Слот {activeSlot}</span>
               </div>
-
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
@@ -4029,19 +3714,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={() =>
                     updateSlotConfig(activeSlot, prev => ({
                       ...prev,
                       bgAdjust: { ...DEFAULT_BG_ADJUST }
-                    }));
-                  }}
+                    }))
+                  }
                   className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#111827]/85 hover:bg-white/[0.08] border border-white/[0.1] text-white/75 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer transition"
                 >
                   <RotateCcw className="w-3 h-3 shrink-0" />
                   <span>↺ Сброс</span>
                 </button>
               </div>
-
               <div className="space-y-2 bg-[#111827]/75 border border-white/[0.06] rounded-xl p-3">
                 <div className="space-y-0.5">
                   <div className="flex items-center justify-between text-[11px]">
@@ -4071,12 +3755,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <div className="space-y-0.5">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-white/80 font-semibold">
-                      Яркость и подсветка бликов
-                    </span>
+                    <span className="text-white/80 font-semibold">Яркость и подсветка бликов</span>
                     <span className="font-mono font-bold text-amber-300 tabular-nums">
                       {activeConfig.bgAdjust.brightnessPct}%
                     </span>
@@ -4100,12 +3781,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <div className="space-y-0.5">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-white/80 font-semibold">
-                      Мягкая сочность (Vibrance)
-                    </span>
+                    <span className="text-white/80 font-semibold">Мягкая сочность (Vibrance)</span>
                     <span className="font-mono font-bold text-amber-300 tabular-nums">
                       {activeConfig.bgAdjust.vibrancePct}%
                     </span>
@@ -4129,15 +3807,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     className="w-full accent-amber-400 cursor-pointer"
                   />
                 </div>
-
                 <p className="text-[10px] text-white/50 leading-tight pt-0.5">
-                  Применяется 100% локально на Canvas только к фону слота {activeSlot} — заголовки и бейджи сохраняют исходную чёткость.
+                  Применяется 100% локально на Canvas только к фону слота {activeSlot} — заголовки и
+                  бейджи сохраняют исходную чёткость.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Мультиформатный экспорт для слота A/B/C: 4K (3840x2160) & 720p (1280x720) в JPEG и PNG */}
           <div className="aether-card rounded-2xl p-3.5 space-y-2.5 border border-white/[0.08] bg-[#0b0f19]/90 backdrop-blur-md">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc]">
@@ -4148,11 +3825,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   title={lastExportReport[activeSlot]?.filename}
                   className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-400/35 px-2 py-0.5 rounded-md tabular-nums"
                 >
-                  {lastExportReport[activeSlot]?.formatLabel}: {lastExportReport[activeSlot]?.sizeText}
+                  {lastExportReport[activeSlot]?.formatLabel}:{' '}
+                  {lastExportReport[activeSlot]?.sizeText}
                 </span>
               )}
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
@@ -4164,7 +3841,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <Download className="w-3.5 h-3.5 shrink-0" />
                 <span>4K JPEG (3840×2160)</span>
               </button>
-
               <button
                 type="button"
                 disabled={Boolean(isExportingFormat)}
@@ -4175,7 +3851,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <Download className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                 <span>4K PNG (3840×2160)</span>
               </button>
-
               <button
                 type="button"
                 disabled={Boolean(isExportingFormat)}
@@ -4186,7 +3861,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <Download className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
                 <span>720p JPEG (1280×720)</span>
               </button>
-
               <button
                 type="button"
                 disabled={Boolean(isExportingFormat)}
@@ -4198,7 +3872,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <span>720p PNG (1280×720)</span>
               </button>
             </div>
-
             <button
               type="button"
               disabled={Boolean(isExportingFormat)}
@@ -4214,7 +3887,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 {batchExportStatus || '📦 Скачать все 3 обложки A/B/C для YouTube (< 2 МБ)'}
               </span>
             </button>
-
             {onSendToArtEditor && (
               <button
                 type="button"
@@ -4229,7 +3901,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         </div>
 
-        {/* Правая зона (7/12): 4K Холст активного слота A/B/C или Сравнение A / B / C в ленте YouTube */}
         <div className="lg:col-span-7 aether-surface rounded-2xl p-4 sm:p-6 space-y-5 flex flex-col justify-between min-w-0">
           {!compareFeedEnabled ? (
             <div className="space-y-4">
@@ -4274,9 +3945,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
                           : 'bg-white/[0.04] border-white/[0.08] text-white/55 hover:text-white'
                       }`}
-                      title="Переключить направляющую безопасной зоны YouTube End Screen"
+                      title="End Screen рассчитывается от реальной длительности проекта (последние 5–20 с)"
                     >
-                      End Screen: {endScreenSafeZone || '05:14-05:24'} {showEndScreenSafeZone ? 'ON' : 'OFF'}
+                      End Screen: {effectiveEndScreenSafeZone} {showEndScreenSafeZone ? 'ON' : 'OFF'}
                     </button>
                     <span className="text-[11px] font-mono text-white/55 bg-white/[0.04] border border-white/[0.08] px-2.5 py-0.5 rounded-full">
                       3840×2160 • 16:9
@@ -4284,7 +3955,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </div>
                 </div>
 
-                {/* Интерактивный 4K холст активного слота с Drag & Drop */}
                 <div className="aether-preview-frame group/previewActive">
                   <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
                     <canvas
@@ -4295,7 +3965,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         bwContrastFilter ? 'grayscale contrast-125' : ''
                       }`}
                     />
-
                     {activeHookBox && (
                       <div
                         role="button"
@@ -4321,19 +3990,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         }`}
                       />
                     )}
-
-                    {/* End Screen Safe-Zone Guide Overlay (05:14-05:24) */}
                     {showEndScreenSafeZone && (
                       <div className="pointer-events-none absolute inset-0 z-10">
-                        {/* Безопасная рамка отступов 5% */}
                         <div className="absolute inset-[5%] border border-dashed border-emerald-400/35 rounded-lg" />
-                        {/* Зона карточек YouTube End Screen (правая/нижняя часть для финала 05:14-05:24) */}
                         <div className="absolute right-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/65 bg-cyan-500/10 flex flex-col items-center justify-center text-center p-1">
                           <span className="text-[9px] font-mono font-bold text-cyan-200 uppercase">
                             End Screen Card
                           </span>
                           <span className="text-[8px] font-mono text-cyan-300/80">
-                            {endScreenSafeZone || '05:14-05:24'}
+                            {effectiveEndScreenSafeZone}
                           </span>
                         </div>
                         <div className="absolute left-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/45 bg-cyan-500/5 flex flex-col items-center justify-center text-center p-1">
@@ -4342,11 +4007,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           </span>
                         </div>
                         <div className="absolute top-2.5 left-2.5 bg-[#0b0f19]/85 backdrop-blur-md border border-emerald-400/40 text-emerald-300 font-mono text-[9.5px] px-2 py-0.5 rounded-md">
-                          Safe-Zone • End Screen {endScreenSafeZone || '05:14-05:24'}
+                          Safe-Zone • End Screen {effectiveEndScreenSafeZone}
                         </div>
                       </div>
                     )}
-
                     {showYoutubeOverlay && (
                       <>
                         <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewActive:opacity-100 transition-opacity duration-300">
@@ -4360,9 +4024,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                           <div className="border-r border-white/10" />
                           <div />
                         </div>
-
                         <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
-                          {manifestDurationBadge || youtubeDurationBadge || '3:00:00'}
+                          {youtubeDurationBadge}
                         </div>
                       </>
                     )}
@@ -4373,11 +4036,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
                     <span className="flex items-center gap-1.5">
                       <Move className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Перетащите заголовок Варианта {activeSlot} мышью или пальцем по кадру</span>
+                      <span>
+                        Перетащите заголовок Варианта {activeSlot} мышью или пальцем по кадру
+                      </span>
                     </span>
                     <span className="font-mono text-amber-300/90 tabular-nums">
                       X:{Math.round(activeConfig.hookLayout.xPct)}% • Y:
-                      {Math.round(activeConfig.hookLayout.yPct)}% • S1:{activeConfig.hookLayout.topScalePct}% / S2:{activeConfig.hookLayout.bottomScalePct}%
+                      {Math.round(activeConfig.hookLayout.yPct)}% • S1:
+                      {activeConfig.hookLayout.topScalePct}% / S2:
+                      {activeConfig.hookLayout.bottomScalePct}%
                     </span>
                   </div>
                 )}
@@ -4396,8 +4063,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       />
                       <div className="text-xs text-white/55 flex items-center gap-1.5 flex-wrap">
                         <span>{youtubeChannelName}</span>
-                        <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">✓</span>
-                        <span className="font-mono text-[11px]">• 428K views • 2h ago • Слот {activeSlot}</span>
+                        <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">
+                          ✓
+                        </span>
+                        <span className="font-mono text-[11px]">
+                          • 428K views • 2h ago • Слот {activeSlot}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -4405,7 +4076,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
           ) : (
-            /* РЕЖИМ СРАВНЕНИЯ «👁️ Сравнить A / B / C в ленте» (Desktop 16:9 + Mobile Scale) */
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
                 <div>
@@ -4417,7 +4087,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     Нажмите на любую карточку, чтобы перейти к редактированию слота
                   </p>
                 </div>
-
                 <div className="flex items-center gap-1 bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-1">
                   {(
                     [
@@ -4442,7 +4111,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </div>
               </div>
 
-              {/* 1. Десктопная лента YouTube (сетка 16:9) */}
               {(feedViewportMode === 'both' || feedViewportMode === 'desktop') && (
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between text-[11px] text-white/60">
@@ -4488,9 +4156,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                             }
                           }}
                           className={`rounded-2xl p-2.5 bg-[#080c14]/85 border transition cursor-pointer space-y-2.5 ${
-                            isCurrent
-                              ? item.borderActive
-                              : 'border-white/[0.08] hover:border-white/25'
+                            isCurrent ? item.borderActive : 'border-white/[0.08] hover:border-white/25'
                           }`}
                         >
                           <div className="flex items-center justify-between text-[10.5px] font-bold">
@@ -4509,7 +4175,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                               }`}
                             />
                             <div className="pointer-events-none absolute bottom-1.5 right-1.5 bg-black/90 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded">
-                              {youtubeDurationBadge || '3:00:00'}
+                              {youtubeDurationBadge}
                             </div>
                           </div>
                           <div className="flex items-start gap-2 pt-0.5">
@@ -4532,7 +4198,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </div>
               )}
 
-              {/* 2. Мобильная лента YouTube (масштаб смартфона ~160x90) */}
               {(feedViewportMode === 'both' || feedViewportMode === 'mobile') && (
                 <div className="space-y-2.5 pt-1">
                   <div className="flex items-center justify-between text-[11px] text-white/60">
@@ -4570,7 +4235,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                             }`}
                           />
                           <div className="pointer-events-none absolute bottom-1 right-1 bg-black/90 text-white font-mono text-[9px] font-bold px-1 rounded">
-                            {youtubeDurationBadge || '3:00:00'}
+                            {youtubeDurationBadge}
                           </div>
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
@@ -4605,7 +4270,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           )}
 
-          {/* НИЖНЯЯ ПАНЕЛЬ ХОЛСТА: МОБИЛЬНЫЙ МАСШТАБ АКТИВНОГО СЛОТА (160x90 PX) И ТАЙМКОД */}
           <div className="aether-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-4">
               <div className="relative w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/15 bg-black shrink-0 shadow-lg">
@@ -4618,10 +4282,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   }`}
                 />
                 <div className="pointer-events-none absolute bottom-1 right-1 bg-black/90 text-white font-mono text-[9px] font-bold px-1 rounded">
-                  {youtubeDurationBadge || '3:00:00'}
+                  {youtubeDurationBadge}
                 </div>
               </div>
-
               <div className="space-y-1">
                 <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
                   <Smartphone className="w-4 h-4 text-amber-400 shrink-0" />
@@ -4629,11 +4292,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
                 <p className="text-xs text-white/55 max-w-md leading-relaxed">
                   Контроль читаемости заголовка, верхнего ряда бейджей и таймкода{' '}
-                  <code className="font-mono text-amber-300">{youtubeDurationBadge}</code> в ленте смартфона.
+                  <code className="font-mono text-amber-300">{youtubeDurationBadge}</code> в ленте
+                  смартфона.
                 </p>
               </div>
             </div>
-
             <div className="flex items-center gap-2 text-xs">
               <span className="text-white/55">Таймкод:</span>
               <input
@@ -4647,7 +4310,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         </div>
       </div>
 
-      {/* СЕТКА 2x2 FLUX.1-SCHNELL */}
       <div className="aether-surface rounded-2xl p-5 sm:p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3.5">
           <div className="flex items-center gap-2.5">
@@ -4657,12 +4319,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 Галерея сцен и обложек 2×2 (Flux.1 • 16:9)
               </h3>
               <p className="text-xs text-white/55">
-                Выберите любую карточку для установки в мастер-слот (`window.selectedMasterThumbnail`)
+                Выберите любую карточку для установки в мастер-слот (window.selectedMasterThumbnail)
                 {lastModelUsed ? ` • ${lastModelUsed}` : ''}
               </p>
             </div>
           </div>
-
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={localMediaInputRef}
@@ -4684,7 +4345,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               )}
               <span>Кадр из локального видео/арта</span>
             </button>
-
             <button
               type="button"
               onClick={() => handleGenerateProceduralBatchFallback(activeSlot)}
@@ -4693,7 +4353,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             >
               <span>🎨 4 локальных фона</span>
             </button>
-
             <button
               type="button"
               onClick={() => handleGenerateFluxCover(activeSlot)}
@@ -4737,7 +4396,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           </div>
         )}
 
-        {/* Индикатор и 4 анимированных скелетона на время запроса */}
         {isGeneratingCovers || isSlicingLocalMedia ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-300">
@@ -4774,12 +4432,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             </div>
           </div>
         ) : (
-          <div id="flux-thumbnails-grid-container" className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4">
+          <div
+            id="flux-thumbnails-grid-container"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4"
+          >
             {batchVariants.map((imgSrc, index) => {
               const isMaster = selectedMasterVariantIdx === index;
               const isAttached = attachedToYoutubeIdx === index;
               const sceneLabel = variantLabels[index] || `Вариант #${index + 1}`;
-
               return (
                 <div
                   key={`grid-variant-${index}`}
@@ -4836,12 +4496,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       ✓
                     </div>
                   </div>
-
-                  {/* Панель действий под выбранной карточкой */}
                   <div className="p-3 bg-[#0f1623]/90 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs min-w-0">
-                      <span className="font-mono font-bold text-[#f8fafc] shrink-0">#{index + 1}</span>
-                      <span className="text-[11px] text-white/55 truncate max-w-[180px]" title={sceneLabel}>
+                      <span className="font-mono font-bold text-[#f8fafc] shrink-0">
+                        #{index + 1}
+                      </span>
+                      <span
+                        className="text-[11px] text-white/55 truncate max-w-[180px]"
+                        title={sceneLabel}
+                      >
                         {sceneLabel}
                       </span>
                       {isMaster && (
@@ -4850,7 +4513,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         </span>
                       )}
                     </div>
-
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
@@ -4864,7 +4526,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       >
                         <ZoomIn className="w-4 h-4" />
                       </button>
-
                       <button
                         type="button"
                         onClick={e => {
@@ -4876,7 +4537,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         <Download className="w-3.5 h-3.5" />
                         <span>📥 Скачать 4K</span>
                       </button>
-
                       <button
                         type="button"
                         onClick={e => {
@@ -4890,9 +4550,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         }`}
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>
-                          {isAttached ? '✓ В релизе' : 'В релиз'}
-                        </span>
+                        <span>{isAttached ? '✓ В релизе' : 'В релиз'}</span>
                       </button>
                     </div>
                   </div>
@@ -4903,9 +4561,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         )}
       </div>
 
-      {/* ВТОРОСТЕПЕННЫЕ ИНСТРУМЕНТЫ ПОД ПЛАВНЫМИ АККОРДЕОНАМИ (УСТРАНЕНИЕ ВИЗУАЛЬНОГО ШУМА) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* АККОРДЕОН 1: АВТО-ЭКСТРАКТОР СТОП-КАДРА ИЗ ГОТОВОГО ВИДЕО В ЧЕСТНОМ 4K ПО ТАЙМКОДУ СЕКУНДЫ */}
         <div className="aether-surface rounded-2xl overflow-hidden">
           <button
             type="button"
@@ -4926,9 +4582,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[11px] font-mono text-amber-300/85">
-                3840×2160
-              </span>
+              <span className="text-[11px] font-mono text-amber-300/85">3840×2160</span>
               <ChevronDown
                 className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
                   showVideoExtractor ? 'rotate-180 text-amber-400' : ''
@@ -4936,7 +4590,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
           </button>
-
           {showVideoExtractor && (
             <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4952,22 +4605,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   </span>
                 )}
               </div>
-
               {videoUrl ? (
                 <div className="space-y-3">
                   <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/[0.1]">
                     <video
                       ref={videoRef}
                       src={videoUrl}
-                      onLoadedMetadata={e => {
-                        setVideoDuration(e.currentTarget.duration || 10);
-                      }}
+                      onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration || 10)}
                       className="w-full h-full object-contain"
                       controls
                       muted
                     />
                   </div>
-
                   <div className="bg-[#080c14]/80 border border-white/[0.08] rounded-xl p-3.5 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] text-[#f8fafc] font-semibold">
@@ -4988,7 +4637,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                         </span>
                       </div>
                     </div>
-
                     <input
                       type="range"
                       min={0}
@@ -4998,7 +4646,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       onChange={e => handleSeekVideo(Number(e.target.value))}
                       className="w-full accent-amber-400 cursor-pointer"
                     />
-
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                       <button
                         type="button"
@@ -5046,7 +4693,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           )}
         </div>
 
-        {/* АККОРДЕОН 2: ГЕНЕРАТОР ВИЗУАЛЬНОГО ПРОМПТА (FLUX.1 / MIDJOURNEY / LEONARDO) */}
         <div className="aether-surface rounded-2xl overflow-hidden">
           <button
             type="button"
@@ -5067,9 +4713,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[11px] font-mono text-emerald-300/85">
-                PROMPT LAB
-              </span>
+              <span className="text-[11px] font-mono text-emerald-300/85">PROMPT LAB</span>
               <ChevronDown
                 className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
                   showPromptGenerator ? 'rotate-180 text-emerald-400' : ''
@@ -5077,7 +4721,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               />
             </div>
           </button>
-
           {showPromptGenerator && (
             <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4">
               <div className="space-y-2">
@@ -5118,7 +4761,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   })}
                 </div>
               </div>
-
               <div className="space-y-1.5">
                 <label className="text-[10px] font-mono text-white/55 uppercase block">
                   Промпт для Flux.1-Schnell (1344×768 / 16:9):
@@ -5130,7 +4772,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                   className="w-full bg-[#080c14]/90 border border-white/[0.1] focus:border-emerald-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
                 />
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
@@ -5145,7 +4786,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                       : 'Сгенерировать 2×2 по промпту'}
                   </span>
                 </button>
-
                 <button
                   type="button"
                   onClick={copyCoverPromptForWebGenerator}
