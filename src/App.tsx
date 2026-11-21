@@ -45,10 +45,12 @@ import {
   ListOrdered,
   Trash2,
   Clock,
-  ChevronDown
+  ChevronDown,
+  RotateCcw,
+  Terminal
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import { initDriveAuth } from './googleDriveAuth';
+import { initDriveAuth, getRestoredGoogleSession } from './googleDriveAuth';
 import { GoogleDriveDirectUploader } from './components/GoogleDriveDirectUploader';
 import {
   MontageCombineView,
@@ -88,6 +90,19 @@ import {
   parseV21ManifestObject
 } from './utils/manifestV21';
 import { serializeCompactDispatchJson } from './utils/manifestDispatch';
+import {
+  AetherActiveRenderJob,
+  AetherCombineDraftSlice,
+  AetherWorkspaceDraft,
+  clearActiveRenderJob,
+  clearWorkspaceDraft,
+  loadActiveRenderJob,
+  loadGoogleAuthRecord,
+  loadWorkspaceDraft,
+  saveActiveRenderJob,
+  saveGoogleAuthPatch,
+  saveWorkspaceDraft
+} from './utils/aetherPersistence';
 
 type TabId = 'combine' | 'loop' | 'verbaflow' | 'seo' | 'thumb' | 'editor';
 type StudioFormatPresetId = 'histoviva_doc' | 'ambient_loop_3h';
@@ -919,7 +934,81 @@ jobs:
             -d "parse_mode=Markdown" \\
             -d "text=\$MSG"`;
 
+const DEFAULT_SEO_SCRIPT_TEXT =
+  'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.';
+
+const DEFAULT_VERBAFLOW_SOURCE_TEXT =
+  'В 1974 году в архивах альпийской метеостанции нашли кассету с записью странного низкочастотного гула. Станцию закрыли за 24 часа, а персонал подписал неразглашение на 50 лет. Официальная версия гласила, что сошла лавина, но все приборы продолжали передавать сигнал еще три недели.';
+
+const DEFAULT_RENDER_SPECS_SUMMARY =
+  'libx264 / High / CRF 18 / yuv420p / 3840x2160 / 24fps CFR / -14.0 LUFS / -1.0 dBTP';
+
+const DEFAULT_AUDIO_MASTERING: AudioMasteringConfig = {
+  loudnorm_enabled: true,
+  integrated_lufs: -16,
+  true_peak_dbtp: -3,
+  lra: 11,
+  e3_soft_attack_compressor: true,
+  e3_max_peak_over_bed_db: 6
+};
+
+const DEFAULT_CONTINUOUS_BED: ContinuousBedConfig = {
+  enabled: false,
+  asset_id: '',
+  file_name: '',
+  loop_entire_duration: true,
+  acrossfade_sec: 1.0,
+  veo_native_audio: true,
+  veo_audio_weight: 0.85,
+  bed_audio_weight: 0.55
+};
+
+const DEFAULT_LOOP_MASTER_AUDIO: LoopMasterAudioConfig = {
+  enabled: false,
+  file_name: '',
+  start_timecode: '00:00:00',
+  weight: 1.0
+};
+
+const DEFAULT_SEAMLESS_ASYMMETRY: SeamlessAsymmetryConfig = {
+  enabled: true,
+  random_interval: [1200, 2400]
+};
+
 export default function App() {
+  // Синхронная первичная загрузка всех снимков из localStorage при старте / F5
+  const [bootSnapshot] = useState(() => {
+    const googleAuth = loadGoogleAuthRecord();
+    const restoredGoogleSession = getRestoredGoogleSession();
+    const draft = loadWorkspaceDraft();
+    const activeJob = loadActiveRenderJob();
+    return { googleAuth, restoredGoogleSession, draft, activeJob };
+  });
+
+  const bootDraft = bootSnapshot.draft;
+  const bootRunningJob =
+    bootSnapshot.activeJob && bootSnapshot.activeJob.status === 'running'
+      ? bootSnapshot.activeJob
+      : null;
+
+  // Ключ перемонтирования дочерних цехов при сбросе проекта («Сбросить проект»)
+  const [workspaceResetKey, setWorkspaceResetKey] = useState<number>(0);
+  const [initialCombineDraft, setInitialCombineDraft] = useState<AetherCombineDraftSlice | null>(
+    () => bootDraft?.combine ?? null
+  );
+  const combineDraftSliceRef = useRef<AetherCombineDraftSlice | undefined>(
+    bootDraft?.combine ?? undefined
+  );
+  const [combineDraftRev, setCombineDraftRev] = useState<number>(0);
+  const [isResetProjectModalOpen, setIsResetProjectModalOpen] = useState<boolean>(false);
+  const draftDebounceTimerRef = useRef<number | null>(null);
+  const suppressNextDraftSaveRef = useRef<boolean>(false);
+
+  const handleCombineDraftChange = useCallback((slice: AetherCombineDraftSlice) => {
+    combineDraftSliceRef.current = slice;
+    setCombineDraftRev(prev => prev + 1);
+  }, []);
+
   // Active tab state & animation pulse trigger key
   const [activeTab, setActiveTab] = useState<TabId>('combine');
   const [tabPulseKey, setTabPulseKey] = useState<number>(0);
@@ -943,13 +1032,18 @@ export default function App() {
     durationSec?: number;
   } | null>(null);
   const [seoScriptText, setSeoScriptText] = useState<string>(
-    'In the classified archives of the alpine station, a strange low-frequency hum was recorded. Within twenty-four hours, the entire facility was sealed under a fifty-year non-disclosure order. The official report blamed an avalanche, yet every instrument kept broadcasting for three weeks.'
+    () => bootDraft?.project?.seo_script_text ?? DEFAULT_SEO_SCRIPT_TEXT
   );
-  const [verbaFlowChaptersTxt, setVerbaFlowChaptersTxt] = useState<string>('');
+  const [verbaFlowChaptersTxt, setVerbaFlowChaptersTxt] = useState<string>(
+    () => bootDraft?.project?.verbaflow_chapters_txt ?? ''
+  );
 
   // Пресеты форматов каналов (1-Click Format Presets) + синхронизация Ритм-карты, Shorts и шрифта превью
-  const [activeFormatPreset, setActiveFormatPreset] =
-    useState<StudioFormatPresetId>('histoviva_doc');
+  const [activeFormatPreset, setActiveFormatPreset] = useState<StudioFormatPresetId>(() =>
+    bootDraft?.project?.active_format_preset === 'ambient_loop_3h'
+      ? 'ambient_loop_3h'
+      : 'histoviva_doc'
+  );
   const [rhythmProfilePreset, setRhythmProfilePreset] = useState<
     'historical_storytelling' | 'ambient_meditative' | null
   >(null);
@@ -960,8 +1054,12 @@ export default function App() {
     useState<ThumbnailFontStyleId | null>(null);
 
   // Loop studio state (Universal dynamic manifest state)
-  const [loopProjectName, setLoopProjectName] = useState<string>('HistoViva Documentary 4K');
-  const [ambientLoopEnabled, setAmbientLoopEnabled] = useState<boolean>(true);
+  const [loopProjectName, setLoopProjectName] = useState<string>(
+    () => bootDraft?.project?.name || 'HistoViva Documentary 4K'
+  );
+  const [ambientLoopEnabled, setAmbientLoopEnabled] = useState<boolean>(
+    () => bootDraft?.project?.ambient_loop_enabled ?? true
+  );
   const [externalV21Manifest, setExternalV21Manifest] = useState<{
     raw: Record<string, unknown>;
     fileName: string;
@@ -973,18 +1071,31 @@ export default function App() {
     text: string;
     nonce: number;
   } | null>(null);
-  const [strictSceneDurationLock, setStrictSceneDurationLock] = useState<boolean>(true);
-  const [sidecarBurnInVideo, setSidecarBurnInVideo] = useState<boolean>(false);
-  const [exportSeparateSrtFiles, setExportSeparateSrtFiles] = useState<boolean>(true);
-  const [selectedSubtitleLanguages, setSelectedSubtitleLanguages] = useState<V21SubtitleLang[]>([
-    'EN',
-    'RU'
-  ]);
-  const [renderSpecsSummary, setRenderSpecsSummary] = useState<string>(
-    'libx264 / High / CRF 18 / yuv420p / 3840x2160 / 24fps CFR / -14.0 LUFS / -1.0 dBTP'
+  const [strictSceneDurationLock, setStrictSceneDurationLock] = useState<boolean>(
+    () => bootDraft?.render_settings?.strict_scene_duration_lock ?? true
   );
-  const [exportOutputChaptersEnabled, setExportOutputChaptersEnabled] = useState<boolean>(true);
-  const [exportReleaseCardMdEnabled, setExportReleaseCardMdEnabled] = useState<boolean>(true);
+  const [sidecarBurnInVideo, setSidecarBurnInVideo] = useState<boolean>(
+    () => bootDraft?.render_settings?.sidecar_burn_in_video ?? false
+  );
+  const [exportSeparateSrtFiles, setExportSeparateSrtFiles] = useState<boolean>(
+    () => bootDraft?.render_settings?.export_separate_srt_files ?? true
+  );
+  const [selectedSubtitleLanguages, setSelectedSubtitleLanguages] = useState<V21SubtitleLang[]>(
+    () =>
+      Array.isArray(bootDraft?.render_settings?.selected_subtitle_languages) &&
+      bootDraft.render_settings.selected_subtitle_languages.length > 0
+        ? (bootDraft.render_settings.selected_subtitle_languages as V21SubtitleLang[])
+        : ['EN', 'RU']
+  );
+  const [renderSpecsSummary, setRenderSpecsSummary] = useState<string>(
+    () => bootDraft?.render_settings?.render_specs_summary || DEFAULT_RENDER_SPECS_SUMMARY
+  );
+  const [exportOutputChaptersEnabled, setExportOutputChaptersEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.export_output_chapters_enabled ?? true
+  );
+  const [exportReleaseCardMdEnabled, setExportReleaseCardMdEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.export_release_card_md_enabled ?? true
+  );
   const [manifestThumbnailSlots, setManifestThumbnailSlots] = useState<{
     A: string;
     B: string;
@@ -994,8 +1105,12 @@ export default function App() {
     B: 'thumbnail_4k_3840x2160_B.jpg',
     C: 'thumbnail_4k_3840x2160_C.jpg'
   });
-  const [endScreenSafeZone, setEndScreenSafeZone] = useState<string>('05:14-05:24');
-  const [manifestDurationBadge, setManifestDurationBadge] = useState<string>('');
+  const [endScreenSafeZone, setEndScreenSafeZone] = useState<string>(
+    () => bootDraft?.project?.end_screen_safe_zone || '05:14-05:24'
+  );
+  const [manifestDurationBadge, setManifestDurationBadge] = useState<string>(
+    () => bootDraft?.project?.manifest_duration_badge || ''
+  );
   const [youtubeSeoState, setYoutubeSeoState] = useState<YoutubeSeoState>(() =>
     loadStoredYoutubeSeoState()
   );
@@ -1015,55 +1130,104 @@ export default function App() {
   const [loopMedia, setLoopMedia] = useState<File | null>(null);
   const [loopAudio, setLoopAudio] = useState<File | null>(null);
   const [uploadedLoopAssets, setUploadedLoopAssets] = useState<Record<string, File>>({});
-  const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(INITIAL_TIMELINE_SLOTS);
-  const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>('libx264');
-  const [videoCrf, setVideoCrf] = useState<number>(20);
-  const [videoFps, setVideoFps] = useState<24 | 30 | 60>(24);
-  const [audioBitrateKbps, setAudioBitrateKbps] = useState<320 | 256 | 192>(320);
-  const [actCrossfadeSec, setActCrossfadeSec] = useState<number>(90.0);
-  const [internalLoopCrossfadeSec, setInternalLoopCrossfadeSec] = useState<number>(1.0);
-  const [finalBlackScreenEnabled, setFinalBlackScreenEnabled] = useState<boolean>(true);
-  const [finalBlackScreenSec, setFinalBlackScreenSec] = useState<number>(2.0);
-  const [audioMastering, setAudioMastering] = useState<AudioMasteringConfig>({
-    loudnorm_enabled: true,
-    integrated_lufs: -16,
-    true_peak_dbtp: -3,
-    lra: 11,
-    e3_soft_attack_compressor: true,
-    e3_max_peak_over_bed_db: 6
-  });
-  const [continuousBed, setContinuousBed] = useState<ContinuousBedConfig>({
-    enabled: false,
-    asset_id: '',
-    file_name: '',
-    loop_entire_duration: true,
-    acrossfade_sec: 1.0,
-    veo_native_audio: true,
-    veo_audio_weight: 0.85,
-    bed_audio_weight: 0.55
-  });
-  const [loopMasterAudio, setLoopMasterAudio] = useState<LoopMasterAudioConfig>({
-    enabled: false,
-    file_name: '',
-    start_timecode: '00:00:00',
-    weight: 1.0
-  });
-  const [seamlessAsymmetry, setSeamlessAsymmetry] = useState<SeamlessAsymmetryConfig>({
-    enabled: true,
-    random_interval: [1200, 2400]
-  });
-  const [loopHours, setLoopHours] = useState<number>(3);
-  const [loopResolution, setLoopResolution] = useState<'720p' | '1080p' | '2k' | '4k'>('4k');
-  const [loopDraftMode, setLoopDraftMode] = useState<boolean>(false);
-  const [bitratePreset, setBitratePreset] = useState<'standard' | 'cinema' | 'eco'>('cinema');
-  const [seamlessTransitionMode, setSeamlessTransitionMode] = useState<'crossfade' | 'pingpong'>('crossfade');
-  const [seamlessStitchEnabled, setSeamlessStitchEnabled] = useState<boolean>(true);
-  const [crossfadeDuration, setCrossfadeDuration] = useState<number>(1.0);
-  const [audioCrossfadeDuration, setAudioCrossfadeDuration] = useState<number>(90.0);
-  const [audioCrossfadeEnabled, setAudioCrossfadeEnabled] = useState<boolean>(true);
-  const [useEmbeddedAudio, setUseEmbeddedAudio] = useState<boolean>(true);
-  const [expectedVideoFilename, setExpectedVideoFilename] = useState<string>('');
-  const [expectedAudioFilename, setExpectedAudioFilename] = useState<string>('');
+  const [timelineSlots, setTimelineSlots] = useState<TimelineSlot[]>(() =>
+    Array.isArray(bootDraft?.render_settings?.timeline_slots) &&
+    bootDraft.render_settings.timeline_slots.length > 0
+      ? (bootDraft.render_settings.timeline_slots as TimelineSlot[])
+      : INITIAL_TIMELINE_SLOTS
+  );
+  const [videoCodec, setVideoCodec] = useState<'libx265' | 'libx264'>(() =>
+    bootDraft?.render_settings?.video_codec === 'libx265' ? 'libx265' : 'libx264'
+  );
+  const [videoCrf, setVideoCrf] = useState<number>(
+    () => bootDraft?.render_settings?.video_crf ?? 20
+  );
+  const [videoFps, setVideoFps] = useState<24 | 30 | 60>(() =>
+    bootDraft?.render_settings?.video_fps === 30 || bootDraft?.render_settings?.video_fps === 60
+      ? bootDraft.render_settings.video_fps
+      : 24
+  );
+  const [audioBitrateKbps, setAudioBitrateKbps] = useState<320 | 256 | 192>(() =>
+    bootDraft?.render_settings?.audio_bitrate_kbps === 256 ||
+    bootDraft?.render_settings?.audio_bitrate_kbps === 192
+      ? bootDraft.render_settings.audio_bitrate_kbps
+      : 320
+  );
+  const [actCrossfadeSec, setActCrossfadeSec] = useState<number>(
+    () => bootDraft?.render_settings?.act_crossfade_sec ?? 90.0
+  );
+  const [internalLoopCrossfadeSec, setInternalLoopCrossfadeSec] = useState<number>(
+    () => bootDraft?.render_settings?.internal_loop_crossfade_sec ?? 1.0
+  );
+  const [finalBlackScreenEnabled, setFinalBlackScreenEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.final_black_screen_enabled ?? true
+  );
+  const [finalBlackScreenSec, setFinalBlackScreenSec] = useState<number>(
+    () => bootDraft?.render_settings?.final_black_screen_sec ?? 2.0
+  );
+  const [audioMastering, setAudioMastering] = useState<AudioMasteringConfig>(() => ({
+    ...DEFAULT_AUDIO_MASTERING,
+    ...((bootDraft?.render_settings?.audio_mastering as Partial<AudioMasteringConfig>) || {})
+  }));
+  const [continuousBed, setContinuousBed] = useState<ContinuousBedConfig>(() => ({
+    ...DEFAULT_CONTINUOUS_BED,
+    ...((bootDraft?.render_settings?.continuous_bed as Partial<ContinuousBedConfig>) || {})
+  }));
+  const [loopMasterAudio, setLoopMasterAudio] = useState<LoopMasterAudioConfig>(() => ({
+    ...DEFAULT_LOOP_MASTER_AUDIO,
+    ...((bootDraft?.render_settings?.loop_master_audio as Partial<LoopMasterAudioConfig>) || {})
+  }));
+  const [seamlessAsymmetry, setSeamlessAsymmetry] = useState<SeamlessAsymmetryConfig>(() => ({
+    ...DEFAULT_SEAMLESS_ASYMMETRY,
+    ...((bootDraft?.render_settings?.seamless_asymmetry as Partial<SeamlessAsymmetryConfig>) || {})
+  }));
+  const [loopHours, setLoopHours] = useState<number>(
+    () => bootDraft?.render_settings?.loop_hours ?? 3
+  );
+  const [loopResolution, setLoopResolution] = useState<'720p' | '1080p' | '2k' | '4k'>(() =>
+    bootDraft?.render_settings?.loop_resolution === '720p' ||
+    bootDraft?.render_settings?.loop_resolution === '1080p' ||
+    bootDraft?.render_settings?.loop_resolution === '2k' ||
+    bootDraft?.render_settings?.loop_resolution === '4k'
+      ? bootDraft.render_settings.loop_resolution
+      : '4k'
+  );
+  const [loopDraftMode, setLoopDraftMode] = useState<boolean>(
+    () => bootDraft?.render_settings?.loop_draft_mode ?? false
+  );
+  const [bitratePreset, setBitratePreset] = useState<'standard' | 'cinema' | 'eco'>(() =>
+    bootDraft?.render_settings?.bitrate_preset === 'standard' ||
+    bootDraft?.render_settings?.bitrate_preset === 'eco'
+      ? bootDraft.render_settings.bitrate_preset
+      : 'cinema'
+  );
+  const [seamlessTransitionMode, setSeamlessTransitionMode] = useState<'crossfade' | 'pingpong'>(
+    () =>
+      bootDraft?.render_settings?.seamless_transition_mode === 'pingpong'
+        ? 'pingpong'
+        : 'crossfade'
+  );
+  const [seamlessStitchEnabled, setSeamlessStitchEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.seamless_stitch_enabled ?? true
+  );
+  const [crossfadeDuration, setCrossfadeDuration] = useState<number>(
+    () => bootDraft?.render_settings?.crossfade_duration ?? 1.0
+  );
+  const [audioCrossfadeDuration, setAudioCrossfadeDuration] = useState<number>(
+    () => bootDraft?.render_settings?.audio_crossfade_duration ?? 90.0
+  );
+  const [audioCrossfadeEnabled, setAudioCrossfadeEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.audio_crossfade_enabled ?? true
+  );
+  const [useEmbeddedAudio, setUseEmbeddedAudio] = useState<boolean>(
+    () => bootDraft?.render_settings?.use_embedded_audio ?? true
+  );
+  const [expectedVideoFilename, setExpectedVideoFilename] = useState<string>(
+    () => bootDraft?.render_settings?.expected_video_filename ?? ''
+  );
+  const [expectedAudioFilename, setExpectedAudioFilename] = useState<string>(
+    () => bootDraft?.render_settings?.expected_audio_filename ?? ''
+  );
   const [importedManifestName, setImportedManifestName] = useState<string>('');
   const [showFilterComplexPreview, setShowFilterComplexPreview] = useState<boolean>(true);
   const [isLoopDispatching, setIsLoopDispatching] = useState<boolean>(false);
@@ -1116,17 +1280,31 @@ export default function App() {
   >(null);
 
   // Гибкая система субтитров и Shorts Factory для текущего манифеста
-  const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(false);
-  const [loopUploadSrtToDrive, setLoopUploadSrtToDrive] = useState<boolean>(true);
-  const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'>('en');
-  const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>('');
-  const [shortsFactoryEnabled, setShortsFactoryEnabled] = useState<boolean>(false);
+  const [loopBurnInSubtitles, setLoopBurnInSubtitles] = useState<boolean>(
+    () => bootDraft?.render_settings?.loop_burn_in_subtitles ?? false
+  );
+  const [loopUploadSrtToDrive, setLoopUploadSrtToDrive] = useState<boolean>(
+    () => bootDraft?.render_settings?.loop_upload_srt_to_drive ?? true
+  );
+  const [loopSubtitleLanguage, setLoopSubtitleLanguage] = useState<
+    'en' | 'ru' | 'es' | 'de' | 'fr' | 'original'
+  >(() => bootDraft?.render_settings?.loop_subtitle_language ?? 'en');
+  const [loopSrtCustomContent, setLoopSrtCustomContent] = useState<string>(
+    () => bootDraft?.render_settings?.loop_srt_custom_content ?? ''
+  );
+  const [shortsFactoryEnabled, setShortsFactoryEnabled] = useState<boolean>(
+    () => bootDraft?.render_settings?.shorts_factory_enabled ?? false
+  );
   const [showLoopAdvancedAccordion, setShowLoopAdvancedAccordion] = useState<boolean>(false);
 
   // Thumbnail studio state
   const [thumbImg, setThumbImg] = useState<HTMLImageElement | null>(null);
-  const [thumbTitle, setThumbTitle] = useState<string>('SEALED ARCHIVE');
-  const [thumbBadge, setThumbBadge] = useState<string>('4k_ultra_hd,documentary,lost_archives');
+  const [thumbTitle, setThumbTitle] = useState<string>(
+    () => bootDraft?.project?.thumb_title || 'SEALED ARCHIVE'
+  );
+  const [thumbBadge, setThumbBadge] = useState<string>(
+    () => bootDraft?.project?.thumb_badge || '4k_ultra_hd,documentary,lost_archives'
+  );
   const [artEditorIncomingAsset, setArtEditorIncomingAsset] =
     useState<ArtEditorIncomingAsset | null>(null);
   const [editorEditedCoverAUrl, setEditorEditedCoverAUrl] = useState<string | null>(null);
@@ -1203,17 +1381,17 @@ export default function App() {
 
   // VerbaFlow source text state
   const [sourceText, setSourceText] = useState<string>(
-    'В 1974 году в архивах альпийской метеостанции нашли кассету с записью странного низкочастотного гула. Станцию закрыли за 24 часа, а персонал подписал неразглашение на 50 лет. Официальная версия гласила, что сошла лавина, но все приборы продолжали передавать сигнал еще три недели.'
+    () => bootDraft?.verbaflow?.source_text ?? DEFAULT_VERBAFLOW_SOURCE_TEXT
   );
 
-  // GitHub & Google Drive Runner Configuration state
-  const [ghToken, setGhToken] = useState<string>(() => localStorage.getItem('ac_gh_token') || '');
+  // GitHub & Google Drive Runner Configuration state (единый ключ "aether_google_auth" + совместимость с ac_*)
+  const [ghToken, setGhToken] = useState<string>(() => bootSnapshot.googleAuth.github_token || '');
   const [ghRepo, setGhRepo] = useState<string>(
-    () => localStorage.getItem('ac_gh_repo') || 'ZermeXX/aetherflow-render'
+    () => bootSnapshot.googleAuth.repo || 'ZermeXX/aetherflow-render'
   );
-  const [ghBranch, setGhBranch] = useState<string>(() => localStorage.getItem('ac_gh_branch') || 'main');
+  const [ghBranch, setGhBranch] = useState<string>(() => bootSnapshot.googleAuth.branch || 'main');
   const [gdriveFolderId, setGdriveFolderId] = useState<string>(
-    () => localStorage.getItem('ac_gdrive_folder_id') || '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK'
+    () => bootSnapshot.googleAuth.drive_folder_id || '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK'
   );
   const [gdriveSaKey, setGdriveSaKey] = useState<string>(
     () => localStorage.getItem('ac_gdrive_sa_key') || ''
@@ -1224,6 +1402,144 @@ export default function App() {
   const [telegramChatId, setTelegramChatId] = useState<string>(
     () => localStorage.getItem('ac_tg_chat_id') || ''
   );
+
+  // Автосинхронизация GitHub Token / repo / branch / Drive Folder ID в "aether_google_auth"
+  useEffect(() => {
+    saveGoogleAuthPatch({
+      github_token: ghToken,
+      repo: ghRepo,
+      branch: ghBranch,
+      drive_folder_id: gdriveFolderId
+    });
+  }, [ghToken, ghRepo, ghBranch, gdriveFolderId]);
+
+  // Автосохранение черновика проекта "aether_workspace_draft" (debounce 400 мс)
+  useEffect(() => {
+    if (suppressNextDraftSaveRef.current) {
+      suppressNextDraftSaveRef.current = false;
+      return;
+    }
+    if (draftDebounceTimerRef.current !== null) {
+      window.clearTimeout(draftDebounceTimerRef.current);
+    }
+    draftDebounceTimerRef.current = window.setTimeout(() => {
+      const draftPayload: AetherWorkspaceDraft = {
+        version: 1,
+        updated_at: Date.now(),
+        project: {
+          name: loopProjectName,
+          active_format_preset: activeFormatPreset,
+          thumb_title: thumbTitle,
+          thumb_badge: thumbBadge,
+          seo_script_text: seoScriptText,
+          verbaflow_chapters_txt: verbaFlowChaptersTxt,
+          ambient_loop_enabled: ambientLoopEnabled,
+          end_screen_safe_zone: endScreenSafeZone,
+          manifest_duration_badge: manifestDurationBadge
+        },
+        verbaflow: {
+          source_text: sourceText
+        },
+        combine: combineDraftSliceRef.current,
+        render_settings: {
+          timeline_slots: timelineSlots,
+          video_codec: videoCodec,
+          video_crf: videoCrf,
+          video_fps: videoFps,
+          audio_bitrate_kbps: audioBitrateKbps,
+          act_crossfade_sec: actCrossfadeSec,
+          internal_loop_crossfade_sec: internalLoopCrossfadeSec,
+          final_black_screen_enabled: finalBlackScreenEnabled,
+          final_black_screen_sec: finalBlackScreenSec,
+          audio_mastering: audioMastering as unknown as Record<string, unknown>,
+          continuous_bed: continuousBed as unknown as Record<string, unknown>,
+          loop_master_audio: loopMasterAudio as unknown as Record<string, unknown>,
+          seamless_asymmetry: seamlessAsymmetry as unknown as Record<string, unknown>,
+          loop_hours: loopHours,
+          loop_resolution: loopResolution,
+          loop_draft_mode: loopDraftMode,
+          bitrate_preset: bitratePreset,
+          seamless_transition_mode: seamlessTransitionMode,
+          seamless_stitch_enabled: seamlessStitchEnabled,
+          crossfade_duration: crossfadeDuration,
+          audio_crossfade_duration: audioCrossfadeDuration,
+          audio_crossfade_enabled: audioCrossfadeEnabled,
+          use_embedded_audio: useEmbeddedAudio,
+          expected_video_filename: expectedVideoFilename,
+          expected_audio_filename: expectedAudioFilename,
+          loop_burn_in_subtitles: loopBurnInSubtitles,
+          loop_upload_srt_to_drive: loopUploadSrtToDrive,
+          loop_subtitle_language: loopSubtitleLanguage,
+          loop_srt_custom_content: loopSrtCustomContent,
+          shorts_factory_enabled: shortsFactoryEnabled,
+          strict_scene_duration_lock: strictSceneDurationLock,
+          sidecar_burn_in_video: sidecarBurnInVideo,
+          export_separate_srt_files: exportSeparateSrtFiles,
+          selected_subtitle_languages: selectedSubtitleLanguages,
+          render_specs_summary: renderSpecsSummary,
+          export_output_chapters_enabled: exportOutputChaptersEnabled,
+          export_release_card_md_enabled: exportReleaseCardMdEnabled
+        }
+      };
+      saveWorkspaceDraft(draftPayload);
+      draftDebounceTimerRef.current = null;
+    }, 400);
+
+    return () => {
+      if (draftDebounceTimerRef.current !== null) {
+        window.clearTimeout(draftDebounceTimerRef.current);
+      }
+    };
+  }, [
+    loopProjectName,
+    activeFormatPreset,
+    thumbTitle,
+    thumbBadge,
+    seoScriptText,
+    verbaFlowChaptersTxt,
+    ambientLoopEnabled,
+    endScreenSafeZone,
+    manifestDurationBadge,
+    sourceText,
+    combineDraftRev,
+    timelineSlots,
+    videoCodec,
+    videoCrf,
+    videoFps,
+    audioBitrateKbps,
+    actCrossfadeSec,
+    internalLoopCrossfadeSec,
+    finalBlackScreenEnabled,
+    finalBlackScreenSec,
+    audioMastering,
+    continuousBed,
+    loopMasterAudio,
+    seamlessAsymmetry,
+    loopHours,
+    loopResolution,
+    loopDraftMode,
+    bitratePreset,
+    seamlessTransitionMode,
+    seamlessStitchEnabled,
+    crossfadeDuration,
+    audioCrossfadeDuration,
+    audioCrossfadeEnabled,
+    useEmbeddedAudio,
+    expectedVideoFilename,
+    expectedAudioFilename,
+    loopBurnInSubtitles,
+    loopUploadSrtToDrive,
+    loopSubtitleLanguage,
+    loopSrtCustomContent,
+    shortsFactoryEnabled,
+    strictSceneDurationLock,
+    sidecarBurnInVideo,
+    exportSeparateSrtFiles,
+    selectedSubtitleLanguages,
+    renderSpecsSummary,
+    exportOutputChaptersEnabled,
+    exportReleaseCardMdEnabled
+  ]);
 
   // Modal state
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(false);
@@ -1237,8 +1553,12 @@ export default function App() {
   const [modalTelegramChatId, setModalTelegramChatId] = useState<string>('');
 
   // Состояние авторизации Google Drive (OAuth 2.0 Resumable Upload в текущую папку)
-  const [driveUser, setDriveUser] = useState<User | null>(null);
-  const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [driveUser, setDriveUser] = useState<User | null>(
+    () => bootSnapshot.restoredGoogleSession?.user ?? null
+  );
+  const [driveToken, setDriveToken] = useState<string | null>(
+    () => bootSnapshot.restoredGoogleSession?.accessToken ?? null
+  );
 
   useEffect(() => {
     const unsubscribe = initDriveAuth(
@@ -1254,7 +1574,15 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Cloud Render status bar & GitHub Actions Polling state
+  // Cloud Render status bar & GitHub Actions Polling state (автовосстановление из "aether_active_render_job" при F5)
+  const bootElapsedSeconds = bootRunningJob
+    ? Math.max(0, Math.floor((Date.now() - bootRunningJob.started_at) / 1000))
+    : 0;
+
+  const [isRenderLogPanelOpen, setIsRenderLogPanelOpen] = useState<boolean>(() =>
+    Boolean(bootRunningJob)
+  );
+
   const [renderStatus, setRenderStatus] = useState<{
     visible: boolean;
     status: 'idle' | 'running' | 'success' | 'failure';
@@ -1265,23 +1593,90 @@ export default function App() {
     seconds: number;
     runUrl: string;
     runId?: number;
-  }>({
-    visible: false,
-    status: 'idle',
-    runnerPhase: undefined,
-    title: 'Облачный рендер запущен...',
-    desc: 'GitHub Actions FFmpeg выполняет компиляцию кадров',
-    stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
-    seconds: 0,
-    runUrl: 'https://github.com/ZermeXX/aetherflow-render/actions'
-  });
+  }>(() =>
+    bootRunningJob
+      ? {
+          visible: true,
+          status: 'running',
+          runnerPhase: 'running',
+          title:
+            bootRunningJob.title ||
+            `Сборка «${bootRunningJob.project_name}» выполняется в GitHub Actions...`,
+          desc:
+            bootRunningJob.desc ||
+            `Workflow: ${bootRunningJob.workflow} • Ветка: ${bootRunningJob.branch} • Репозиторий: ${bootRunningJob.repo}`,
+          stepLabel:
+            bootRunningJob.step_label || 'Шаг: Возобновление опроса GitHub Actions (каждые 5с)...',
+          seconds: bootElapsedSeconds,
+          runUrl:
+            bootRunningJob.run_url ||
+            (bootRunningJob.run_id
+              ? `https://github.com/${bootRunningJob.repo}/actions/runs/${bootRunningJob.run_id}`
+              : `https://github.com/${bootRunningJob.repo}/actions`),
+          runId: bootRunningJob.run_id ?? undefined
+        }
+      : {
+          visible: false,
+          status: 'idle',
+          runnerPhase: undefined,
+          title: 'Облачный рендер запущен...',
+          desc: 'GitHub Actions FFmpeg выполняет компиляцию кадров',
+          stepLabel: 'Шаг: Скачивание клипов из Google Drive...',
+          seconds: 0,
+          runUrl: 'https://github.com/ZermeXX/aetherflow-render/actions'
+        }
+  );
 
   // Состояние студийного псевдотерминала (LiveTerminal)
-  const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>([]);
-  const seenStepsRef = useRef<Record<string, string>>({});
-  const secondsRef = useRef<number>(0);
-  const dispatchTimeRef = useRef<number>(0);
-  const activeRunIdRef = useRef<number | null>(null);
+  const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>(() => {
+    if (!bootRunningJob) return [];
+    return [
+      ...bootRunningJob.logs,
+      {
+        id: `${Date.now()}-resumed`,
+        text: `[${formatTerminalTime(bootElapsedSeconds)}] 🔄 Сессия восстановлена после перезагрузки — опрос GitHub Actions возобновлён (каждые 5с)...`,
+        level: 'info'
+      }
+    ];
+  });
+
+  const seenStepsRef = useRef<Record<string, string>>(
+    (() => {
+      const seeded: Record<string, string> = {};
+      if (bootRunningJob?.logs) {
+        for (const entry of bootRunningJob.logs) {
+          const inProg = entry.text.match(/⚙️ Выполняется шаг:\s*(.+?)\.\.\.$/);
+          if (inProg) seeded[`name:${inProg[1].trim()}`] = 'in_progress';
+          const okMatch = entry.text.match(/✅ Шаг\s+(.+?)\s+завершён успешно\.$/);
+          if (okMatch) seeded[`name:${okMatch[1].trim()}`] = 'completed_success';
+          const failMatch = entry.text.match(/❌ Сбой на шаге:\s*(.+?)!$/);
+          if (failMatch) seeded[`name:${failMatch[1].trim()}`] = 'completed_failure';
+        }
+      }
+      return seeded;
+    })()
+  );
+  const secondsRef = useRef<number>(bootElapsedSeconds);
+  const dispatchTimeRef = useRef<number>(bootRunningJob?.started_at ?? 0);
+  const activeRunIdRef = useRef<number | null>(bootRunningJob?.run_id ?? null);
+  const resumedFromStorageRef = useRef<boolean>(Boolean(bootRunningJob));
+  const activeRenderMetaRef = useRef<{
+    repo: string;
+    workflow: string;
+    branch: string;
+    started_at: number;
+    project_name: string;
+  } | null>(
+    bootRunningJob
+      ? {
+          repo: bootRunningJob.repo,
+          workflow: bootRunningJob.workflow,
+          branch: bootRunningJob.branch,
+          started_at: bootRunningJob.started_at,
+          project_name: bootRunningJob.project_name
+        }
+      : null
+  );
 
   const appendTerminalLog = useCallback(
     (text: string, level: TerminalLogEntry['level'] = 'info') => {
@@ -1293,7 +1688,47 @@ export default function App() {
 
   const clearTerminalLogs = useCallback(() => {
     setTerminalLogs([]);
-  }, []);
+    if (renderStatus.status !== 'running') {
+      activeRenderMetaRef.current = null;
+      clearActiveRenderJob();
+    }
+  }, [renderStatus.status]);
+
+  // Автообновление "aether_active_render_job" при каждом изменении статуса, run_id и logs
+  useEffect(() => {
+    const meta = activeRenderMetaRef.current;
+    if (!meta) return;
+    if (
+      renderStatus.status !== 'running' &&
+      renderStatus.status !== 'success' &&
+      renderStatus.status !== 'failure'
+    ) {
+      return;
+    }
+    const jobRecord: AetherActiveRenderJob = {
+      status: renderStatus.status,
+      repo: meta.repo,
+      workflow: meta.workflow,
+      branch: meta.branch,
+      started_at: meta.started_at,
+      run_id: activeRunIdRef.current ?? renderStatus.runId ?? null,
+      project_name: meta.project_name,
+      logs: terminalLogs,
+      title: renderStatus.title,
+      desc: renderStatus.desc,
+      step_label: renderStatus.stepLabel,
+      run_url: renderStatus.runUrl
+    };
+    saveActiveRenderJob(jobRecord);
+  }, [
+    renderStatus.status,
+    renderStatus.runId,
+    renderStatus.title,
+    renderStatus.desc,
+    renderStatus.stepLabel,
+    renderStatus.runUrl,
+    terminalLogs
+  ]);
 
   const terminalRunnerStatus: TerminalRunnerState =
     renderStatus.status === 'running'
@@ -1484,6 +1919,11 @@ export default function App() {
     }
 
     let activeRunId = activeRunIdRef.current || renderStatus.runId;
+    const cancelTargetRepo = (
+      activeRenderMetaRef.current?.repo ||
+      ghRepo ||
+      'ZermeXX/aetherflow-render'
+    ).trim();
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${githubToken}`,
@@ -1493,7 +1933,7 @@ export default function App() {
     try {
       if (!activeRunId) {
         const runsRes = await fetch(
-          'https://api.github.com/repos/ZermeXX/aetherflow-render/actions/runs?event=workflow_dispatch&per_page=5',
+          `https://api.github.com/repos/${cancelTargetRepo}/actions/runs?event=workflow_dispatch&per_page=5`,
           { headers }
         );
         if (runsRes.ok) {
@@ -1516,7 +1956,7 @@ export default function App() {
       }
 
       await fetch(
-        `https://api.github.com/repos/ZermeXX/aetherflow-render/actions/runs/${activeRunId}/cancel`,
+        `https://api.github.com/repos/${cancelTargetRepo}/actions/runs/${activeRunId}/cancel`,
         {
           method: 'POST',
           headers
@@ -1535,12 +1975,16 @@ export default function App() {
       const msg = err instanceof Error ? err.message : String(err);
       appendTerminalLog(`[ПРЕРВАНО]: Запрос на отмену отправлен в GitHub Actions (${msg}).`, 'error');
     }
-  }, [ghToken, renderStatus.runId, appendTerminalLog, showToast]);
+  }, [ghToken, ghRepo, renderStatus.runId, appendTerminalLog, showToast]);
 
-  // Автоматический умный опрос GitHub Actions (пауза 4 секунды после старта, защита от ложного cancelled)
+  // Автоматический умный опрос GitHub Actions каждые 5 сек (мгновенное возобновление при F5)
   useEffect(() => {
     if (!renderStatus.visible || renderStatus.status !== 'running') return;
-    const targetRepo = (ghRepo || 'ZermeXX/aetherflow-render').trim();
+    const targetRepo = (
+      activeRenderMetaRef.current?.repo ||
+      ghRepo ||
+      'ZermeXX/aetherflow-render'
+    ).trim();
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28'
@@ -1551,55 +1995,72 @@ export default function App() {
 
     let isCancelled = false;
 
+    type GhWorkflowRun = {
+      id: number;
+      status: string;
+      conclusion: string | null;
+      html_url: string;
+      created_at: string;
+    };
+
     const pollGitHubActions = async () => {
       try {
         const startTime = dispatchTimeRef.current;
-        const runsRes = await fetch(
-          `https://api.github.com/repos/${targetRepo}/actions/runs?event=workflow_dispatch&per_page=5`,
-          { headers }
-        );
-        if (!runsRes.ok || isCancelled) return;
+        let latestRun: GhWorkflowRun | undefined;
 
-        const runsData = (await runsRes.json()) as {
-          workflow_runs?: Array<{
-            id: number;
-            status: string;
-            conclusion: string | null;
-            html_url: string;
-            created_at: string;
-          }>;
-        };
-
-        const rawRuns = runsData.workflow_runs || [];
-        if (rawRuns.length === 0 || isCancelled) return;
-
-        // Игнорируем любые runs со статусом 'cancelled' или 'completed', если они были созданы раньше startTime.
-        // Подхватываем только run_id, который находится в 'queued' или 'in_progress' (или новый run после startTime).
-        const candidateRuns = rawRuns.filter(run => {
-          if (activeRunIdRef.current !== null && run.id === activeRunIdRef.current) {
-            return true;
+        // Если run_id уже известен (например, восстановлен из "aether_active_render_job" при F5), опрашиваем его напрямую
+        if (activeRunIdRef.current !== null) {
+          const directRes = await fetch(
+            `https://api.github.com/repos/${targetRepo}/actions/runs/${activeRunIdRef.current}`,
+            { headers }
+          );
+          if (directRes.ok && !isCancelled) {
+            latestRun = (await directRes.json()) as GhWorkflowRun;
           }
-          const runCreatedTime = new Date(run.created_at).getTime();
-          const isCancelledOrCompleted =
-            run.status === 'cancelled' ||
-            run.status === 'completed' ||
-            run.conclusion === 'cancelled';
+        }
 
-          if (isCancelledOrCompleted && runCreatedTime < startTime) {
-            return false;
-          }
+        if (!latestRun) {
+          const runsRes = await fetch(
+            `https://api.github.com/repos/${targetRepo}/actions/runs?event=workflow_dispatch&per_page=5`,
+            { headers }
+          );
+          if (!runsRes.ok || isCancelled) return;
 
-          if (run.status === 'queued' || run.status === 'in_progress') {
-            return true;
-          }
+          const runsData = (await runsRes.json()) as {
+            workflow_runs?: GhWorkflowRun[];
+          };
 
-          return runCreatedTime >= startTime;
-        });
+          const rawRuns = runsData.workflow_runs || [];
+          if (rawRuns.length === 0 || isCancelled) return;
 
-        const latestRun =
-          activeRunIdRef.current !== null
-            ? candidateRuns.find(r => r.id === activeRunIdRef.current) || candidateRuns[0]
-            : candidateRuns[0];
+          // Игнорируем любые runs со статусом 'cancelled' или 'completed', если они были созданы раньше startTime.
+          // Подхватываем только run_id, который находится в 'queued' или 'in_progress' (или новый run после startTime).
+          const candidateRuns = rawRuns.filter(run => {
+            if (activeRunIdRef.current !== null && run.id === activeRunIdRef.current) {
+              return true;
+            }
+            const runCreatedTime = new Date(run.created_at).getTime();
+            const isCancelledOrCompleted =
+              run.status === 'cancelled' ||
+              run.status === 'completed' ||
+              run.conclusion === 'cancelled';
+
+            if (isCancelledOrCompleted && runCreatedTime < startTime) {
+              return false;
+            }
+
+            if (run.status === 'queued' || run.status === 'in_progress') {
+              return true;
+            }
+
+            return runCreatedTime >= startTime;
+          });
+
+          latestRun =
+            activeRunIdRef.current !== null
+              ? candidateRuns.find(r => r.id === activeRunIdRef.current) || candidateRuns[0]
+              : candidateRuns[0];
+        }
 
         // Если актуальный запуск еще не появился на стороне GitHub — продолжаем ждать без перехода в FAILED
         if (!latestRun || isCancelled) return;
@@ -1638,14 +2099,16 @@ export default function App() {
           jobId = primaryJob?.id;
           const steps = primaryJob?.steps || [];
 
-          // Пошаговая трансляция шагов jobs[0].steps в студийный терминал
+          // Пошаговая трансляция шагов jobs[0].steps в студийный терминал (без дублей после F5)
           steps.forEach(step => {
             const stepKey = `${runId}-${step.number ?? step.name}`;
-            const prevRecorded = seenStepsRef.current[stepKey];
+            const nameKey = `name:${step.name.trim()}`;
+            const prevRecorded = seenStepsRef.current[stepKey] || seenStepsRef.current[nameKey];
             const timeStr = formatTerminalTime(secondsRef.current);
 
             if (step.status === 'in_progress' && !prevRecorded) {
               seenStepsRef.current[stepKey] = 'in_progress';
+              seenStepsRef.current[nameKey] = 'in_progress';
               appendTerminalLog(
                 `[${timeStr}] ⚙️ Выполняется шаг: ${step.name}...`,
                 'step'
@@ -1653,12 +2116,14 @@ export default function App() {
             } else if (step.status === 'completed') {
               if (step.conclusion === 'success' && prevRecorded !== 'completed_success') {
                 seenStepsRef.current[stepKey] = 'completed_success';
+                seenStepsRef.current[nameKey] = 'completed_success';
                 appendTerminalLog(
                   `[${timeStr}] ✅ Шаг ${step.name} завершён успешно.`,
                   'success'
                 );
               } else if (step.conclusion === 'failure' && prevRecorded !== 'completed_failure') {
                 seenStepsRef.current[stepKey] = 'completed_failure';
+                seenStepsRef.current[nameKey] = 'completed_failure';
                 appendTerminalLog(
                   `[${timeStr}] ❌ Сбой на шаге: ${step.name}!`,
                   'error'
@@ -1823,14 +2288,18 @@ export default function App() {
       }
     };
 
-    // Ждем 4.5 секунды (4500 мс) перед первым запросом к API
+    // При восстановлении после F5 опрашиваем немедленно, при свежем старте ждём 4.5с; далее интервал 5 сек
     let interval: ReturnType<typeof setInterval> | null = null;
     const startPollingWithDelay = async () => {
-      await new Promise(r => setTimeout(r, 4500));
+      const initialDelayMs = resumedFromStorageRef.current ? 0 : 4500;
+      resumedFromStorageRef.current = false;
+      if (initialDelayMs > 0) {
+        await new Promise(r => setTimeout(r, initialDelayMs));
+      }
       if (isCancelled) return;
       await pollGitHubActions();
       if (isCancelled) return;
-      interval = setInterval(pollGitHubActions, 3500);
+      interval = setInterval(pollGitHubActions, 5000);
     };
 
     void startPollingWithDelay();
@@ -2025,9 +2494,79 @@ export default function App() {
     localStorage.setItem('ac_gdrive_sa_key', trimmedSaKey);
     localStorage.setItem('ac_tg_bot_token', trimmedTgToken);
     localStorage.setItem('ac_tg_chat_id', trimmedTgChat);
+    saveGoogleAuthPatch({
+      github_token: trimmedToken,
+      repo: trimmedRepo,
+      branch: trimmedBranch,
+      drive_folder_id: trimmedFolder
+    });
 
     closeConfigModal();
     showToast('Конфигурация GitHub Actions, Google Drive и Telegram сохранена', 'success');
+  };
+
+  const confirmResetWorkspaceProject = () => {
+    if (draftDebounceTimerRef.current !== null) {
+      window.clearTimeout(draftDebounceTimerRef.current);
+      draftDebounceTimerRef.current = null;
+    }
+    suppressNextDraftSaveRef.current = true;
+    clearWorkspaceDraft();
+    combineDraftSliceRef.current = undefined;
+    setInitialCombineDraft(null);
+
+    setLoopProjectName('HistoViva Documentary 4K');
+    setActiveFormatPreset('histoviva_doc');
+    setThumbTitle('SEALED ARCHIVE');
+    setThumbBadge('4k_ultra_hd,documentary,lost_archives');
+    setSeoScriptText(DEFAULT_SEO_SCRIPT_TEXT);
+    setVerbaFlowChaptersTxt('');
+    setSourceText(DEFAULT_VERBAFLOW_SOURCE_TEXT);
+    setAmbientLoopEnabled(true);
+    setEndScreenSafeZone('05:14-05:24');
+    setManifestDurationBadge('');
+    setTimelineSlots(INITIAL_TIMELINE_SLOTS);
+    setVideoCodec('libx264');
+    setVideoCrf(20);
+    setVideoFps(24);
+    setAudioBitrateKbps(320);
+    setActCrossfadeSec(90.0);
+    setInternalLoopCrossfadeSec(1.0);
+    setFinalBlackScreenEnabled(true);
+    setFinalBlackScreenSec(2.0);
+    setAudioMastering({ ...DEFAULT_AUDIO_MASTERING });
+    setContinuousBed({ ...DEFAULT_CONTINUOUS_BED });
+    setLoopMasterAudio({ ...DEFAULT_LOOP_MASTER_AUDIO });
+    setSeamlessAsymmetry({ ...DEFAULT_SEAMLESS_ASYMMETRY });
+    setLoopHours(3);
+    setLoopResolution('4k');
+    setLoopDraftMode(false);
+    setBitratePreset('cinema');
+    setSeamlessTransitionMode('crossfade');
+    setSeamlessStitchEnabled(true);
+    setCrossfadeDuration(1.0);
+    setAudioCrossfadeDuration(90.0);
+    setAudioCrossfadeEnabled(true);
+    setUseEmbeddedAudio(true);
+    setExpectedVideoFilename('');
+    setExpectedAudioFilename('');
+    setImportedManifestName('');
+    setLoopBurnInSubtitles(false);
+    setLoopUploadSrtToDrive(true);
+    setLoopSubtitleLanguage('en');
+    setLoopSrtCustomContent('');
+    setShortsFactoryEnabled(false);
+    setStrictSceneDurationLock(true);
+    setSidecarBurnInVideo(false);
+    setExportSeparateSrtFiles(true);
+    setSelectedSubtitleLanguages(['EN', 'RU']);
+    setRenderSpecsSummary(DEFAULT_RENDER_SPECS_SUMMARY);
+    setExportOutputChaptersEnabled(true);
+    setExportReleaseCardMdEnabled(true);
+
+    setWorkspaceResetKey(prev => prev + 1);
+    setIsResetProjectModalOpen(false);
+    showToast('Проект и черновик сброшены к настройкам по умолчанию', 'success');
   };
 
   const copyWorkflowTemplate = () => {
@@ -2035,31 +2574,72 @@ export default function App() {
     showToast('Шаблон render_loop.yml скопирован в буфер обмена!', 'success');
   };
 
-  const showStatusBar = (title: string, desc: string, repo: string, customDispatchTime?: number) => {
+  const showStatusBar = (
+    title: string,
+    desc: string,
+    repo: string,
+    customDispatchTime?: number,
+    meta?: { workflow?: string; branch?: string; projectName?: string }
+  ) => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
     const cleanRepo = (repo || 'ZermeXX/aetherflow-render').trim();
-    dispatchTimeRef.current = customDispatchTime || new Date().getTime();
+    const startedAt = customDispatchTime || new Date().getTime();
+    const resolvedWorkflow = meta?.workflow || 'render_scenes.yml';
+    const resolvedBranch = (meta?.branch || ghBranch || 'main').trim();
+    const resolvedProjectName =
+      meta?.projectName || loopProjectName || 'Aether Combine Project';
+
+    dispatchTimeRef.current = startedAt;
     activeRunIdRef.current = null;
     secondsRef.current = 0;
     seenStepsRef.current = {};
-    setTerminalLogs([
+    resumedFromStorageRef.current = false;
+    activeRenderMetaRef.current = {
+      repo: cleanRepo,
+      workflow: resolvedWorkflow,
+      branch: resolvedBranch,
+      started_at: startedAt,
+      project_name: resolvedProjectName
+    };
+
+    const initialLogs: TerminalLogEntry[] = [
       {
         id: `${Date.now()}-init`,
         text: `[00:00] 🚀 Инициализация dispatch в репозиторий ${cleanRepo}...`,
         level: 'info'
       }
-    ]);
+    ];
+    const initialRunUrl = `https://github.com/${cleanRepo}/actions`;
+    const initialStepLabel = 'Шаг: Очередь и скачивание клипов из Google Drive...';
+
+    saveActiveRenderJob({
+      status: 'running',
+      repo: cleanRepo,
+      workflow: resolvedWorkflow,
+      branch: resolvedBranch,
+      started_at: startedAt,
+      run_id: null,
+      project_name: resolvedProjectName,
+      logs: initialLogs,
+      title,
+      desc,
+      step_label: initialStepLabel,
+      run_url: initialRunUrl
+    });
+
+    setIsRenderLogPanelOpen(true);
+    setTerminalLogs(initialLogs);
     setRenderStatus({
       visible: true,
       status: 'running',
       runnerPhase: 'queued',
       title,
       desc,
-      stepLabel: 'Шаг: Очередь и скачивание клипов из Google Drive...',
+      stepLabel: initialStepLabel,
       seconds: 0,
-      runUrl: `https://github.com/${cleanRepo}/actions`
+      runUrl: initialRunUrl
     });
   };
 
@@ -4077,7 +4657,11 @@ export default function App() {
           ? `Режим preflight_only: "true" (~15 сек) | Проверка всех слотов, вставок и аудио в папке ${manifestToSend.gdrive_folder_id || 'GDrive'}`
           : `Проект: ${manifestToSend.project_name} | Кодек: ${manifestToSend.video_codec} (CRF ${crfVal}) | manifest_payload (JSON, ${manifestPayloadJson.length} симв.) | Хронометраж: ${manifestToSend.calculated_project_duration_sec}s | ${scaleFlag}`;
 
-        showStatusBar(statusTitle, statusDesc, targetRepo, startTime);
+        showStatusBar(statusTitle, statusDesc, targetRepo, startTime, {
+          workflow: 'render_loop.yml',
+          branch: targetBranch,
+          projectName: manifestToSend.project_name
+        });
         appendTerminalLog(
           preflightOnly
             ? '[00:00] 🔍 Запущена быстрая Preflight-проверка наличия файлов на Google Drive (preflight_only: "true")...'
@@ -4350,6 +4934,16 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => setIsResetProjectModalOpen(true)}
+              title="Очистить черновик проекта (aether_workspace_draft) и сбросить сцены, сценарий и настройки рендера"
+              className="min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-rose-950/35 hover:border-rose-500/45 text-slate-300 hover:text-rose-200 px-2.5 sm:px-3 py-2 text-xs font-bold cursor-pointer transition"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span className="whitespace-nowrap hidden sm:inline">Сбросить проект</span>
+            </button>
+
+            <button
+              type="button"
               onClick={openConfigModal}
               className="min-h-[40px] sm:min-h-[44px] flex shrink-0 items-center gap-2 sm:gap-3 rounded-xl border border-white/[0.08] bg-[#0f1623]/85 hover:bg-[#0f1623] hover:border-amber-400/40 px-2.5 sm:px-4 py-2 text-xs cursor-pointer shadow-inner"
             >
@@ -4493,6 +5087,7 @@ export default function App() {
           className={`studio-view space-y-6 ${activeTab === 'combine' ? '' : 'hidden'}`}
         >
           <MontageCombineView
+            key={`combine-workspace-${workspaceResetKey}`}
             ghToken={ghToken}
             ghRepo={ghRepo}
             ghBranch={ghBranch}
@@ -4547,6 +5142,8 @@ export default function App() {
             terminalRunUrl={renderStatus.runUrl}
             onClearTerminalLogs={clearTerminalLogs}
             onCancelRenderRun={cancelActiveRenderRun}
+            initialCombineDraft={initialCombineDraft}
+            onCombineDraftChange={handleCombineDraftChange}
           />
         </section>
 
@@ -6863,6 +7460,7 @@ export default function App() {
           className={`studio-view space-y-6 ${activeTab === 'verbaflow' ? '' : 'hidden'}`}
         >
           <VerbaFlowTextWorkbench
+            key={`verbaflow-workspace-${workspaceResetKey}`}
             sourceText={sourceText}
             onSourceTextChange={setSourceText}
             projectName={loopProjectName}
@@ -7100,6 +7698,20 @@ export default function App() {
                 {formatTime(renderStatus.seconds)}
               </span>
 
+              <button
+                type="button"
+                onClick={() => setIsRenderLogPanelOpen(prev => !prev)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 cursor-pointer transition ${
+                  isRenderLogPanelOpen
+                    ? 'text-amber-300 bg-amber-500/15 border-amber-400/50'
+                    : 'text-slate-300 hover:text-amber-300 bg-slate-900 border-slate-700'
+                }`}
+                title="Открыть или свернуть живой лог рендера"
+              >
+                <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isRenderLogPanelOpen ? 'Свернуть лог' : 'Открыть лог'}</span>
+              </button>
+
               <a
                 id="gh-run-link"
                 href={renderStatus.runUrl}
@@ -7110,9 +7722,79 @@ export default function App() {
                 Смотреть лог в GitHub <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
               </a>
             </div>
+
+            {isRenderLogPanelOpen && (
+              <div className="w-full pt-3 border-t border-white/[0.08]">
+                <LiveTerminal
+                  status={terminalRunnerStatus}
+                  elapsedSeconds={renderStatus.seconds}
+                  logs={terminalLogs}
+                  runUrl={renderStatus.runUrl}
+                  onClearLogs={clearTerminalLogs}
+                  onCancelRun={cancelActiveRenderRun}
+                />
+              </div>
+            )}
           </div>
         )}
       </main>
+
+      {/* МОДАЛКА ПОДТВЕРЖДЕНИЯ СБРОСА ПРОЕКТА («Сбросить проект») */}
+      {isResetProjectModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reset-project-modal-title"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
+          <div className="bg-[#111622] border border-rose-500/35 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 id="reset-project-modal-title" className="text-sm font-bold text-slate-100">
+                    Сбросить проект?
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Очистка локального черновика <code className="font-mono text-rose-300">aether_workspace_draft</code>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsResetProjectModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                aria-label="Закрыть"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Будут сброшены название проекта, сценарий VerbaFlow, сцены (с датами и локациями), оверлеи и настройки рендера. Подключения Google Auth, GitHub Token и Google Drive Folder ID сохранятся.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsResetProjectModalOpen(false)}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300 cursor-pointer transition"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={confirmResetWorkspaceProject}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 text-xs font-bold cursor-pointer transition shadow-md shadow-rose-500/20"
+              >
+                Да, сбросить проект
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =========================================
           МОДАЛКА НАСТРОЕК GITHUB ACTIONS & GOOGLE DRIVE

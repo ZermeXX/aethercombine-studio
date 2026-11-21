@@ -17,8 +17,10 @@ import {
 import type { User } from 'firebase/auth';
 import {
   googleDriveSignIn,
+  googleDriveSilentRefresh,
   googleDriveLogout,
   getDriveAccessToken,
+  isDriveTokenFresh,
   resumableUploadToGoogleDrive
 } from '../googleDriveAuth';
 
@@ -97,7 +99,14 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
       onTargetFolderIdChange(DEFAULT_DRIVE_FOLDER_ID);
     }
 
-    let activeToken = explicitToken || driveToken || getDriveAccessToken();
+    let activeToken = explicitToken || (isDriveTokenFresh() ? driveToken || getDriveAccessToken() : null);
+    if (!activeToken) {
+      const refreshed = await googleDriveSilentRefresh(driveUser?.email || undefined);
+      if (refreshed) {
+        onAuthChange(refreshed.user, refreshed.accessToken);
+        activeToken = refreshed.accessToken;
+      }
+    }
     if (!activeToken) {
       activeToken = await handleLogin();
       if (!activeToken) return;
@@ -258,7 +267,16 @@ export const GoogleDriveDirectUploader: React.FC<GoogleDriveDirectUploaderProps>
         <div className="flex flex-wrap items-center gap-2">
           {driveUser && driveToken ? (
             <div className="flex items-center gap-2 bg-emerald-950/30 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-xs">
-              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+              {driveUser.photoURL ? (
+                <img
+                  src={driveUser.photoURL}
+                  alt={driveUser.displayName || driveUser.email || 'Google Avatar'}
+                  referrerPolicy="no-referrer"
+                  className="w-5 h-5 rounded-full object-cover border border-emerald-400/50 shrink-0"
+                />
+              ) : (
+                <HardDrive className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              )}
               <span className="text-emerald-300 font-medium truncate max-w-[180px]">
                 {driveUser.email || driveUser.displayName || 'Google Drive подключен'}
               </span>

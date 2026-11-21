@@ -56,6 +56,7 @@ import {
   parseV21ManifestObject
 } from '../utils/manifestV21';
 import { serializeCompactDispatchJson } from '../utils/manifestDispatch';
+import type { AetherCombineDraftSlice } from '../utils/aetherPersistence';
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
 
@@ -418,7 +419,13 @@ interface MontageCombineViewProps {
   telegramBotToken?: string;
   telegramChatId?: string;
   onOpenConfigModal: () => void;
-  onStartRenderStatus: (title: string, desc: string, repo: string, customDispatchTime?: number) => void;
+  onStartRenderStatus: (
+    title: string,
+    desc: string,
+    repo: string,
+    customDispatchTime?: number,
+    meta?: { workflow?: string; branch?: string; projectName?: string }
+  ) => void;
   onCancelRenderRun: () => void;
   onNotify: (
     message: string,
@@ -431,6 +438,8 @@ interface MontageCombineViewProps {
   terminalLogs: TerminalLogEntry[];
   terminalRunUrl?: string;
   onClearTerminalLogs: () => void;
+  initialCombineDraft?: AetherCombineDraftSlice | null;
+  onCombineDraftChange?: (slice: AetherCombineDraftSlice) => void;
 }
 
 const formatTimecode = (sec: number): string => {
@@ -890,6 +899,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   ghToken,
   ghRepo,
+  ghBranch,
   gdriveFolderId,
   onGdriveFolderIdChange,
   driveUser,
@@ -927,10 +937,18 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   terminalSeconds,
   terminalLogs,
   terminalRunUrl,
-  onClearTerminalLogs
+  onClearTerminalLogs,
+  initialCombineDraft,
+  onCombineDraftChange
 }) => {
   // Редактируемое имя проекта (по умолчанию: "Narrative Movie 4K")
-  const [projectName, setProjectName] = useState<string>(externalProjectName || 'Narrative Movie 4K');
+  const [projectName, setProjectName] = useState<string>(
+    () =>
+      (typeof initialCombineDraft?.project_name === 'string' &&
+      initialCombineDraft.project_name.trim()
+        ? initialCombineDraft.project_name
+        : externalProjectName) || 'Narrative Movie 4K'
+  );
 
   useEffect(() => {
     if (typeof externalProjectName === 'string' && externalProjectName !== projectName) {
@@ -946,24 +964,40 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   // Профиль Ритм-карты и Генератор ритма по референсу (Style & Pacing DNA)
   const [rhythmProfile, setRhythmProfile] = useState<
     'historical_storytelling' | 'ambient_meditative' | 'custom_dna'
-  >('historical_storytelling');
-  const [isDnaModalOpen, setIsDnaModalOpen] = useState<boolean>(false);
-  const [dnaReferenceInput, setDnaReferenceInput] = useState<string>(
-    'Быстрый монтаж каждые 3 сек, резкие наезды, мрачный нуар'
+  >(() =>
+    initialCombineDraft?.rhythm_profile === 'ambient_meditative' ||
+    initialCombineDraft?.rhythm_profile === 'custom_dna' ||
+    initialCombineDraft?.rhythm_profile === 'historical_storytelling'
+      ? initialCombineDraft.rhythm_profile
+      : 'historical_storytelling'
   );
-  const [lastAppliedDnaSummary, setLastAppliedDnaSummary] = useState<string>(
-    'Historical Storytelling • 2.5–8 сек • Живопись / Графический роман'
+  const [isDnaModalOpen, setIsDnaModalOpen] = useState<boolean>(false);
+  const [dnaReferenceInput, setDnaReferenceInput] = useState<string>(() =>
+    typeof initialCombineDraft?.dna_reference_input === 'string'
+      ? initialCombineDraft.dna_reference_input
+      : 'Быстрый монтаж каждые 3 сек, резкие наезды, мрачный нуар'
+  );
+  const [lastAppliedDnaSummary, setLastAppliedDnaSummary] = useState<string>(() =>
+    typeof initialCombineDraft?.last_applied_dna_summary === 'string'
+      ? initialCombineDraft.last_applied_dna_summary
+      : 'Historical Storytelling • 2.5–8 сек • Живопись / Графический роман'
   );
   const [importedRhythmMap, setImportedRhythmMap] = useState<
     Record<string, unknown> | string | null
   >(null);
 
   // Мультивыбор кинематографичных оверлеев (записываются в массив overlays внутри manifest.json)
-  const [selectedOverlays, setSelectedOverlays] = useState<CinematicOverlayId[]>([
-    'ambient_particles',
-    'cinematic_film_grain'
-  ]);
-  const [lowerThirdStyle, setLowerThirdStyle] = useState<LowerThirdStyleId>('rossiya24');
+  const [selectedOverlays, setSelectedOverlays] = useState<CinematicOverlayId[]>(() =>
+    Array.isArray(initialCombineDraft?.selected_overlays)
+      ? (initialCombineDraft.selected_overlays as CinematicOverlayId[])
+      : ['ambient_particles', 'cinematic_film_grain']
+  );
+  const [lowerThirdStyle, setLowerThirdStyle] = useState<LowerThirdStyleId>(() =>
+    typeof initialCombineDraft?.lower_third_style === 'string' &&
+    initialCombineDraft.lower_third_style.trim()
+      ? (initialCombineDraft.lower_third_style as LowerThirdStyleId)
+      : 'rossiya24'
+  );
 
   const toggleOverlayPreset = (overlayId: CinematicOverlayId) => {
     setSelectedOverlays(prev =>
@@ -972,8 +1006,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   };
 
   // Динамический массив сцен любой длины (80, 120, 160, 200+ сцен без лимитов и без тестовых заглушек)
-  const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() =>
-    Array.from({ length: 12 }, (_, idx) => ({
+  const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() => {
+    if (
+      Array.isArray(initialCombineDraft?.narrative_scenes) &&
+      initialCombineDraft.narrative_scenes.length > 0
+    ) {
+      return initialCombineDraft.narrative_scenes as NarrativeSceneItem[];
+    }
+    return Array.from({ length: 12 }, (_, idx) => ({
       scene_index: idx + 1,
       scene_id: `SCENE_${String(idx + 1).padStart(3, '0')}`,
       file_name: '',
@@ -988,8 +1028,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       text_overlay: '',
       needs_revision: false,
       revision_note: ''
-    }))
-  );
+    }));
+  });
 
   // Применение 1-Click пресета Ритм-карты из шапки студии или блока Ритм-карты
   const applyRhythmProfileToScenes = (
@@ -1191,22 +1231,29 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Двухслойный аудио-микшер:
   // а) Фоновый эмбиент (непрерывный фоновый звук, чекбокс «Зациклить на всю длину видео»)
-  const [ambientAudio, setAmbientAudio] = useState<AmbientAudioConfig>({
+  const [ambientAudio, setAmbientAudio] = useState<AmbientAudioConfig>(() => ({
     file_name: '',
     loop_full_duration: true,
-    volume: 0.45
-  });
+    volume: 0.45,
+    ...((initialCombineDraft?.ambient_audio as Partial<AmbientAudioConfig>) || {})
+  }));
 
   // б) Мастер-аудиодорожка (озвучка / саундтрек) с полями таймкода старта и громкости
-  const [masterAudio, setMasterAudio] = useState<MasterAudioConfig>({
+  const [masterAudio, setMasterAudio] = useState<MasterAudioConfig>(() => ({
     file_name: '',
     start_timecode: '00:00:00',
     volume: 1.0,
     fade_in_sec: 1.0,
-    fade_out_sec: 2.0
-  });
+    fade_out_sec: 2.0,
+    ...((initialCombineDraft?.master_audio as Partial<MasterAudioConfig>) || {})
+  }));
   // Матрица рассинхрона (Audio-to-Video Drift Guard): длительность мастер-аудиодорожки в секундах
-  const [masterAudioDurationSec, setMasterAudioDurationSec] = useState<number>(64);
+  const [masterAudioDurationSec, setMasterAudioDurationSec] = useState<number>(() =>
+    typeof initialCombineDraft?.master_audio_duration_sec === 'number' &&
+    Number.isFinite(initialCombineDraft.master_audio_duration_sec)
+      ? initialCombineDraft.master_audio_duration_sec
+      : 64
+  );
   const [masterAudioFile, setMasterAudioFile] = useState<File | null>(null);
   const [masterAudioUploadProgress, setMasterAudioUploadProgress] = useState<{
     uploading: boolean;
@@ -1237,11 +1284,32 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   }, [externalMasterAudioFile, onConsumeExternalMasterAudio]);
 
   // Гибкая система субтитров: Hardsub (burn_in) / Softsub (upload_srt на Google Диск) / Скачивание .SRT
-  const [burnInSrtEnabled, setBurnInSrtEnabled] = useState<boolean>(false);
-  const [uploadSrtToDriveEnabled, setUploadSrtToDriveEnabled] = useState<boolean>(true);
-  const [subtitleLanguage, setSubtitleLanguage] = useState<SubtitleTargetLanguage>('en-US');
-  const [srtFilename, setSrtFilename] = useState<string>('subtitles_en.srt');
-  const [srtTextContent, setSrtTextContent] = useState<string>('');
+  const [burnInSrtEnabled, setBurnInSrtEnabled] = useState<boolean>(() =>
+    typeof initialCombineDraft?.burn_in_srt_enabled === 'boolean'
+      ? initialCombineDraft.burn_in_srt_enabled
+      : false
+  );
+  const [uploadSrtToDriveEnabled, setUploadSrtToDriveEnabled] = useState<boolean>(() =>
+    typeof initialCombineDraft?.upload_srt_to_drive_enabled === 'boolean'
+      ? initialCombineDraft.upload_srt_to_drive_enabled
+      : true
+  );
+  const [subtitleLanguage, setSubtitleLanguage] = useState<SubtitleTargetLanguage>(() =>
+    typeof initialCombineDraft?.subtitle_language === 'string' &&
+    initialCombineDraft.subtitle_language.trim()
+      ? (initialCombineDraft.subtitle_language as SubtitleTargetLanguage)
+      : 'en-US'
+  );
+  const [srtFilename, setSrtFilename] = useState<string>(() =>
+    typeof initialCombineDraft?.srt_filename === 'string'
+      ? initialCombineDraft.srt_filename
+      : 'subtitles_en.srt'
+  );
+  const [srtTextContent, setSrtTextContent] = useState<string>(() =>
+    typeof initialCombineDraft?.srt_text_content === 'string'
+      ? initialCombineDraft.srt_text_content
+      : ''
+  );
   const srtFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Авто-нарезка вирусных Shorts (9:16, 1080x1920, центрированный кроп + 2–3 индивидуальных хука)
@@ -1250,12 +1318,23 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     'NOBODY COULD EXPLAIN THIS...',
     'THE TRUTH WAS BURIED HERE...'
   ];
-  const [shortsAutoSliceEnabled, setShortsAutoSliceEnabled] = useState<boolean>(false);
-  const [shortsSliceCount, setShortsSliceCount] = useState<2 | 3>(3);
-  const [shortsHookTexts, setShortsHookTexts] = useState<[string, string, string]>(DEFAULT_SHORTS_HOOKS);
+  const [shortsAutoSliceEnabled, setShortsAutoSliceEnabled] = useState<boolean>(() =>
+    typeof initialCombineDraft?.shorts_auto_slice_enabled === 'boolean'
+      ? initialCombineDraft.shorts_auto_slice_enabled
+      : false
+  );
+  const [shortsSliceCount, setShortsSliceCount] = useState<2 | 3>(() =>
+    initialCombineDraft?.shorts_slice_count === 2 ? 2 : 3
+  );
+  const [shortsHookTexts, setShortsHookTexts] = useState<[string, string, string]>(() =>
+    Array.isArray(initialCombineDraft?.shorts_hook_texts) &&
+    initialCombineDraft.shorts_hook_texts.length === 3
+      ? ([...initialCombineDraft.shorts_hook_texts] as [string, string, string])
+      : DEFAULT_SHORTS_HOOKS
+  );
 
   // Параметры кодирования для N-сцен (по умолчанию H.264 libx264 High profile CRF 18 yuv420p 24fps CFR)
-  const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>({
+  const [exportSettings, setExportSettings] = useState<NarrativeExportSettings>(() => ({
     resolution: '4k',
     aspect_ratio: '16:9',
     video_codec: 'libx264',
@@ -1267,11 +1346,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     bitrate_mbps: 35,
     crf: 18,
     fps: 24,
-    audio_bitrate_kbps: 320
-  });
+    audio_bitrate_kbps: 320,
+    ...((initialCombineDraft?.export_settings as Partial<NarrativeExportSettings>) || {})
+  }));
 
   // Авто-блокировки непрерывного голоса, декупленного FFmpeg xfade и аудио-нормализации v2.2-FINAL
-  const [v21Locks, setV21Locks] = useState<V21PipelineLocks>({
+  const [v21Locks, setV21Locks] = useState<V21PipelineLocks>(() => ({
     hardFrameLock: true,
     apadAtrimLock: true,
     continuousVoiceMaster: true,
@@ -1283,8 +1363,57 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     integratedLufs: -14.0,
     truePeakDbtp: -1.0,
     voiceoverLeadInSec: VOICEOVER_LEAD_IN_SEC,
-    voiceoverSentencePadSec: VOICEOVER_SENTENCE_PAD_SEC
-  });
+    voiceoverSentencePadSec: VOICEOVER_SENTENCE_PAD_SEC,
+    ...((initialCombineDraft?.v21_locks as Partial<V21PipelineLocks>) || {})
+  }));
+
+  // Передача актуального среза сцен (включая даты/локации), оверлеев и настроек рендера для автосохранения "aether_workspace_draft"
+  useEffect(() => {
+    onCombineDraftChange?.({
+      project_name: projectName,
+      rhythm_profile: rhythmProfile,
+      dna_reference_input: dnaReferenceInput,
+      last_applied_dna_summary: lastAppliedDnaSummary,
+      selected_overlays: selectedOverlays,
+      lower_third_style: lowerThirdStyle,
+      narrative_scenes: narrativeScenes,
+      ambient_audio: ambientAudio as unknown as Record<string, unknown>,
+      master_audio: masterAudio as unknown as Record<string, unknown>,
+      master_audio_duration_sec: masterAudioDurationSec,
+      burn_in_srt_enabled: burnInSrtEnabled,
+      upload_srt_to_drive_enabled: uploadSrtToDriveEnabled,
+      subtitle_language: subtitleLanguage,
+      srt_filename: srtFilename,
+      srt_text_content: srtTextContent,
+      shorts_auto_slice_enabled: shortsAutoSliceEnabled,
+      shorts_slice_count: shortsSliceCount,
+      shorts_hook_texts: shortsHookTexts,
+      export_settings: exportSettings as unknown as Record<string, unknown>,
+      v21_locks: v21Locks as unknown as Record<string, unknown>
+    });
+  }, [
+    onCombineDraftChange,
+    projectName,
+    rhythmProfile,
+    dnaReferenceInput,
+    lastAppliedDnaSummary,
+    selectedOverlays,
+    lowerThirdStyle,
+    narrativeScenes,
+    ambientAudio,
+    masterAudio,
+    masterAudioDurationSec,
+    burnInSrtEnabled,
+    uploadSrtToDriveEnabled,
+    subtitleLanguage,
+    srtFilename,
+    srtTextContent,
+    shortsAutoSliceEnabled,
+    shortsSliceCount,
+    shortsHookTexts,
+    exportSettings,
+    v21Locks
+  ]);
 
   const [importedScenarioName, setImportedScenarioName] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
@@ -3755,7 +3884,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           'Сборка успешно запущена в GitHub Actions!',
           `Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)} • ${serialized.finalLength} симв.) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
           'ZermeXX/aetherflow-render',
-          dispatchTime
+          dispatchTime,
+          {
+            workflow: 'render_scenes.yml',
+            branch: (ghBranch || 'main').trim(),
+            projectName: fullManifestToDispatch.project_name
+          }
         );
         onNotify('Сборка успешно запущена в GitHub Actions!', 'success');
       } else {
