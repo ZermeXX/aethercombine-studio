@@ -203,7 +203,7 @@ aethercombine-studio/
 
 <div align="center">
 
-**Сделано для [@Histoviva](https://youtube.com/@Histoviva) и [@ytAnimistry](https://youtube.com/@ytAnimistry)**
+**Сделано для [@Histoviva](https://youtube.com/@Histoviva)**
 
 *Cloud 4K Production Pipeline · GitHub Actions FFmpeg + Rclone Google Drive*
 
