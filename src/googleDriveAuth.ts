@@ -19,6 +19,10 @@ import {
   loadGoogleAuthRecord,
   saveGoogleAuthPatch
 } from './utils/aetherPersistence';
+import { maskSecret, sanitizeLogText } from './utils/logSanitizer';
+
+/** Реэкспорт для обратной совместимости с импортами из этого модуля. */
+export { maskSecret, sanitizeLogText };
 
 export const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
@@ -36,29 +40,6 @@ let cachedExpiresAt = 0;
 
 type SessionTokenRecord = { access_token: string; expires_at: number };
 type PersistPatch = Parameters<typeof saveGoogleAuthPatch>[0];
-
-/* ------------------------------------------------------------------ */
-/* Маскирование секретов для терминала / копирования логов             */
-/* ------------------------------------------------------------------ */
-export const maskSecret = (value: string, keep: number = 4): string => {
-  const v = String(value || '');
-  if (v.length <= keep * 2) return '••••';
-  return `${v.slice(0, keep)}••••${v.slice(-keep)}`;
-};
-
-export const sanitizeLogText = (text: string): string => {
-  let out = String(text || '');
-  out = out.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer ••••');
-  out = out.replace(/\bya29\.[A-Za-z0-9._-]+/g, 'ya29.••••');
-  out = out.replace(/\bAIza[0-9A-Za-z_-]{20,}/g, 'AIza••••');
-  out = out.replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, 'gh•_••••');
-  out = out.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, 'github_pat_••••');
-  out = out.replace(/\bsk-[A-Za-z0-9_-]{16,}/g, 'sk-••••');
-  out = out.replace(/([?&](?:upload_id|access_token|token|key)=)[^&\s"']+/gi, '$1••••');
-  out = out.replace(/("?(?:private_key|client_secret|bot_token|api_token|access_token|refresh_token)"?\s*[:=]\s*")[^"]+(")/gi, '$1••••$2');
-  out = out.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '•••• PRIVATE KEY REMOVED ••••');
-  return out;
-};
 
 /* ------------------------------------------------------------------ */
 /* Session-scoped хранилище токена                                     */
@@ -80,7 +61,7 @@ const writeSessionToken = (record: SessionTokenRecord | null): void => {
     if (record) sessionStorage.setItem(SESSION_TOKEN_KEY, JSON.stringify(record));
     else sessionStorage.removeItem(SESSION_TOKEN_KEY);
   } catch {
-    // sessionStorage может быть недоступен (private mode) — остаёмся в памяти
+    /* sessionStorage недоступен (private mode) — остаёмся в памяти вкладки */
   }
 };
 
@@ -98,13 +79,16 @@ const purgeLegacyLocalStorageToken = (): SessionTokenRecord | null => {
       sessionStorage.setItem(LEGACY_PURGE_KEY, '1');
     }
   } catch {
-    // ignore
+    /* ignore */
   }
   return migrated;
 };
 
 const legacyMigrated = purgeLegacyLocalStorageToken();
 
+/* ------------------------------------------------------------------ */
+/* OAuth helpers                                                       */
+/* ------------------------------------------------------------------ */
 function createGoogleProvider(options?: {
   prompt?: '' | 'none' | 'select_account';
   loginHint?: string;
@@ -150,7 +134,7 @@ function persistGoogleAuthSession(user: User, accessToken: string, expiresAt: nu
   try {
     saveGoogleAuthPatch({ profile, access_token: '', expires_at: 0 } as PersistPatch);
   } catch {
-    // ignore persistence errors
+    /* ignore persistence errors */
   }
 }
 
@@ -158,6 +142,9 @@ const hasUserActivation = (): boolean => {
   const nav = navigator as Navigator & { userActivation?: { hasBeenActive: boolean } };
   return Boolean(nav.userActivation?.hasBeenActive);
 };
+
+const fallbackUser = (): User =>
+  profileToRestoredUser({ email: '', name: 'Google Drive', avatar: '' });
 
 /** Восстановление сессии текущей вкладки (без чтения токена из localStorage). */
 export const getRestoredGoogleSession = (): {
@@ -171,13 +158,11 @@ export const getRestoredGoogleSession = (): {
   cachedExpiresAt = session.expires_at;
   const stored = loadGoogleAuthRecord();
   const activeUser =
-    auth.currentUser ||
-    (stored.profile
-      ? profileToRestoredUser(stored.profile)
-      : profileToRestoredUser({ email: '', name: 'Google Drive', avatar: '' }));
+    auth.currentUser || (stored.profile ? profileToRestoredUser(stored.profile) : fallbackUser());
   return { user: activeUser, accessToken: session.access_token, expiresAt: session.expires_at };
 };
 
+/** Тихое обновление OAuth access_token (prompt: "none" → "" с login_hint). */
 export const googleDriveSilentRefresh = async (
   loginHint?: string
 ): Promise<{ user: User; accessToken: string } | null> => {
@@ -200,7 +185,7 @@ export const googleDriveSilentRefresh = async (
       persistGoogleAuthSession(result.user, credential.accessToken, expiresAt);
       return { user: result.user, accessToken: credential.accessToken };
     } catch {
-      // Интерактивный фолбэк допустим только после жеста пользователя (иначе popup-blocker)
+      /* Интерактивный фолбэк допустим только после жеста пользователя (иначе popup-blocker) */
       if (!hasUserActivation()) return null;
       try {
         const emptyPromptProvider = createGoogleProvider({
@@ -254,10 +239,7 @@ export const initDriveAuth = (
       cachedExpiresAt = session.expires_at;
       const stored = loadGoogleAuthRecord();
       const effectiveUser =
-        user ||
-        (stored.profile
-          ? profileToRestoredUser(stored.profile)
-          : profileToRestoredUser({ email: '', name: 'Google Drive', avatar: '' }));
+        user || (stored.profile ? profileToRestoredUser(stored.profile) : fallbackUser());
       if (user) persistGoogleAuthSession(user, session.access_token, session.expires_at);
       onAuthSuccess?.(effectiveUser, session.access_token);
       return;
@@ -332,7 +314,7 @@ export const googleDriveLogout = async () => {
   try {
     await auth.signOut();
   } catch {
-    // ignore
+    /* ignore signOut errors when session was restored purely from storage */
   }
   cachedAccessToken = null;
   cachedExpiresAt = 0;
@@ -341,7 +323,7 @@ export const googleDriveLogout = async () => {
     saveGoogleAuthPatch({ access_token: '', expires_at: 0 } as PersistPatch);
     clearGoogleSessionOnly();
   } catch {
-    // ignore
+    /* ignore */
   }
 };
 
@@ -361,7 +343,7 @@ export class DriveUploadAuthError extends Error {
   }
 }
 
-const CHUNK_SIZE = 8 * 1024 * 1024; // кратно 256 КиБ — требование Drive API
+const CHUNK_SIZE = 8 * 1024 * 1024; /* кратно 256 КиБ — требование Drive API */
 const MAX_CHUNK_ATTEMPTS = 5;
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -415,7 +397,7 @@ const queryConfirmedOffset = async (
     const res = await xhrPut(
       sessionUri,
       null,
-      { 'Content-Length': '0', 'Content-Range': `bytes */${total}` },
+      { 'Content-Range': `bytes */${total}` },
       undefined,
       signal
     );
@@ -471,7 +453,9 @@ export const resumableUploadToGoogleDrive = async (
   if (!initRes.ok) {
     const errText = await initRes.text().catch(() => '');
     throw new Error(
-      `Ошибка инициализации Resumable Upload (${initRes.status}): ${sanitizeLogText(errText || initRes.statusText)}`
+      `Ошибка инициализации Resumable Upload (${initRes.status}): ${sanitizeLogText(
+        errText || initRes.statusText
+      )}`
     );
   }
   const sessionUri = initRes.headers.get('Location');
@@ -485,7 +469,6 @@ export const resumableUploadToGoogleDrive = async (
     if (signal?.aborted) throw new DOMException('Upload aborted', 'AbortError');
     const end = Math.min(offset + chunkSize, total);
     const blob = file.slice(offset, end);
-    const isLast = end === total;
     const rangeHeader = `bytes ${offset}-${end - 1}/${total}`;
 
     try {
@@ -529,6 +512,12 @@ export const resumableUploadToGoogleDrive = async (
         );
       }
 
+      if (res.status === 404 || res.status === 410) {
+        throw new Error(
+          `Сессия загрузки «${file.name}» истекла на стороне Drive (${res.status}) — запустите файл заново.`
+        );
+      }
+
       if (res.status === 429 || res.status >= 500) {
         throw new Error(`transient ${res.status}`);
       }
@@ -539,6 +528,9 @@ export const resumableUploadToGoogleDrive = async (
     } catch (err) {
       if (err instanceof DriveUploadAuthError) throw err;
       if ((err as DOMException)?.name === 'AbortError') throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.startsWith('transient') && message !== 'network') throw err;
+
       attempt += 1;
       if (attempt > MAX_CHUNK_ATTEMPTS) {
         throw new Error(
@@ -551,8 +543,6 @@ export const resumableUploadToGoogleDrive = async (
     }
   }
 
-  if (isLast !== undefined && offset >= total) {
-    onProgress?.(100, total, total);
-  }
+  onProgress?.(100, total, total);
   return finalMeta;
 };
