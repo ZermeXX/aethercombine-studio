@@ -433,9 +433,7 @@ export function loadActiveRenderJob(): AetherActiveRenderJob | null {
         ? parsed.workflow.trim()
         : 'render_scenes.yml',
     branch:
-      typeof parsed.branch === 'string' && parsed.branch.trim()
-        ? parsed.branch.trim()
-        : DEFAULT_PUBLIC.branch,
+      typeof parsed.branch === 'string' && parsed.branch.trim() ? parsed.branch.trim() : 'main',
     started_at:
       typeof parsed.started_at === 'number' && Number.isFinite(parsed.started_at)
         ? parsed.started_at
