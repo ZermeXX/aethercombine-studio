@@ -1,0 +1,61 @@
+name: AI Fix Web (Gemini)
+on:
+  workflow_dispatch:
+    inputs:
+      task_file:
+        description: 'Файл с задачей (например tasks/fix-counters.md)'
+        required: true
+        type: string
+      branch_name:
+        description: 'Имя ветки для PR'
+        required: false
+        default: 'ai/web-fix'
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: ai-fix-web-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+      - name: Install Gemini CLI
+        run: npm i -g @google/gemini-cli
+      - name: Verify task file exists
+        run: test -f "${{ inputs.task_file }}"
+      - name: Run agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          gemini -p "Прочитай ${{ inputs.task_file }} и выполни все требования к этому репозиторию. Меняй только то, что требует задача. Не добавляй секреты в код и не трогай deploy.yml, vite.config.ts, firebase-applet-config.json. После правок запусти проверку типов и сборку." --yolo
+      - name: Typecheck
+        continue-on-error: true
+        run: bunx tsc --noEmit
+      - name: Build
+        run: bun run build
+      - name: Open Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ${{ inputs.branch_name }}
+          title: 'fix: остаточные клиентские баги по ${{ inputs.task_file }}'
+          commit-message: 'fix: client counters and pipeline duplicates cleanup'
+          body: |
+            Автоматические правки по `${{ inputs.task_file }}`.
+            Сборка `bun run build` прогнана в job.
+            Ревью diff перед мержем обязательно: не должно быть изменений в
+            `deploy.yml`, `vite.config.ts`, `firebase-applet-config.json`.
+          delete-branch: true
