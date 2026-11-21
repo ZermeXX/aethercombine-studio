@@ -5,7 +5,7 @@
 
 const MASK = '••••';
 
-/** Оставляет первые/последние `keep` символов, середину скрывает. */
+/** Оставляет первые и последние `keep` символов, середину скрывает. */
 export const maskSecret = (value: string, keep: number = 4): string => {
   const v = String(value ?? '');
   if (!v) return '';
@@ -38,7 +38,7 @@ const SECRET_OBJECT_KEYS = ['service_account', 'sa_json', 'gdrive_sa_json', 'cre
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Маскирует значения-объекты (`"service_account": { ... }`) с учётом вложенных фигурных скобок. */
+/** Маскирует значения-объекты (`"service_account": { … }`) с учётом вложенных скобок. */
 const maskJsonObjects = (input: string, keys: string[]): string => {
   let out = input;
   for (const key of keys) {
@@ -74,38 +74,32 @@ const maskJsonObjects = (input: string, keys: string[]): string => {
  Маскирует токены и ключи в любом тексте: терминал раннера, «Копировать лог»,
  тексты ошибок, персист джобы и исходящие манифесты.
  Идемпотентна — повторный прогон уже очищенного текста ничего не портит.
- */
+*/
 export const sanitizeLogText = (text: string): string => {
   let out = String(text ?? '');
   if (!out) return out;
 
-  // 1. Приватные ключи в PEM-блоках (включая многострочные)
   out = out.replace(
     /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
     `${MASK} PRIVATE KEY REMOVED ${MASK}`
   );
 
-  // 2. Объекты с секретами целиком
   out = maskJsonObjects(out, SECRET_OBJECT_KEYS);
 
-  // 3. Строковые поля JSON: "access_token": "..."
   const jsonFieldRe = new RegExp(
     `("?(?:${SECRET_STRING_KEYS.map(escapeRegExp).join('|')})"?\\s*[:=]\\s*")([^"]*)(")`,
     'gi'
   );
   out = out.replace(jsonFieldRe, (_m, head: string, _val: string, tail: string) => `${head}${MASK}${tail}`);
 
-  // 4. Незакавыченные присваивания: token=abc123 / api_key: abc123
   const bareFieldRe = new RegExp(
-    `\\b((?:${SECRET_STRING_KEYS.map(escapeRegExp).join('|')})\\s*[:=]\\s*)(?!["${MASK}])([^\\s,;&"'}{\\]]+)`,
+    `\\b((?:${SECRET_STRING_KEYS.map(escapeRegExp).join('|')})\\s*[:=]\\s*)(?!["•])([^\\s,;&"'}\\]]+)`,
     'gi'
   );
   out = out.replace(bareFieldRe, (_m, head: string) => `${head}${MASK}`);
 
-  // 5. HTTP-заголовки авторизации
   out = out.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${MASK}`);
 
-  // 6. Узнаваемые форматы токенов
   out = out.replace(/\bya29\.[A-Za-z0-9._-]+/g, `ya29.${MASK}`);
   out = out.replace(/\bAIza[0-9A-Za-z_-]{20,}/g, `AIza${MASK}`);
   out = out.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, `github_pat_${MASK}`);
@@ -113,19 +107,15 @@ export const sanitizeLogText = (text: string): string => {
   out = out.replace(/\bsk-[A-Za-z0-9_-]{16,}/g, `sk-${MASK}`);
   out = out.replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, `xox-${MASK}`);
 
-  // 7. Telegram bot token (123456789:AA...)
   out = out.replace(/\b\d{6,}:[A-Za-z0-9_-]{30,}/g, `${MASK}:${MASK}`);
 
-  // 8. Секреты в query-параметрах и signed-URL
   out = out.replace(
     /([?&](?:upload_id|access_token|id_token|token|key|apikey|sig|signature|X-Goog-Signature)=)[^&\s"'<>]+/gi,
     `$1${MASK}`
   );
 
-  // 9. rclone.conf: token = {"access_token":"...","refresh_token":"..."}
   out = out.replace(/\btoken\s*=\s*\{[^}]*\}/gi, `token = {${MASK}}`);
 
-  // 10. Resumable upload session URI целиком содержит upload_id
   out = out.replace(
     /(https:\/\/www\.googleapis\.com\/upload\/[^\s"'<>]*[?&]upload_id=)[^\s"'<>]+/gi,
     `$1${MASK}`
