@@ -1,13 +1,18 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
+ @license
+ SPDX-License-Identifier: Apache-2.0
+*/
 import type { TerminalLogEntry } from '../components/StudioTerminal';
+import { sanitizeLogText } from './logSanitizer';
 
 export const AETHER_GOOGLE_AUTH_STORAGE_KEY = 'aether_google_auth';
 export const AETHER_WORKSPACE_DRAFT_STORAGE_KEY = 'aether_workspace_draft';
 export const AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY = 'aether_active_render_job';
+
+const GOOGLE_TOKEN_SESSION_KEY = 'aether_google_token_session';
+const GITHUB_TOKEN_SESSION_KEY = 'aether_github_token_session';
+const TELEGRAM_SESSION_KEY = 'aether_telegram_session';
+const SECRETS_PURGED_FLAG = 'aether_secrets_purged_v1';
 
 /** Minimum remaining validity window (3 minutes) before attempting silent token refresh. */
 export const GOOGLE_TOKEN_REFRESH_MARGIN_MS = 3 * 60 * 1000;
@@ -28,6 +33,17 @@ export interface AetherGoogleAuthRecord {
   branch: string;
   drive_folder_id: string;
   updated_at?: number;
+}
+
+export interface TelegramSession {
+  bot_token: string;
+  chat_id: string;
+}
+
+interface SessionSecrets {
+  access_token: string;
+  expires_at: number;
+  github_token: string;
 }
 
 export interface AetherActiveRenderJob {
@@ -127,97 +143,198 @@ export interface AetherWorkspaceDraft {
   };
 }
 
-const DEFAULT_GOOGLE_AUTH_RECORD: AetherGoogleAuthRecord = {
-  access_token: '',
-  expires_at: 0,
-  profile: null,
-  github_token: '',
+const DEFAULT_PUBLIC = {
   repo: 'ZermeXX/aetherflow-render',
   branch: 'main',
   drive_folder_id: '1OuuxKa85KAR-zz9TFXv6Ccg99fZ6JpuK'
 };
 
-export function loadGoogleAuthRecord(): AetherGoogleAuthRecord {
+/* ---------------- storage helpers ---------------- */
+const readJson = <T>(storage: Storage, key: string): T | null => {
   try {
-    const raw = localStorage.getItem(AETHER_GOOGLE_AUTH_STORAGE_KEY);
-    if (!raw) {
-      return {
-        ...DEFAULT_GOOGLE_AUTH_RECORD,
-        github_token: localStorage.getItem('ac_gh_token') || '',
-        repo: localStorage.getItem('ac_gh_repo') || DEFAULT_GOOGLE_AUTH_RECORD.repo,
-        branch: localStorage.getItem('ac_gh_branch') || DEFAULT_GOOGLE_AUTH_RECORD.branch,
-        drive_folder_id:
-          localStorage.getItem('ac_gdrive_folder_id') || DEFAULT_GOOGLE_AUTH_RECORD.drive_folder_id
-      };
-    }
-    const parsed = JSON.parse(raw) as Partial<AetherGoogleAuthRecord> | null;
-    if (!parsed || typeof parsed !== 'object') {
-      return { ...DEFAULT_GOOGLE_AUTH_RECORD };
-    }
-    const profile: AetherGoogleProfile | null =
-      parsed.profile && typeof parsed.profile === 'object'
-        ? {
-            email: typeof parsed.profile.email === 'string' ? parsed.profile.email : '',
-            name: typeof parsed.profile.name === 'string' ? parsed.profile.name : '',
-            avatar: typeof parsed.profile.avatar === 'string' ? parsed.profile.avatar : '',
-            ...(typeof parsed.profile.uid === 'string' ? { uid: parsed.profile.uid } : {})
-          }
-        : null;
-
-    return {
-      access_token: typeof parsed.access_token === 'string' ? parsed.access_token : '',
-      expires_at:
-        typeof parsed.expires_at === 'number' && Number.isFinite(parsed.expires_at)
-          ? parsed.expires_at
-          : 0,
-      profile,
-      github_token:
-        typeof parsed.github_token === 'string'
-          ? parsed.github_token
-          : localStorage.getItem('ac_gh_token') || '',
-      repo:
-        typeof parsed.repo === 'string' && parsed.repo.trim()
-          ? parsed.repo
-          : localStorage.getItem('ac_gh_repo') || DEFAULT_GOOGLE_AUTH_RECORD.repo,
-      branch:
-        typeof parsed.branch === 'string' && parsed.branch.trim()
-          ? parsed.branch
-          : localStorage.getItem('ac_gh_branch') || DEFAULT_GOOGLE_AUTH_RECORD.branch,
-      drive_folder_id:
-        typeof parsed.drive_folder_id === 'string'
-          ? parsed.drive_folder_id
-          : localStorage.getItem('ac_gdrive_folder_id') ||
-            DEFAULT_GOOGLE_AUTH_RECORD.drive_folder_id,
-      updated_at: typeof parsed.updated_at === 'number' ? parsed.updated_at : undefined
-    };
+    const raw = storage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
-    return { ...DEFAULT_GOOGLE_AUTH_RECORD };
+    return null;
   }
+};
+
+const writeJson = (storage: Storage, key: string, value: unknown): void => {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota / private mode — остаёмся в памяти вкладки */
+  }
+};
+
+const removeKey = (storage: Storage, key: string): void => {
+  try {
+    storage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+};
+
+const readSessionSecrets = (): SessionSecrets => {
+  const g = readJson<{ access_token?: string; expires_at?: number }>(
+    sessionStorage,
+    GOOGLE_TOKEN_SESSION_KEY
+  );
+  const gh = readJson<{ github_token?: string }>(sessionStorage, GITHUB_TOKEN_SESSION_KEY);
+  return {
+    access_token: typeof g?.access_token === 'string' ? g.access_token : '',
+    expires_at: Number.isFinite(g?.expires_at) ? Number(g?.expires_at) : 0,
+    github_token: typeof gh?.github_token === 'string' ? gh.github_token : ''
+  };
+};
+
+const writeSessionSecrets = (patch: Partial<SessionSecrets>): void => {
+  if (patch.access_token !== undefined || patch.expires_at !== undefined) {
+    const cur = readSessionSecrets();
+    const next = {
+      access_token: patch.access_token ?? cur.access_token,
+      expires_at: patch.expires_at ?? cur.expires_at
+    };
+    if (next.access_token) writeJson(sessionStorage, GOOGLE_TOKEN_SESSION_KEY, next);
+    else removeKey(sessionStorage, GOOGLE_TOKEN_SESSION_KEY);
+  }
+  if (patch.github_token !== undefined) {
+    if (patch.github_token) {
+      writeJson(sessionStorage, GITHUB_TOKEN_SESSION_KEY, { github_token: patch.github_token });
+    } else {
+      removeKey(sessionStorage, GITHUB_TOKEN_SESSION_KEY);
+    }
+  }
+};
+
+/** Однократная миграция: секреты уезжают в sessionStorage и стираются из localStorage. */
+const migrateLegacySecrets = (): void => {
+  try {
+    if (sessionStorage.getItem(SECRETS_PURGED_FLAG)) return;
+
+    const legacy = readJson<Partial<AetherGoogleAuthRecord>>(
+      localStorage,
+      AETHER_GOOGLE_AUTH_STORAGE_KEY
+    );
+    const legacyGh = localStorage.getItem('ac_gh_token') || '';
+    const cur = readSessionSecrets();
+
+    writeSessionSecrets({
+      access_token: cur.access_token || legacy?.access_token || '',
+      expires_at: cur.expires_at || Number(legacy?.expires_at) || 0,
+      github_token: cur.github_token || legacy?.github_token || legacyGh || ''
+    });
+
+    const tgBot = localStorage.getItem('ac_tg_bot_token') || '';
+    const tgChat = localStorage.getItem('ac_tg_chat_id') || '';
+    if (tgBot || tgChat) {
+      const existing = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
+      if (!existing?.bot_token) {
+        writeJson(sessionStorage, TELEGRAM_SESSION_KEY, { bot_token: tgBot, chat_id: tgChat });
+      }
+    }
+
+    if (legacy) {
+      writeJson(localStorage, AETHER_GOOGLE_AUTH_STORAGE_KEY, {
+        profile: legacy.profile ?? null,
+        repo: legacy.repo || DEFAULT_PUBLIC.repo,
+        branch: legacy.branch || DEFAULT_PUBLIC.branch,
+        drive_folder_id: legacy.drive_folder_id || DEFAULT_PUBLIC.drive_folder_id,
+        updated_at: Date.now()
+      });
+    }
+
+    removeKey(localStorage, 'ac_gh_token');
+    removeKey(localStorage, 'ac_tg_bot_token');
+    removeKey(localStorage, 'ac_tg_chat_id');
+    removeKey(localStorage, 'ac_gdrive_sa_key');
+    sessionStorage.setItem(SECRETS_PURGED_FLAG, '1');
+  } catch {
+    /* ignore */
+  }
+};
+
+migrateLegacySecrets();
+
+/* ---------------- public auth record ---------------- */
+const sanitizeProfile = (raw: unknown): AetherGoogleProfile | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Record<string, unknown>;
+  return {
+    email: typeof p.email === 'string' ? p.email : '',
+    name: typeof p.name === 'string' ? p.name : '',
+    avatar: typeof p.avatar === 'string' ? p.avatar : '',
+    ...(typeof p.uid === 'string' ? { uid: p.uid } : {})
+  };
+};
+
+const loadPublicRecord = () => {
+  const parsed = readJson<Partial<AetherGoogleAuthRecord>>(
+    localStorage,
+    AETHER_GOOGLE_AUTH_STORAGE_KEY
+  );
+  return {
+    profile: sanitizeProfile(parsed?.profile),
+    repo:
+      typeof parsed?.repo === 'string' && parsed.repo.trim()
+        ? parsed.repo
+        : localStorage.getItem('ac_gh_repo') || DEFAULT_PUBLIC.repo,
+    branch:
+      typeof parsed?.branch === 'string' && parsed.branch.trim()
+        ? parsed.branch
+        : localStorage.getItem('ac_gh_branch') || DEFAULT_PUBLIC.branch,
+    drive_folder_id:
+      typeof parsed?.drive_folder_id === 'string' && parsed.drive_folder_id.trim()
+        ? parsed.drive_folder_id
+        : localStorage.getItem('ac_gdrive_folder_id') || DEFAULT_PUBLIC.drive_folder_id,
+    updated_at: typeof parsed?.updated_at === 'number' ? parsed.updated_at : undefined
+  };
+};
+
+export function loadGoogleAuthRecord(): AetherGoogleAuthRecord {
+  const pub = loadPublicRecord();
+  const secrets = readSessionSecrets();
+  return {
+    access_token: secrets.access_token,
+    expires_at: secrets.expires_at,
+    github_token: secrets.github_token,
+    profile: pub.profile,
+    repo: pub.repo,
+    branch: pub.branch,
+    drive_folder_id: pub.drive_folder_id,
+    updated_at: pub.updated_at
+  };
 }
 
 export function saveGoogleAuthPatch(
   patch: Partial<AetherGoogleAuthRecord>
 ): AetherGoogleAuthRecord {
-  const current = loadGoogleAuthRecord();
-  const next: AetherGoogleAuthRecord = {
-    ...current,
-    ...patch,
+  writeSessionSecrets({
+    ...(patch.access_token !== undefined ? { access_token: patch.access_token } : {}),
+    ...(patch.expires_at !== undefined ? { expires_at: patch.expires_at } : {}),
+    ...(patch.github_token !== undefined ? { github_token: patch.github_token } : {})
+  });
+
+  const current = loadPublicRecord();
+  writeJson(localStorage, AETHER_GOOGLE_AUTH_STORAGE_KEY, {
+    profile: patch.profile !== undefined ? patch.profile : current.profile,
+    repo: patch.repo !== undefined && patch.repo.trim() ? patch.repo : current.repo,
+    branch: patch.branch !== undefined && patch.branch.trim() ? patch.branch : current.branch,
+    drive_folder_id:
+      patch.drive_folder_id !== undefined ? patch.drive_folder_id : current.drive_folder_id,
     updated_at: Date.now()
-  };
-  try {
-    localStorage.setItem(AETHER_GOOGLE_AUTH_STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // ignore storage quota errors
-  }
-  return next;
+  });
+
+  return loadGoogleAuthRecord();
 }
 
 export function clearGoogleSessionOnly(): AetherGoogleAuthRecord {
-  return saveGoogleAuthPatch({
-    access_token: '',
-    expires_at: 0,
-    profile: null
-  });
+  writeSessionSecrets({ access_token: '', expires_at: 0 });
+  return saveGoogleAuthPatch({ profile: null });
+}
+
+export function clearGithubSessionToken(): void {
+  writeSessionSecrets({ github_token: '' });
 }
 
 export function isGoogleAuthTokenValid(
@@ -229,125 +346,127 @@ export function isGoogleAuthTokenValid(
   return record.expires_at - Date.now() > marginMs;
 }
 
+/* ---------------- Telegram (session only) ---------------- */
+export function loadTelegramSession(): TelegramSession {
+  const s = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
+  return {
+    bot_token: typeof s?.bot_token === 'string' ? s.bot_token : '',
+    chat_id: typeof s?.chat_id === 'string' ? s.chat_id : ''
+  };
+}
+
+export function saveTelegramSession(patch: Partial<TelegramSession>): TelegramSession {
+  const cur = loadTelegramSession();
+  const next = {
+    bot_token: patch.bot_token !== undefined ? patch.bot_token : cur.bot_token,
+    chat_id: patch.chat_id !== undefined ? patch.chat_id : cur.chat_id
+  };
+  if (next.bot_token || next.chat_id) writeJson(sessionStorage, TELEGRAM_SESSION_KEY, next);
+  else removeKey(sessionStorage, TELEGRAM_SESSION_KEY);
+  return next;
+}
+
+export function clearTelegramSession(): void {
+  removeKey(sessionStorage, TELEGRAM_SESSION_KEY);
+}
+
+/* ---------------- workspace draft ---------------- */
 export function loadWorkspaceDraft(): AetherWorkspaceDraft | null {
-  try {
-    const raw = localStorage.getItem(AETHER_WORKSPACE_DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AetherWorkspaceDraft> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed as AetherWorkspaceDraft;
-  } catch {
-    return null;
-  }
+  const parsed = readJson<AetherWorkspaceDraft>(localStorage, AETHER_WORKSPACE_DRAFT_STORAGE_KEY);
+  if (!parsed || typeof parsed !== 'object') return null;
+  return parsed;
 }
 
 export function saveWorkspaceDraft(draft: AetherWorkspaceDraft): void {
-  try {
-    localStorage.setItem(AETHER_WORKSPACE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
-  } catch {
-    // ignore storage quota errors
-  }
+  writeJson(localStorage, AETHER_WORKSPACE_DRAFT_STORAGE_KEY, draft);
 }
 
 export function clearWorkspaceDraft(): void {
-  try {
-    localStorage.removeItem(AETHER_WORKSPACE_DRAFT_STORAGE_KEY);
-  } catch {
-    // ignore storage errors
-  }
+  removeKey(localStorage, AETHER_WORKSPACE_DRAFT_STORAGE_KEY);
 }
 
+/* ---------------- active render job (логи маскируются) ---------------- */
 const MAX_PERSISTED_RENDER_LOGS = 500;
 
+const normalizeLogs = (raw: unknown): TerminalLogEntry[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (entry): entry is TerminalLogEntry =>
+        Boolean(entry) &&
+        typeof entry === 'object' &&
+        typeof (entry as TerminalLogEntry).text === 'string'
+    )
+    .map((entry, idx) => ({
+      id: typeof entry.id === 'string' && entry.id ? entry.id : `restored-${idx}`,
+      text: sanitizeLogText(entry.text),
+      level:
+        entry.level === 'info' ||
+        entry.level === 'step' ||
+        entry.level === 'success' ||
+        entry.level === 'error' ||
+        entry.level === 'raw'
+          ? entry.level
+          : 'info'
+    }));
+};
+
 export function loadActiveRenderJob(): AetherActiveRenderJob | null {
-  try {
-    const raw = localStorage.getItem(AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AetherActiveRenderJob> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    const status =
-      parsed.status === 'running' || parsed.status === 'success' || parsed.status === 'failure'
-        ? parsed.status
-        : null;
-    if (!status) return null;
-
-    const logs: TerminalLogEntry[] = Array.isArray(parsed.logs)
-      ? parsed.logs
-          .filter(
-            (entry): entry is TerminalLogEntry =>
-              Boolean(entry) &&
-              typeof entry === 'object' &&
-              typeof (entry as TerminalLogEntry).text === 'string'
-          )
-          .map((entry, idx) => ({
-            id: typeof entry.id === 'string' && entry.id ? entry.id : `restored-${idx}`,
-            text: entry.text,
-            level:
-              entry.level === 'info' ||
-              entry.level === 'step' ||
-              entry.level === 'success' ||
-              entry.level === 'error' ||
-              entry.level === 'raw'
-                ? entry.level
-                : 'info'
-          }))
-      : [];
-
-    return {
-      status,
-      repo:
-        typeof parsed.repo === 'string' && parsed.repo.trim()
-          ? parsed.repo.trim()
-          : 'ZermeXX/aetherflow-render',
-      workflow:
-        typeof parsed.workflow === 'string' && parsed.workflow.trim()
-          ? parsed.workflow.trim()
-          : 'render_scenes.yml',
-      branch:
-        typeof parsed.branch === 'string' && parsed.branch.trim() ? parsed.branch.trim() : 'main',
-      started_at:
-        typeof parsed.started_at === 'number' && Number.isFinite(parsed.started_at)
-          ? parsed.started_at
-          : Date.now(),
-      run_id:
-        typeof parsed.run_id === 'number' && Number.isFinite(parsed.run_id)
-          ? parsed.run_id
-          : null,
-      project_name:
-        typeof parsed.project_name === 'string' ? parsed.project_name : 'Aether Combine Project',
-      logs,
-      title: typeof parsed.title === 'string' ? parsed.title : undefined,
-      desc: typeof parsed.desc === 'string' ? parsed.desc : undefined,
-      step_label: typeof parsed.step_label === 'string' ? parsed.step_label : undefined,
-      run_url: typeof parsed.run_url === 'string' ? parsed.run_url : undefined
-    };
-  } catch {
-    return null;
-  }
+  const parsed = readJson<Partial<AetherActiveRenderJob>>(
+    localStorage,
+    AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY
+  );
+  if (!parsed || typeof parsed !== 'object') return null;
+  const status =
+    parsed.status === 'running' || parsed.status === 'success' || parsed.status === 'failure'
+      ? parsed.status
+      : null;
+  if (!status) return null;
+  return {
+    status,
+    repo:
+      typeof parsed.repo === 'string' && parsed.repo.trim()
+        ? parsed.repo.trim()
+        : DEFAULT_PUBLIC.repo,
+    workflow:
+      typeof parsed.workflow === 'string' && parsed.workflow.trim()
+        ? parsed.workflow.trim()
+        : 'render_scenes.yml',
+    branch:
+      typeof parsed.branch === 'string' && parsed.branch.trim()
+        ? parsed.branch.trim()
+        : DEFAULT_PUBLIC.branch,
+    started_at:
+      typeof parsed.started_at === 'number' && Number.isFinite(parsed.started_at)
+        ? parsed.started_at
+        : Date.now(),
+    run_id:
+      typeof parsed.run_id === 'number' && Number.isFinite(parsed.run_id) ? parsed.run_id : null,
+    project_name:
+      typeof parsed.project_name === 'string' ? parsed.project_name : 'Aether Combine Project',
+    logs: normalizeLogs(parsed.logs),
+    title: typeof parsed.title === 'string' ? sanitizeLogText(parsed.title) : undefined,
+    desc: typeof parsed.desc === 'string' ? sanitizeLogText(parsed.desc) : undefined,
+    step_label:
+      typeof parsed.step_label === 'string' ? sanitizeLogText(parsed.step_label) : undefined,
+    run_url: typeof parsed.run_url === 'string' ? parsed.run_url : undefined
+  };
 }
 
 export function saveActiveRenderJob(job: AetherActiveRenderJob): void {
-  try {
-    const trimmedLogs =
-      job.logs.length > MAX_PERSISTED_RENDER_LOGS
-        ? job.logs.slice(job.logs.length - MAX_PERSISTED_RENDER_LOGS)
-        : job.logs;
-    localStorage.setItem(
-      AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY,
-      JSON.stringify({
-        ...job,
-        logs: trimmedLogs
-      })
-    );
-  } catch {
-    // ignore storage quota errors
-  }
+  const trimmedLogs =
+    job.logs.length > MAX_PERSISTED_RENDER_LOGS
+      ? job.logs.slice(job.logs.length - MAX_PERSISTED_RENDER_LOGS)
+      : job.logs;
+  writeJson(localStorage, AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY, {
+    ...job,
+    title: job.title ? sanitizeLogText(job.title) : job.title,
+    desc: job.desc ? sanitizeLogText(job.desc) : job.desc,
+    step_label: job.step_label ? sanitizeLogText(job.step_label) : job.step_label,
+    logs: trimmedLogs.map(l => ({ ...l, text: sanitizeLogText(l.text) }))
+  });
 }
 
 export function clearActiveRenderJob(): void {
-  try {
-    localStorage.removeItem(AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY);
-  } catch {
-    // ignore storage errors
-  }
+  removeKey(localStorage, AETHER_ACTIVE_RENDER_JOB_STORAGE_KEY);
 }
