@@ -592,7 +592,7 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
   const endScreenSafeZone = String(
     overlaysObj.end_screen_safe_zone ||
       tab5Obj.end_screen_safe_zone ||
-      '05:14-05:24'
+      ''
   ).trim();
 
   return {
@@ -710,7 +710,7 @@ export function parseV21ManifestObject(raw: Record<string, unknown>): ParsedV21M
         B: String(rawSlotsObj.B || 'thumbnail_4k_3840x2160_B.jpg'),
         C: String(rawSlotsObj.C || 'thumbnail_4k_3840x2160_C.jpg')
       },
-      endScreenSafeZone: endScreenSafeZone || '05:14-05:24',
+      endScreenSafeZone: endScreenSafeZone || '',
       endScreenGuideVisible: true
     },
     totalDurationFormatted: totalSec > 0 ? formatSecToMmSs(totalSec) : '05:24'
@@ -812,7 +812,7 @@ export function buildEnglishReleaseCardMarkdown(input: ReleaseCardExportInput): 
     `- [x] Chapter timestamps exported to \`output_chapters.txt\` (\`00:00\` start verified)`,
     `- [x] Separate multi-language \`.srt\` sidecar files generated (${langsDisplay})`,
     `- [x] Continuous Voice Master (Zero Overlap) + Decoupled Video-Only \`xfade\` enabled`,
-    `- [x] 4K A/B/C thumbnails verified against End Screen safe zone (\`${input.endScreenSafeZone || '05:14-05:24'}\`)`,
+    `- [x] 4K A/B/C thumbnails verified against End Screen safe zone (\`${input.endScreenSafeZone || 'auto (last 5-20s of runtime)'}\`)`,
     ``
   ].join('\n');
 }
