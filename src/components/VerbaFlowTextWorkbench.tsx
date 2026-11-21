@@ -223,10 +223,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     a.download = `${slug}_${lang}.srt`;
     a.click();
     URL.revokeObjectURL(url);
-    onNotify(
-      `📥 Субтитры ${slug}_${lang}.srt скачаны (${narrativeScenes.length} сцен)!`,
-      'success'
-    );
+    onNotify(`📥 Субтитры ${slug}_${lang}.srt скачаны (${narrativeScenes.length} сцен)!`, 'success');
   };
 
   const handleDownloadAllSidecarSrt = () => {
@@ -274,8 +271,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
 
   // 2. Настройки Хуков
   const [hookGenerationMode, setHookGenerationMode] = useState<'single15' | 'pack5'>('pack5');
-  const [hookCards, setHookCards] = useState<VerbaHookCard[]>(
-    () => localGenerateHooks(sourceText, 'doc', 'ru').hooks
+  const [hookCards, setHookCards] = useState<VerbaHookCard[]>(() =>
+    localGenerateHooks(sourceText, 'doc', 'ru').hooks
   );
   const [appliedHookId, setAppliedHookId] = useState<string>('');
 
@@ -324,7 +321,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         const pdfDoc = await loadingTask.promise;
         pagesCount = pdfDoc.numPages;
         const pageTexts: string[] = [];
-        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum += 1) {
           const page = await pdfDoc.getPage(pageNum);
           const textContent = await page.getTextContent();
           const linesMap = new Map<number, string[]>();
@@ -484,16 +481,16 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     [analyzedText, sourceText]
   );
 
-  const xrayTokens = useMemo(
-    () => buildXrayTokens(workingText || sourceText),
-    [workingText, sourceText]
-  );
+  const xrayTokens = useMemo(() => buildXrayTokens(workingText || sourceText), [
+    workingText,
+    sourceText
+  ]);
 
   const copyWithFeedback = (val: string, id: string, message: string) => {
     navigator.clipboard.writeText(val);
     setCopiedId(id);
     onNotify(message, 'success');
-    window.setTimeout(() => setCopiedId(''), 1800);
+    setTimeout(() => setCopiedId(''), 1800);
   };
 
   const handleSelectLanguage = (lang: VerbaLanguage) => {
@@ -1166,9 +1163,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400 font-mono tabular-nums">
             <span
-              className={`whitespace-nowrap ${
-                digitsSafe > 0 ? 'text-amber-300' : 'text-emerald-300'
-              }`}
+              className={`whitespace-nowrap ${digitsSafe > 0 ? 'text-amber-300' : 'text-emerald-300'}`}
             >
               Цифр: {digitsSafe}
             </span>
@@ -1220,8 +1215,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
 
           <div className="rounded-xl bg-[#131B2E]/60 border border-white/[0.08] p-3.5 space-y-2.5">
-            <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-              <span>Быстрый тест текста</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300">Быстрый тест текста</span>
               <span className="text-[11px] font-mono tabular-nums text-slate-400">
                 {safeCount(telemetry.charCount)} симв.
               </span>
@@ -1524,8 +1519,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                   <div className="rounded-xl bg-[#131B2E]/70 border border-emerald-400/25 p-4 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-xs font-bold text-emerald-300">
-                        Готовый результат (
-                        {outputLanguage === 'en' ? '🇺🇸 US English' : '🇷🇺 Русский'})
+                        Готовый результат ({outputLanguage === 'en' ? '🇺🇸 US English' : '🇷🇺 Русский'})
                       </label>
                       <button
                         type="button"
@@ -1600,7 +1594,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                       <Sparkles className="w-4 h-4" />
                     )}
                     <span>
-                      {outputLanguage === 'en' ? 'Generate 5 Hooks (US English)' : 'Сгенерировать хуки'}
+                      {outputLanguage === 'en'
+                        ? 'Generate 5 Hooks (US English)'
+                        : 'Сгенерировать хуки'}
                     </span>
                   </button>
                 </div>
@@ -1879,11 +1875,9 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     </h3>
                     <p className="text-xs text-slate-400">
                       Авто-расчёт{' '}
-                      <code className="text-emerald-300 font-mono">duration = words / 2.2 сек</code>{' '}
-                      под темп диктора и чередование векторов камеры (
-                      <code className="text-amber-300 font-mono">
-                        zoom_in / zoom_out / pan_left / pan_right
-                      </code>{' '}
+                      <code className="text-emerald-300">duration = words / 2.2 сек</code> под темп
+                      диктора и чередование векторов камеры (
+                      <code className="text-amber-300">zoom_in / zoom_out / pan_left / pan_right</code>{' '}
                       без повторов)
                     </p>
                   </div>
@@ -2260,9 +2254,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
               type="checkbox"
               checked={activeStrictLock}
               onChange={e => {
-                if (onStrictSceneDurationLockChange)
+                if (onStrictSceneDurationLockChange) {
                   onStrictSceneDurationLockChange(e.target.checked);
-                else setLocalStrictLock(e.target.checked);
+                } else {
+                  setLocalStrictLock(e.target.checked);
+                }
               }}
               className="accent-cyan-400 w-4 h-4 shrink-0"
             />
@@ -2313,9 +2309,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                 className="min-h-[34px] px-3 py-1 rounded-lg bg-[#111827] hover:bg-slate-800 border border-white/[0.12] text-cyan-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>
-                  Скачать {sanitizeSlugForFilename(projectName)}_{previewSrtLang}.srt
-                </span>
+                <span>Скачать {sanitizeSlugForFilename(projectName)}_{previewSrtLang}.srt</span>
               </button>
               <button
                 type="button"
