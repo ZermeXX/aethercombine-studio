@@ -37,24 +37,19 @@ import {
   ArrowRight,
   Sun,
   AlignCenterHorizontal,
-  Paintbrush,
   Tag
 } from 'lucide-react';
 import {
   CornerPositionPresetId,
   DEFAULT_BG_ADJUST,
   LINE_COLOR_SWATCHES,
-  SPLASH_COLOR_SWATCHES,
-  SPLASH_SHAPE_OPTIONS,
   SlotBgAdjustConfig,
   SplashColorPresetId,
   SplashShapeId,
   YOUTUBE_CINEMA_BG_ADJUST,
   buildVertical3DFill,
-  drawUnifiedGrungeSplash,
   legacyPresetToSplashColor,
   renderAdjustedBackgroundToCanvas,
-  resolveSplashColorPalette,
   splitProjectTitleIntoTwoLines
 } from '../utils/thumbnailPresetsAndEffects';
 
@@ -891,8 +886,7 @@ const createDefaultSlotConfig = (
   const split = splitProjectTitleIntoTwoLines(projectTitleSeed);
   const defaultSplashColor =
     slot === 'B' ? '#18181B' : slot === 'C' ? '#D97706' : '#E10613';
-  const defaultSplashShape: SplashShapeId =
-    slot === 'B' ? 'double_strokes' : slot === 'C' ? 'tapered_speed' : 'monolith_bristle';
+  const defaultSplashShape: SplashShapeId = 'none';
   return {
     topText: split.line1,
     topColor: '#FFFFFF',
@@ -975,14 +969,7 @@ const hydrateSlotConfig = (
     }
   }
 
-  const resolvedShape: SplashShapeId =
-    raw.splashShape && VALID_SPLASH_SHAPES.has(raw.splashShape)
-      ? raw.splashShape
-      : raw.splashPreset === 'none'
-        ? 'none'
-        : raw.splashPreset
-          ? 'monolith_bristle'
-          : base.splashShape;
+  const resolvedShape: SplashShapeId = 'none';
 
   const resolvedColor =
     typeof raw.splashColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.splashColor)
@@ -1833,12 +1820,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const totalTextH = capH1 + lineGap + capH2;
       const skewOverhang = Math.max(fontSize1, fontSize2) * 0.16;
       const contentW = Math.max(line1W, line2W) + skewOverhang;
-      const splashPadMult = Math.max(0.5, Math.min(1.6, (cfg.splashPaddingPct ?? 100) / 100));
-
-      const estPadX = Math.max(48 * scale, contentW * 0.14) * splashPadMult;
-      const estPadY = Math.max(22 * scale, totalTextH * 0.18) * splashPadMult;
-      const estBoxW = contentW + estPadX * 2 + 24 * scale;
-      const estBoxH = totalTextH + estPadY * 2 + 14 * scale;
+      const estBoxW = contentW + 40 * scale;
+      const estBoxH = totalTextH + 30 * scale;
 
       const rawCx = (Math.max(6, Math.min(94, hl.xPct)) / 100) * w;
       const rawCy = (Math.max(8, Math.min(92, hl.yPct)) / 100) * h;
@@ -1863,27 +1846,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ctx.translate(drawCx, drawCy);
       ctx.rotate(tiltRad);
 
-      // Процедурная векторная гранж-подложка (6 форм кисти + None) с детерминированным зерном
-      const splashBounds = drawUnifiedGrungeSplash(ctx, {
-        shape: cfg.splashShape || 'monolith_bristle',
-        colorHex: cfg.splashColor || '#E10613',
-        paddingPct: cfg.splashPaddingPct ?? 100,
-        shadowPct: cfg.splashShadowPct ?? 100,
-        contentW,
-        totalTextH,
-        hasTop: Boolean(topUpper),
-        topYCenter,
-        topW: line1W + fontSize1 * 0.14,
-        topH: capH1,
-        hasBottom: Boolean(bottomUpper),
-        bottomYCenter,
-        bottomW: line2W + fontSize2 * 0.14,
-        bottomH: capH2,
-        scale,
-        seedText: `${topUpper}_${bottomUpper}`
-      });
-      const finalW = Math.max(contentW + 40 * scale, splashBounds.splashW);
-      const finalH = Math.max(totalTextH + 30 * scale, splashBounds.splashH);
+      const finalW = estBoxW;
+      const finalH = estBoxH;
 
       const drawDocumentaryImpactLine = (
         text: string,
@@ -3490,7 +3454,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>Композиция и Гранж-подложка</span>
+                  <span>Композиция и позиция заголовка</span>
                 </span>
                 <button
                   type="button"
@@ -3655,237 +3619,6 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </div>
               </div>
 
-              {/* НАСТРОЙКИ ПОДЛОЖКИ КИСТИ (SPLASH / BRUSH BACKGROUND) */}
-              <div className="pt-3 border-t border-white/[0.08] space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#f8fafc] flex items-center gap-1.5">
-                    <Paintbrush className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                    <span>Подложка под заголовком (Brush / Splash):</span>
-                  </span>
-                  <span className="text-[10px] font-mono text-white/55">
-                    {SPLASH_SHAPE_OPTIONS.find(s => s.id === activeConfig.splashShape)?.subtitle || 'Monolith Bristle'}
-                  </span>
-                </div>
-
-                {/* Визуальный селектор из 6 форм гранж-подложки + Без подложки */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {SPLASH_SHAPE_OPTIONS.map(opt => {
-                    const isSelected = activeConfig.splashShape === opt.id;
-                    const resolvedPal = resolveSplashColorPalette(activeConfig.splashColor);
-                    const strokeFill = opt.id === 'none' ? '#334155' : resolvedPal.mainColor;
-                    const strokeEdge = opt.id === 'none' ? '#1E293B' : resolvedPal.edgeColor;
-                    const isWideSpan = opt.id === 'none';
-
-                    return (
-                      <motion.button
-                        key={`splash-shape-${opt.id}`}
-                        type="button"
-                        whileTap={{ scale: 0.96 }}
-                        onClick={() =>
-                          updateSlotConfig(activeSlot, prev => ({
-                            ...prev,
-                            splashShape: opt.id
-                          }))
-                        }
-                        className={`min-h-[64px] p-2 rounded-xl border text-left flex flex-col justify-between gap-1.5 cursor-pointer transition ${
-                          isWideSpan ? 'col-span-2 sm:col-span-3 flex-row items-center min-h-[40px]' : ''
-                        } ${
-                          isSelected
-                            ? 'border-amber-400 bg-amber-500/15 text-[#FDE047] shadow-[0_0_16px_rgba(245,158,11,0.16)]'
-                            : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/75 hover:text-white hover:border-white/20'
-                        }`}
-                      >
-                        <div
-                          className={`${
-                            isWideSpan ? 'w-14 h-5 shrink-0' : 'w-full h-7'
-                          } rounded-lg bg-[#070a12] border border-white/[0.06] flex items-center justify-center overflow-hidden px-1.5`}
-                        >
-                          <svg
-                            viewBox="0 0 120 36"
-                            className="w-full h-full"
-                            aria-hidden="true"
-                          >
-                            <defs>
-                              <linearGradient id={`grad-${activeSlot}-${opt.id}`} x1="0" y1="0" x2="1" y2="1">
-                                <stop offset="0%" stopColor={strokeFill} />
-                                <stop offset="100%" stopColor={strokeEdge} />
-                              </linearGradient>
-                            </defs>
-                            {opt.id === 'monolith_bristle' && (
-                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
-                                <path d="M12,7 Q60,5 108,8 L116,11 L107,14 L115,18 L106,22 L114,26 L108,29 Q60,31 12,28 L5,25 L13,21 L4,17 L13,13 L6,10 Z" />
-                                <rect x="3" y="12" width="12" height="2" rx="1" opacity="0.85" />
-                                <rect x="105" y="21" width="12" height="2" rx="1" opacity="0.85" />
-                              </g>
-                            )}
-                            {opt.id === 'jagged_splash' && (
-                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
-                                <path d="M14,9 L32,4 L45,9 L68,3 L86,8 L108,5 L117,12 L103,16 L118,22 L101,27 L111,31 L84,28 L66,33 L42,27 L20,31 L6,25 L16,20 L3,14 L17,11 Z" />
-                                <ellipse cx="114" cy="7" rx="3.5" ry="1.2" transform="rotate(-14 114 7)" />
-                                <ellipse cx="7" cy="30" rx="4" ry="1.3" transform="rotate(-10 7 30)" />
-                              </g>
-                            )}
-                            {opt.id === 'bottom_slash' && (
-                              <g>
-                                <rect x="24" y="6" width="72" height="6" rx="3" fill="rgba(255,255,255,0.22)" />
-                                <path
-                                  d="M14,22 Q60,18 112,17 L104,23 L114,27 Q62,31 16,30 L7,26 Z"
-                                  fill={`url(#grad-${activeSlot}-${opt.id})`}
-                                />
-                              </g>
-                            )}
-                            {opt.id === 'double_strokes' && (
-                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
-                                <path d="M10,6 Q52,4 94,7 L101,10 L93,13 L99,15 Q52,17 10,15 L5,12 L11,9 Z" />
-                                <path d="M22,20 Q64,18 109,21 L116,24 L108,27 L114,30 Q64,32 22,30 L16,27 L23,23 Z" />
-                              </g>
-                            )}
-                            {opt.id === 'distressed_grunge' && (
-                              <g>
-                                <path
-                                  d="M11,8 Q60,4 109,9 L115,13 L106,18 L114,24 L106,29 Q60,32 12,28 L5,23 L13,18 L6,12 Z"
-                                  fill={`url(#grad-${activeSlot}-${opt.id})`}
-                                />
-                                <path d="M24,13 Q52,11 76,14" stroke="#070a12" strokeWidth="2.4" strokeLinecap="round" />
-                                <path d="M46,24 Q78,22 96,25" stroke="#070a12" strokeWidth="2.2" strokeLinecap="round" />
-                              </g>
-                            )}
-                            {opt.id === 'tapered_speed' && (
-                              <g fill={`url(#grad-${activeSlot}-${opt.id})`}>
-                                <path d="M7,5 Q56,6 106,13 L118,16 L104,18 L116,21 L100,23 Q54,29 8,31 L3,25 L10,18 L3,11 Z" />
-                                <rect x="98" y="12" width="19" height="1.5" rx="0.75" opacity="0.8" />
-                                <rect x="101" y="22" width="16" height="1.5" rx="0.75" opacity="0.8" />
-                              </g>
-                            )}
-                            {opt.id === 'none' && (
-                              <g stroke="#64748b" strokeWidth="1.6" strokeDasharray="3 3" fill="none">
-                                <rect x="14" y="8" width="92" height="20" rx="4" />
-                                <line x1="18" y1="26" x2="102" y2="10" stroke="#94a3b8" strokeDasharray="none" />
-                              </g>
-                            )}
-                          </svg>
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <span className="text-[10.5px] font-bold leading-tight block truncate">
-                            {opt.label}
-                          </span>
-                          <span className="text-[9px] font-mono opacity-65 block truncate">
-                            {opt.subtitle}
-                          </span>
-                        </div>
-                      </motion.button>
-                    );
-                  })}
-                </div>
-
-                {/* Палитра цветов + HTML5 Color Picker с авто-расчётом объёмного градиента */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
-                      Цвет и градиент подложки:
-                    </span>
-                    <label className="min-h-[28px] px-2.5 py-0.5 rounded-lg border border-white/[0.08] bg-[#0b0f19]/90 flex items-center gap-1.5 cursor-pointer text-[10px] text-white/80 hover:border-amber-400/50 transition">
-                      <input
-                        type="color"
-                        value={activeConfig.splashColor}
-                        onChange={e => {
-                          const hex = e.target.value.toUpperCase();
-                          updateSlotConfig(activeSlot, prev => ({
-                            ...prev,
-                            splashShape:
-                              prev.splashShape === 'none' ? 'monolith_bristle' : prev.splashShape,
-                            splashColor: hex
-                          }));
-                        }}
-                        aria-label="Свой цвет подложки"
-                        className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
-                      />
-                      <span className="font-mono font-semibold">{activeConfig.splashColor}</span>
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {SPLASH_COLOR_SWATCHES.map(swatch => {
-                      const isSelected =
-                        activeConfig.splashColor.toUpperCase() === swatch.mainColor.toUpperCase();
-                      return (
-                        <motion.button
-                          key={`splash-swatch-${swatch.id}`}
-                          type="button"
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() =>
-                            updateSlotConfig(activeSlot, prev => ({
-                              ...prev,
-                              splashShape:
-                                prev.splashShape === 'none' ? 'monolith_bristle' : prev.splashShape,
-                              splashColor: swatch.mainColor
-                            }))
-                          }
-                          className={`min-h-[30px] px-2.5 py-1 rounded-xl border text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                            isSelected
-                              ? 'border-amber-400 bg-amber-500/20 text-[#FDE047]'
-                              : 'border-white/[0.08] bg-[#0b0f19]/90 text-white/75 hover:text-white'
-                          }`}
-                        >
-                          <span
-                            className="w-3 h-3 rounded-sm border border-white/25 shrink-0"
-                            style={{
-                              background: `linear-gradient(135deg, ${swatch.mainColor}, ${swatch.edgeColor})`
-                            }}
-                          />
-                          <span>{swatch.label}</span>
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Слайдеры отступа мазка и интенсивности тёмной тени подложки */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
-                    <div className="flex items-center justify-between text-[10.5px]">
-                      <span className="text-white/75 font-semibold">Отступ / Ширина мазка</span>
-                      <span className="font-mono font-bold text-amber-300 tabular-nums">
-                        {activeConfig.splashPaddingPct}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={50}
-                      max={160}
-                      step={2}
-                      value={activeConfig.splashPaddingPct}
-                      onChange={e => {
-                        const val = Number(e.target.value);
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, splashPaddingPct: val }));
-                      }}
-                      className="w-full accent-amber-400 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="space-y-1 bg-[#0b0f19]/75 border border-white/[0.06] rounded-xl p-2.5">
-                    <div className="flex items-center justify-between text-[10.5px]">
-                      <span className="text-white/75 font-semibold">Тёмная тень подложки</span>
-                      <span className="font-mono font-bold text-amber-300 tabular-nums">
-                        {activeConfig.splashShadowPct}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={160}
-                      step={2}
-                      value={activeConfig.splashShadowPct}
-                      onChange={e => {
-                        const val = Number(e.target.value);
-                        updateSlotConfig(activeSlot, prev => ({ ...prev, splashShadowPct: val }));
-                      }}
-                      className="w-full accent-amber-400 cursor-pointer"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* ВЕРХНИЕ КАПСУЛЫ-БЕЙДЖИ (20 ПРЕСЕТОВ В 2 ГРУППАХ + 21-Й КАСТОМНЫЙ) */}
