@@ -1,293 +1,407 @@
 #!/usr/bin/env python3
 """
-assemble_pipeline.py
-Универсальный конвейер сборки видео и слотов (FFmpeg + Rclone Google Drive)
-с поддержкой кэширования скомпилированных видео-слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4 ... + concat -c copy),
-гибких режимов субтитров (Hardsub burn_in / Softsub upload_srt / .SRT),
-режима Черновик Draft 720p ultrafast и Telegram-уведомлений.
+assemble_pipeline.py — многочасовой луп (loop-baker + честные кроссфейды актов + concat -c copy).
+Совместимость: manifest.json (timeline_slots), ./input_clips, ./output,
+final_output_name.txt, final_chapters_name.txt, qc_report.json, shorts_factory.py.
+Секреты — только из окружения / GitHub Secrets, никогда из манифеста.
+Запуск: python3 assemble_pipeline.py manifest.json [--stream | --local] [--preflight] [--selftest]
 """
-
-import base64
+import argparse
+import hashlib
 import json
+import math
 import os
+import re
+import shutil
 import subprocess
-import urllib.request
+import sys
+
+FPS = 24
+TAIL_BLACK = 2.0
+FADE_OUT = 1.5
+RES = {"720p": (1280, 720), "1080p": (1920, 1080), "2k": (2560, 1440), "4k": (3840, 2160)}
 
 
-def send_telegram_alert(cfg: dict, text: str) -> None:
-    tg = cfg.get("telegram_notifications") or {}
-    bot_token = (tg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
-    chat_id = (tg.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
-    if not bot_token or not chat_id:
-        return
+def run(cmd, capture=False):
+    print("\n[EXEC]: " + (" ".join(cmd) if isinstance(cmd, list) else cmd), flush=True)
+    if capture:
+        return subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True)
+    return subprocess.run(cmd, check=True)
+
+
+def probe(path):
+    res = run(["ffprobe", "-v", "error", "-print_format", "json",
+               "-show_format", "-show_streams", path], capture=True)
+    data = json.loads(res.stdout)
+    dur = float(data.get("format", {}).get("duration", 0) or 0)
+    v = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), {})
+    a = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), None)
+    fps = 0.0
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as exc:
-        print(f"Telegram alert warning: {exc}")
+        num, den = str(v.get("r_frame_rate", "0/1")).split("/")
+        fps = float(num) / float(den) if float(den) else 0.0
+    except Exception:
+        fps = 0.0
+    return {"duration": dur, "fps": fps, "has_audio": a is not None,
+            "vcodec": v.get("codec_name", ""), "width": v.get("width", 0),
+            "height": v.get("height", 0)}
 
 
-def is_valid_cached_slot(slot_path: str) -> bool:
-    return os.path.exists(slot_path) and os.path.getsize(slot_path) > 1024
+def fmt_duration(sec):
+    sec = int(round(max(0.0, sec)))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def _snap_range_to_voice_bounds(start_sec: float, target_dur: float, timeline_map: list[dict]) -> tuple[float, float]:
-    """Snap [start_sec, start_sec + target_dur] to continuous scene pause boundaries so speech is never clipped."""
-    if not timeline_map:
-        return round(max(0.0, start_sec), 3), round(max(5.0, target_dur), 3)
+def resolve_file(input_dir, filename):
+    if not filename or not str(filename).strip():
+        raise ValueError("Пустое имя файла в манифесте. Заполните все слоты в Studio.")
+    exact = os.path.join(input_dir, filename)
+    if os.path.exists(exact):
+        return exact
+    for f in sorted(os.listdir(input_dir)):
+        if f.lower() == str(filename).lower():
+            return os.path.join(input_dir, f)
+    raise FileNotFoundError(f"Файл '{filename}' не найден в {input_dir}. "
+                            f"Найдено файлов: {len(os.listdir(input_dir))}")
 
-    best_idx = 0
-    best_dist = float("inf")
-    for idx, entry in enumerate(timeline_map):
-        vs = float(entry.get("voice_start", entry.get("seg_start", 0.0)))
-        dist = abs(vs - start_sec)
-        if dist < best_dist:
-            best_dist = dist
-            best_idx = idx
 
-    first = timeline_map[best_idx]
-    seg_start = float(first.get("seg_start", first.get("voice_start", 0.0)))
-    voice_end = float(first.get("voice_end", seg_start + float(first.get("clip_dur", target_dur))))
-    seg_end = float(first.get("seg_end", voice_end + 0.35))
-    if best_idx < len(timeline_map) - 1:
-        cut_end = (voice_end + seg_end) * 0.5
+def guard_slots(slots):
+    if not slots:
+        raise SystemExit("[P0-GUARD] timeline_slots пуст — рендер запрещён.")
+    empty = [i + 1 for i, s in enumerate(slots)
+             if not str((s.get("base_content") or {}).get("file_name")
+                        or s.get("file_name") or "").strip()]
+    if empty:
+        raise SystemExit(f"[P0-GUARD] Пустые file_name в слотах {empty}. "
+                         f"Рендер запрещён до заполнения (никаких -i \"\").")
+
+
+def slot_duration_sec(slot, idx=0):
+    """Каноническое поле — slot_duration_sec (manifest.json / build_timeline.py / render_loop.yml).
+    duration_sec оставлен только как legacy-fallback."""
+    raw = slot.get("slot_duration_sec")
+    if raw in (None, "", 0, "0"):
+        raw = slot.get("duration_sec")
+    if raw in (None, "", 0, "0"):
+        print(f"[WARN] Слот {idx + 1}: slot_duration_sec отсутствует — fallback 1800s.", flush=True)
+        raw = 1800
+    val = float(raw)
+    if val <= 0:
+        raise SystemExit(f"[P0-GUARD] Слот {idx + 1}: некорректная длительность {val}s.")
+    return val
+
+
+def md5_of(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def enc_args(codec, preset, crf):
+    return ["-c:v", codec, "-preset", preset, "-crf", str(crf),
+            "-pix_fmt", "yuv420p", "-r", str(FPS), "-video_track_timescale", "24000",
+            "-c:a", "aac", "-b:a", "320k", "-ar", "48000"]
+
+
+def bake_loop(src, seam, cache_dir, w, h):
+    """Запекает бесшовный луп длины S-seam: xfade(src,src,offset=S-seam) + trim[seam:S]."""
+    info = probe(src)
+    S = info["duration"]
+    if S <= seam + 0.5:
+        raise SystemExit(f"[P0-GUARD] Исходник '{src}' короток ({S:.2f}s) для шва {seam}s.")
+    os.makedirs(cache_dir, exist_ok=True)
+    L = S - seam
+    out = os.path.join(cache_dir, f"baked_{md5_of(src)}_{S:.3f}_{seam:.3f}_{w}x{h}.mp4")
+    if os.path.exists(out) and abs(probe(out)["duration"] - L) < 0.6:
+        print(f"[CACHE] baked loop: {out}", flush=True)
+        return out, L
+    pre = f"fps={FPS},settb=AVTB,format=yuv420p"
+    vf = (f"[0:v]split=2[va][vb];"
+          f"[va]trim=0:{S},setpts=PTS-STARTPTS,{pre}[fa];"
+          f"[vb]trim=0:{S},setpts=PTS-STARTPTS,{pre}[fb];"
+          f"[fa][fb]xfade=transition=fade:duration={seam}:offset={S - seam}[x];"
+          f"[x]trim=start={seam}:duration={L},setpts=PTS-STARTPTS,"
+          f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+          f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]")
+    inputs = ["-i", src]
+    if info["has_audio"]:
+        af = (f"[0:a]asplit=2[aa][ab];"
+              f"[aa]atrim=0:{S},asetpts=PTS-STARTPTS[ga];"
+              f"[ab]atrim=0:{S},asetpts=PTS-STARTPTS[gb];"
+              f"[ga][gb]acrossfade=d={seam}:c1=tri:c2=tri[xa];"
+              f"[xa]atrim=start={seam}:duration={L},asetpts=PTS-STARTPTS[a]")
     else:
-        cut_end = seg_end
-
-    end_idx = best_idx
-    while (cut_end - seg_start) < max(12.0, target_dur * 0.8) and end_idx + 1 < len(timeline_map):
-        end_idx += 1
-        nxt = timeline_map[end_idx]
-        nxt_ve = float(nxt.get("voice_end", cut_end))
-        nxt_se = float(nxt.get("seg_end", nxt_ve + 0.35))
-        cand_end = ((nxt_ve + nxt_se) * 0.5) if end_idx < len(timeline_map) - 1 else nxt_se
-        if (cand_end - seg_start) > 58.0 and (cut_end - seg_start) >= 15.0:
-            break
-        cut_end = cand_end
-
-    return round(max(0.0, seg_start), 3), round(max(5.0, cut_end - seg_start), 3)
+        inputs += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+        af = f"[1:a]atrim=0:{L},asetpts=PTS-STARTPTS[a]"
+    run(["ffmpeg", "-y"] + inputs + ["-filter_complex", vf + ";" + af,
+         "-map", "[v]", "-map", "[a]", "-t", f"{L}"] + enc_args("libx264", "veryfast", 18) + [out])
+    return out, L
 
 
-def generate_shorts_factory(cfg: dict, source_video: str, timeline_map: list[dict] | None = None) -> None:
-    shorts_factory = cfg.get("shorts_factory") or cfg.get("shorts_config") or {}
-    if not shorts_factory.get("enabled") or not os.path.exists(source_video):
+def cached_piece(out, want_dur, codec):
+    if os.path.exists(out):
+        ci = probe(out)
+        if abs(ci["duration"] - want_dur) < 0.6 and ci["vcodec"] == codec:
+            print(f"[CACHE] piece reuse: {out}", flush=True)
+            return True
+    return False
+
+
+def render_body(baked, skip, dur, out, enc, codec, fade=False):
+    if cached_piece(out, dur, codec):
         return
-
-    if timeline_map is None and os.path.exists("./output/voice_timeline_map.json"):
-        try:
-            with open("./output/voice_timeline_map.json", "r", encoding="utf-8") as mf:
-                loaded_map = json.load(mf)
-            if isinstance(loaded_map, list):
-                timeline_map = loaded_map
-        except Exception:
-            timeline_map = None
-
-    clip_dur = max(5, int(shorts_factory.get("clip_duration_sec") or 38))
-    slots = cfg.get("timeline_slots") or cfg.get("slots") or []
-    insert_timestamps = []
-    for sl in slots:
-        for ins in (sl.get("inserts") or []):
-            insert_timestamps.append(max(0.0, float(ins.get("trigger_at_sec") or 0)))
-
-    if not insert_timestamps:
-        insert_timestamps = [0.0, 60.0, 120.0, 180.0]
-
-    os.makedirs("./output/shorts", exist_ok=True)
-    for idx, raw_start_sec in enumerate(insert_timestamps[:4]):
-        start_sec, safe_dur = _snap_range_to_voice_bounds(raw_start_sec, float(clip_dur), timeline_map or [])
-        out_short = f"./output/shorts/short_{idx + 1:02d}_1080x1920.mp4"
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", str(start_sec),
-            "-i", source_video,
-            "-t", str(safe_dur),
-            "-vf", "crop=ih*9/16:ih,scale=1080:1920,setsar=1",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-            "-movflags", "+faststart",
-            out_short,
-        ]
-        print(f"[SHORTS FACTORY] Generating voice-locked 9:16 Short #{idx + 1} @ {start_sec}s ({safe_dur}s)...")
-        subprocess.run(cmd, check=True)
-
-    subprocess.run(
-        ["rclone", "copy", "./output/shorts", "gdrive:AetherFlow_Output/shorts/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
-        check=True,
-    )
+    vf = f"fps={FPS},format=yuv420p"
+    af = "anull"
+    if fade:
+        vf += f",fade=t=out:st={max(0.0, dur - FADE_OUT)}:d={FADE_OUT}"
+        af = f"afade=t=out:st={max(0.0, dur - FADE_OUT)}:d={FADE_OUT}"
+    run(["ffmpeg", "-y", "-stream_loop", "-1", "-ss", f"{skip}", "-i", baked,
+         "-t", f"{dur}", "-vf", vf, "-af", af] + enc + [out])
 
 
-def run_pipeline(cfg: dict) -> None:
-    # Delegate narrative scenes montage manifests (v2.2-FINAL) to assemble_scenes.py
-    narrative_list = cfg.get("timeline") or cfg.get("scenes") or []
-    if narrative_list and not (cfg.get("timeline_slots") or cfg.get("slots")):
-        import assemble_scenes
-        print("[PIPELINE] Narrative montage manifest detected -> delegating to assemble_scenes.run_narrative_pipeline()...")
-        assemble_scenes.run_narrative_pipeline(cfg)
+def render_transition(baked_a, off_a, baked_b, C, out, enc, codec):
+    if cached_piece(out, C, codec):
         return
+    fc = (f"[0:v]fps={FPS},settb=AVTB,format=yuv420p[va];"
+          f"[1:v]fps={FPS},settb=AVTB,format=yuv420p[vb];"
+          f"[va][vb]xfade=transition=fade:duration={C}:offset=0[v];"
+          f"[0:a]atrim=0:{C},asetpts=PTS-STARTPTS[aa];"
+          f"[1:a]atrim=0:{C},asetpts=PTS-STARTPTS[ab];"
+          f"[aa][ab]acrossfade=d={C}:c1=tri:c2=tri[a]")
+    run(["ffmpeg", "-y", "-stream_loop", "-1", "-ss", f"{off_a}", "-t", f"{C}", "-i", baked_a,
+         "-stream_loop", "-1", "-t", f"{C}", "-i", baked_b,
+         "-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-t", f"{C}"] + enc + [out])
 
-    exp = cfg.get("export_settings") or {}
-    res = str(exp.get("resolution") or cfg.get("resolution") or "4k").lower()
-    draft_mode = bool(exp.get("draft_mode") or res == "720p")
-    v_codec = str(exp.get("video_codec") or cfg.get("video_codec") or "libx264")
-    preset = str(
-        exp.get("preset")
-        or ("ultrafast" if draft_mode else ("veryfast" if v_codec == "libx264" else "medium"))
-    )
-    fps = int(exp.get("fps") or cfg.get("fps") or 24)
-    crf = str(exp.get("crf") or cfg.get("crf") or ("18" if v_codec == "libx264" else "22"))
-    a_bitrate = f"{int(exp.get('audio_bitrate_kbps') or cfg.get('audio_bitrate_kbps') or 320)}k"
-    folder_id = (cfg.get("cloud_export") or {}).get("target_folder_id") or cfg.get("gdrive_folder_id", "")
 
-    os.makedirs("./output", exist_ok=True)
-    os.makedirs("./temp_render", exist_ok=True)
+def render_tail(out, enc, codec, w, h):
+    if cached_piece(out, TAIL_BLACK, codec):
+        return
+    run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=black:s={w}x{h}:r={FPS}:d={TAIL_BLACK}",
+         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{TAIL_BLACK}"] + enc + [out])
 
-    # Параметры гибкой системы субтитров из манифеста (export_settings.subtitles / subtitles)
-    subs_cfg = cfg.get("subtitles") or exp.get("subtitles") or cfg.get("subtitles_burn_in") or {}
-    subs_enabled = bool(subs_cfg.get("enabled", False))
-    burn_in = bool(subs_cfg.get("burn_in", False))
-    upload_srt = bool(subs_cfg.get("upload_srt", False))
-    srt_content = str(subs_cfg.get("srt_content") or "").strip()
 
-    if not srt_content and subs_cfg.get("srt_content_base64"):
-        srt_content = base64.b64decode(subs_cfg["srt_content_base64"]).decode("utf-8")
-
-    output_srt_path = "./output/subtitles.srt"
-    if subs_enabled and (upload_srt or burn_in) and srt_content:
-        with open(output_srt_path, "w", encoding="utf-8") as sf:
-            sf.write(srt_content)
-        with open("subtitles.srt", "w", encoding="utf-8") as sf_root:
-            sf_root.write(srt_content)
-        print(f"Saved SRT file to {output_srt_path}")
-
-    timeline_slots = cfg.get("timeline_slots") or cfg.get("slots") or []
-    output_video = cfg.get("output_filename") or f"./output/master_{res}_{v_codec}_{fps}fps.mp4"
-    master_audio_file = str(
-        (cfg.get("master_audio") or {}).get("file_name") or cfg.get("audio_filename") or ""
-    ).strip()
-
-    # Если есть timeline_slots, проверяем кэш слотов в ./temp_render/ (slot_1.mp4, slot_2.mp4...)
-    if timeline_slots:
-        cached_slot_paths = []
-        for idx, slot in enumerate(timeline_slots):
-            slot_num = idx + 1
-            slot_path = f"./temp_render/slot_{slot_num}.mp4"
-            base_content = slot.get("base_content") if isinstance(slot.get("base_content"), dict) else {}
-            src_clip = (
-                base_content.get("file_name")
-                or slot.get("file_name")
-                or slot.get("filename")
-                or ""
-            )
-            slot_dur = float(slot.get("slot_duration_sec") or 1800)
-
-            if is_valid_cached_slot(slot_path):
-                print(f"[CACHE HIT] Слот {slot_path} уже существует в ./temp_render/ — пропускаем перерендер.")
-            elif src_clip:
-                print(f"[CACHE MISS] Генерация слота #{slot_num} в {slot_path} ...")
-                slot_cmd = [
-                    "ffmpeg", "-y",
-                    "-stream_loop", "-1",
-                    "-t", str(slot_dur),
-                    "-i", src_clip,
-                    "-r", str(fps),
-                    "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-b:a", a_bitrate,
-                    slot_path,
-                ]
-                subprocess.run(slot_cmd, check=True)
-            if os.path.exists(slot_path):
-                cached_slot_paths.append(slot_path)
-
-        if cached_slot_paths:
-            concat_txt = "./temp_render/concat_slots.txt"
-            with open(concat_txt, "w", encoding="utf-8") as cf:
-                for p in cached_slot_paths:
-                    cf.write(f"file '{os.path.abspath(p)}'\n")
-
-            fast_concat_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_txt]
-            if master_audio_file and os.path.exists(master_audio_file):
-                fast_concat_cmd += [
-                    "-i", master_audio_file,
-                    "-map", "0:v:0", "-map", "1:a:0",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", a_bitrate,
-                    "-shortest", "-movflags", "+faststart", output_video,
-                ]
-            else:
-                fast_concat_cmd += ["-c", "copy", "-movflags", "+faststart", output_video]
-
-            print("Fast concat of cached slots:", " ".join(fast_concat_cmd))
-            subprocess.run(fast_concat_cmd, check=True)
-            if os.path.exists(output_video):
-                import shutil
-                shutil.copyfile(output_video, "./output.mp4")
-            if folder_id:
-                subprocess.run(
-                    ["rclone", "copy", "./output.mp4", "gdrive:AetherFlow_Output/", "--drive-chunk-size", "64M", "--transfers", "2", "--checkers", "4", "--retries", "5", "--low-level-retries", "10", "--stats", "15s", "-v"],
-                    check=True,
-                )
-            generate_shorts_factory(cfg, "./output.mp4")
-            send_telegram_alert(cfg, "✅ Рендеринг и выгрузка завершены успешно!")
-            return
-
-    input_video = cfg.get("video_filename") or "input_master.mp4"
-    vf_filters = []
-    if res == "720p":
-        vf_filters.append("scale=1280:720")
-    if subs_enabled and burn_in and srt_content:
-        vf_filters.append(
-            "subtitles=subtitles.srt:force_style='FontName=Inter,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=45'"
-        )
-
-    cmd = ["ffmpeg", "-y", "-i", input_video]
-    if vf_filters:
-        cmd += ["-vf", ",".join(vf_filters)]
-    cmd += [
-        "-r", str(fps),
-        "-c:v", v_codec, "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", a_bitrate,
-        "-movflags", "+faststart",
-        output_video,
-    ]
-
-    print("Executing FFmpeg pipeline:", " ".join(cmd))
+def measure_loudness(concat_list):
+    res = subprocess.run(["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat_list,
+                          "-map", "0:a", "-af", "loudnorm=I=-16:TP=-3:LRA=11:print_format=json",
+                          "-f", "null", "-"], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    m = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", res.stderr)
+    if not m:
+        return None
     try:
-        subprocess.run(cmd, check=True)
-        if os.path.exists(output_video):
-            import shutil
-            shutil.copyfile(output_video, "./output.mp4")
-    except Exception as exc:
-        send_telegram_alert(cfg, f"❌ Ошибка сборки на этапе FFmpeg: {exc}. Проверьте лог FFmpeg.")
-        raise
+        return json.loads(m[-1])
+    except Exception:
+        return None
 
-    if folder_id:
-        subprocess.run(
-            ["rclone", "copy", output_video, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
-            check=True,
-        )
-        if subs_enabled and upload_srt and os.path.exists(output_srt_path):
-            subprocess.run(
-                ["rclone", "copy", output_srt_path, "gdrive:", "--drive-root-folder-id", folder_id, "-P"],
-                check=True,
-            )
 
-    send_telegram_alert(
-        cfg,
-        "✅ Рендеринг и выгрузка успешно завершены!",
-    )
+def plan_pieces(durs, C):
+    n = len(durs)
+    pieces, starts, pos = [], [], 0.0
+    for i, d in enumerate(durs):
+        head = C if i > 0 else 0.0
+        tailc = C if i < n - 1 else 0.0
+        b = d - head - tailc
+        if b <= 5:
+            raise SystemExit(f"[P0-GUARD] Слот {i + 1}: duration {d}s слишком мал для двух "
+                             f"кроссфейдов по {C}s. Увеличьте слот или уменьшите crossfade.")
+        starts.append(pos)
+        pieces.append({"kind": "body", "idx": i, "skip": head, "dur": b})
+        pos += b
+        if i < n - 1:
+            pieces.append({"kind": "trans", "idx": i, "skip": d - C, "dur": C})
+            pos += C
+    pieces.append({"kind": "tail", "idx": None, "skip": 0.0, "dur": TAIL_BLACK})
+    pos += TAIL_BLACK
+    return pieces, starts, pos
+
+
+def selftest():
+    durs = [1800, 1890, 2490, 1290, 2490, 1290]
+    pieces, starts, total = plan_pieces(durs, 90.0)
+    assert abs(total - 10802.0) < 1e-6, total
+    assert [int(s) for s in starts] == [0, 1800, 3600, 6000, 7200, 9600], starts
+    assert fmt_duration(10800) == "3:00:00"
+    assert fmt_duration(64) == "1:04"
+    p1, s1, t1 = plan_pieces([10800], 90.0)
+    assert abs(t1 - 10802.0) < 1e-6 and s1 == [0.0]
+    assert slot_duration_sec({"slot_duration_sec": 1890}) == 1890.0
+    assert slot_duration_sec({"duration_sec": 1290}) == 1290.0
+    assert slot_duration_sec({"slot_duration_sec": 2490, "duration_sec": 1800}) == 2490.0
+    print("[SELFTEST] OK: pieces/chapters/formatter/slot_duration")
+
+
+
+def _write_studio_subtitles_if_configured(manifest: dict, out_dir: str) -> None:
+    """Writes subtitles.srt if enabled in manifest.subtitles or manifest.export_settings.subtitles."""
+    import base64
+    export_cfg = manifest.get("export_settings") or {}
+    subs_cfg = manifest.get("subtitles") or export_cfg.get("subtitles") or {}
+    if not isinstance(subs_cfg, dict) or not subs_cfg.get("enabled"):
+        return
+    srt_text = str(subs_cfg.get("srt_content") or "").strip()
+    if not srt_text and subs_cfg.get("srt_content_base64"):
+        try:
+            srt_text = base64.b64decode(str(subs_cfg["srt_content_base64"])).decode("utf-8").strip()
+        except Exception:
+            srt_text = ""
+    if not srt_text:
+        return
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "subtitles.srt"), "w", encoding="utf-8") as sf:
+        sf.write(srt_text + ("\n" if not srt_text.endswith("\n") else ""))
+
+
+def _maybe_delegate_to_studio_scenes(manifest: dict) -> bool:
+    """Delegates narrative scene manifests (timeline/scenes without timeline_slots) to assemble_scenes.py."""
+    has_slots = bool(manifest.get("timeline_slots") or manifest.get("slots"))
+    has_scenes = bool(manifest.get("timeline") or manifest.get("scenes"))
+    if has_scenes and not has_slots:
+        try:
+            import assemble_scenes
+            if hasattr(assemble_scenes, "run_narrative_pipeline"):
+                assemble_scenes.run_narrative_pipeline(manifest)
+                return True
+        except Exception as exc:
+            print(f"[STUDIO-DELEGATE] assemble_scenes delegation skipped/failed: {exc}", flush=True)
+    return False
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("manifest", nargs="?", default="manifest.json")
+    ap.add_argument("--preflight", action="store_true")
+    ap.add_argument("--stream", action="store_true", help="final mux -> rclone rcat (без локальной копии)")
+    ap.add_argument("--local", action="store_true", help="принудительно локальный финал (игнорировать disk-guard)")
+    ap.add_argument("--selftest", action="store_true")
+    args = ap.parse_args()
+    if args.selftest:
+        selftest()
+        return
+    path = args.manifest if os.path.exists(args.manifest) else "current_manifest.json"
+    with open(path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    if _maybe_delegate_to_studio_scenes(manifest):
+        return
+    export = manifest.get("export_settings", {}) or {}
+    slots = manifest.get("timeline_slots", []) or []
+    guard_slots(slots)
+    _write_studio_subtitles_if_configured(manifest, "./output")
+    codec = export.get("video_codec", "libx264")
+    preset = export.get("preset", "veryfast" if codec == "libx264" else "medium")
+    crf = export.get("crf", 20 if codec == "libx264" else 22)
+    w, h = RES.get(str(export.get("resolution", "4k")).lower(), RES["4k"])
+    C = float(export.get("act_crossfade_sec", manifest.get("act_crossfade_sec", 90)))
+    seam = float(export.get("loop_seam_sec", 1.0))
+    out_name = export.get("output_filename", f"FINAL_RENDER_{w}x{h}_{codec}.mp4")
+    input_dir, temp_dir, out_dir = "./input_clips", "./temp_render", "./output"
+    for d in (input_dir, temp_dir, out_dir, f"{temp_dir}/baked", f"{temp_dir}/pieces"):
+        os.makedirs(d, exist_ok=True)
+    durs = [slot_duration_sec(s, i) for i, s in enumerate(slots)]
+    pieces, starts, total = plan_pieces(durs, C)
+    print(f"=== Loop pipeline: {len(slots)} слотов, crossfade {C}s, seam {seam}s, "
+          f"{w}x{h}, master {fmt_duration(total)} ===", flush=True)
+    sources = [resolve_file(input_dir, (s.get("base_content") or {}).get("file_name")
+                            or s.get("file_name")) for s in slots]
+    if args.preflight:
+        for src, d in zip(sources, durs):
+            info = probe(src)
+            print(f"[PREFLIGHT] {os.path.basename(src)}: {info['duration']:.2f}s "
+                  f"{info['fps']:.2f}fps audio={info['has_audio']} slot={d}s")
+        print("[PREFLIGHT] OK")
+        return
+    baked = [bake_loop(src, seam, f"{temp_dir}/baked", w, h) for src in sources]
+    enc = enc_args(codec, preset, crf)
+    est_mbps = 3.0 if str(manifest.get("content_profile", "")).lower() == "ambience" else 18.0
+    est_bytes = total * est_mbps * 1e6 / 8
+    free = shutil.disk_usage(temp_dir).free
+    need_local = est_bytes * 2.0
+    force_stream = args.stream or os.environ.get("AETHER_FORCE_STREAM", "") == "1"
+    stream = force_stream or (not args.local and need_local > free * 0.85)
+    print(f"[DISK] свободно {free / 1e9:.1f} ГБ • мастер ~{est_bytes / 1e9:.1f} ГБ • "
+          f"локально нужно ~{need_local / 1e9:.1f} ГБ → {'STREAM' if stream else 'LOCAL'}", flush=True)
+    concat_list = f"{temp_dir}/slots_concat.txt"
+    files = []
+    for p in pieces:
+        i = p["idx"]
+        if p["kind"] == "body":
+            out = f"{temp_dir}/pieces/slot_{i + 1}_body.mp4"
+            render_body(baked[i][0], p["skip"], p["dur"], out, enc, codec,
+                        fade=(i == len(slots) - 1))
+        elif p["kind"] == "trans":
+            out = f"{temp_dir}/pieces/trans_{i + 1}.mp4"
+            render_transition(baked[i][0], p["skip"], baked[i + 1][0], p["dur"], out, enc, codec)
+        else:
+            out = f"{temp_dir}/pieces/tail_black.mp4"
+            render_tail(out, enc, codec, w, h)
+        files.append(out)
+    with open(concat_list, "w", encoding="utf-8") as f:
+        for fp in files:
+            f.write(f"file '{os.path.abspath(fp)}'\n")
+    measured = measure_loudness(concat_list)
+    ln = "loudnorm=I=-16:TP=-3:LRA=11"
+    if measured:
+        ln += (f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
+               f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
+               f":offset={measured['target_offset']}:linear=true")
+    final_local = os.path.join(out_dir, out_name)
+    folder = (manifest.get("cloud_export", {}) or {}).get("target_folder_id", "")
+    base = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
+            "-map", "0:v", "-map", "0:a", "-c:v", "copy", "-c:a", "aac",
+            "-b:a", "320k", "-ar", "48000", "-af", ln]
+    if stream:
+        remote = f"gdrive:{out_name}"
+        rclone = ["rclone", "rcat", remote, "--drive-chunk-size", "128M", "--stats", "30s"]
+        if folder:
+            rclone += ["--drive-root-folder-id", folder]
+        p1 = subprocess.Popen(base + ["-f", "mp4",
+                              "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "pipe:1"],
+                              stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(rclone, stdin=p1.stdout)
+        p1.stdout.close()
+        rc2 = p2.wait()
+        rc1 = p1.wait()
+        if rc1 or rc2:
+            raise SystemExit(f"[P0] stream mux/upload failed: ffmpeg={rc1} rclone={rc2}")
+        for fp in files:
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+        size_gb = est_bytes / 1e9
+        print(f"[ГОТОВО] stream-upload: {remote} (~{size_gb:.2f} ГБ оценка)", flush=True)
+    else:
+        run(base + ["-movflags", "+faststart", final_local])
+        size_gb = os.path.getsize(final_local) / (1024 ** 3)
+        for fp in files:
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+        print(f"[ГОТОВО] {final_local} ({size_gb:.2f} ГБ)", flush=True)
+    base_name = os.path.splitext(out_name)[0]
+    ch_name = f"{base_name}_chapters.txt"
+    with open(ch_name, "w", encoding="utf-8") as f:
+        for i, st in enumerate(starts):
+            label = slots[i].get("title") or slots[i].get("name") or f"Act {i + 1}"
+            f.write(f"{fmt_duration(st)} {label}\n")
+    with open("final_output_name.txt", "w", encoding="utf-8") as f:
+        f.write(out_name + "\n")
+    with open("final_chapters_name.txt", "w", encoding="utf-8") as f:
+        f.write(ch_name + "\n")
+    qc = {"duration_sec": round(total, 3), "duration_formatted": fmt_duration(total),
+          "integrated_lufs": -16.0 if measured else None,
+          "loudness_mode": "two-pass-linear" if measured else "single-pass-dynamic",
+          "measured_source": measured, "slots": len(slots), "pieces": len(files),
+          "codec": codec, "crf": crf, "resolution": f"{w}x{h}",
+          "stream_uploaded": bool(stream), "size_gb_estimate": round(size_gb, 2)}
+    with open("qc_report.json", "w", encoding="utf-8") as f:
+        json.dump(qc, f, ensure_ascii=False, indent=2)
+    print(f"[QC] {qc['duration_formatted']} • pieces={len(files)} • stream={stream}", flush=True)
 
 
 if __name__ == "__main__":
-    raw_b64 = os.environ.get("MANIFEST_B64", "").strip()
-    if raw_b64:
-        manifest_data = json.loads(base64.b64decode(raw_b64).decode("utf-8"))
-    elif os.path.exists("manifest.json"):
-        with open("manifest.json", "r", encoding="utf-8") as f:
-            manifest_data = json.load(f)
-    elif os.path.exists("config.json"):
-        with open("config.json", "r", encoding="utf-8") as f:
-            manifest_data = json.load(f)
-    else:
-        manifest_data = {}
-    run_pipeline(manifest_data)
+    main()
