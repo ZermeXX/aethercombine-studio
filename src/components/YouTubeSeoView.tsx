@@ -58,10 +58,11 @@ interface YouTubeSeoViewProps {
   exportReleaseCardMdEnabled?: boolean;
   onExportReleaseCardMdEnabledChange?: (val: boolean) => void;
   onApplyTitleToThumbnail?: (title: string) => void;
+  onApplyTitleToSlot?: (slot: 'A' | 'B' | 'C', titleEn: string, scriptContext: string) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
-/* ---------- счётчики: только целые неотрицательные, без анимационного undershoot ---------- */
+/* ---------- счётчики и форматирование ---------- */
 const safeCount = (value: unknown): number => {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
@@ -76,6 +77,12 @@ const pluralRu = (count: number, one: string, few: string, many: string): string
   if (mod10 >= 2 && mod10 <= 4) return few;
   return many;
 };
+
+const TITLE_TARGET = 60;
+const DESC_MIN = 150;
+const DESC_MAX = 200;
+const TAGS_TARGET = 30;
+const TAGS_MAX_CHARS = 500;
 
 const formatSecToTimestamp = (totalSeconds: number): string => {
   const safe = Math.max(0, Math.floor(Number(totalSeconds) || 0));
@@ -110,7 +117,6 @@ const computeLoopDurationSec = (slots: TimelineSlot[]): number => {
   }, 0);
 };
 
-/** YouTube разрешает End Screen только в последние 5–20 секунд ролика. */
 const computeEndScreenWindow = (durationSec: number): string => {
   if (!Number.isFinite(durationSec) || durationSec < 25) return '—';
   const start = Math.max(0, durationSec - 20);
@@ -121,7 +127,7 @@ const computeEndScreenWindow = (durationSec: number): string => {
 const countWords = (text: string): number =>
   String(text || '').trim().split(/\s+/).filter(Boolean).length;
 
-const clampTitle = (raw: string, max = 60): string => {
+const clampTitle = (raw: string, max = TITLE_TARGET): string => {
   const value = String(raw || '').trim();
   if (value.length <= max) return value;
   const cut = value.slice(0, max);
@@ -129,182 +135,54 @@ const clampTitle = (raw: string, max = 60): string => {
   return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trim();
 };
 
-const TITLE_TARGET = 60;
-const DESC_MIN = 150;
-const DESC_MAX = 200;
-const TAGS_TARGET = 30;
-const TAGS_MAX_CHARS = 500;
-
-const TONE_SUBJECT_FALLBACK: Record<SeoToneStyle, string> = {
-  'Dark Mystery': 'the sealed alpine outpost file',
-  'Cozy Ambient': 'this three-hour winter sanctuary',
-  'Historical Doc': 'the declassified station archive',
-  'Cinematic Drama': 'the night the signal returned'
-};
-
-const TONE_DESCRIPTION_SENTENCES: Record<SeoToneStyle, string[]> = {
-  'Dark Mystery': [
-    'In this 4K investigative documentary we reopen {subject} and read the file the way the inspectors did.',
-    'Working from primary source logs, declassified correspondence and the original telemetry reels, we reconstruct the sequence hour by hour.',
-    'That includes the fourteen-second anomaly every official summary quietly leaves out.',
-    'You will see the archived blueprints, hear the restored audio and follow the paper trail to a room nobody had clearance to enter.',
-    'Every claim is anchored to a document, and where the record runs out we say so plainly instead of filling the gap with speculation.',
-    'The film is mastered in crisp 4K Ultra HD with continuous, unbroken narration, so the timeline never jumps ahead of the evidence.',
-    'This is a slow, deliberate reconstruction rather than a highlight reel.',
-    'If you enjoy dark historical mysteries, unexplained signals and forensic deep dives, stay through the final verdict.',
-    'The last document changes the meaning of everything that came before it.',
-    'Sources, chapter markers and a full transcript are linked below.'
-  ],
-  'Cozy Ambient': [
-    'Settle into {subject}, a continuous three-hour ambience piece recorded and mastered in native 4K Ultra HD.',
-    'Snow drifts past the window while the hearth keeps a low, steady crackle underneath the room tone.',
-    'There are no cuts, no jump scares and no mid-roll interruptions, so the atmosphere stays unbroken for the full runtime.',
-    'The loop seams are crossfaded frame by frame, which means you will not hear the moment the scene starts over.',
-    'Audio is normalised to a gentle broadcast target with true-peak headroom, so it sits comfortably behind sleep, study or deep work.',
-    'Use the chapter markers to jump between acts, or simply let the whole piece run while you read.',
-    'Many viewers keep this open on a second monitor as a calm, warm anchor during long sessions.',
-    'Headphones reveal the distant wind layer, but the mix is deliberately soft on speakers as well.',
-    'Dim the screen, lower the volume a little and let the room settle.',
-    'New ambience films are published regularly, so subscribe if this one helps you focus.'
-  ],
-  'Historical Doc': [
-    'This 4K historical documentary reconstructs {subject} from the archive outward.',
-    'We begin with construction records and staffing rosters, then move through the emergency protocol that emptied the site in a single day.',
-    'Declassified telemetry, witness statements and internal correspondence are read on screen so you can weigh them yourself.',
-    'Each act is anchored to a dated document, and the chapter list below maps directly onto those sources.',
-    'Where accounts disagree we present both readings rather than choosing the more dramatic one.',
-    'The visual language is oil-painting and graphic-novel reconstruction, clearly labelled as such, never passed off as archival footage.',
-    'Narration runs continuously at a measured pace, mastered in 4K Ultra HD with broadcast loudness and clean dialogue.',
-    'A full source list, transcript and timeline are provided so the film can be checked line by line.',
-    'If you care about history that shows its working, this reconstruction is built for you.',
-    'Corrections and additional documents are welcome in the comments and will be pinned.'
-  ],
-  'Cinematic Drama': [
-    '{subject} begins at 03:17, when a warning signal reached a console nobody was watching.',
-    'This 4K cinematic reconstruction follows the twelve minutes before the blackout and the fifty-year oath that came after.',
-    'We stage the events from sworn statements and duty logs, with every dramatised sequence marked as reconstruction.',
-    'The sound design carries the low carrier hum that appears on every surviving reel.',
-    'Colour grading, lens choice and camera movement follow the emotional pressure of the scene rather than spectacle.',
-    'Narration is continuous and unbroken, mastered in 4K Ultra HD with cinema loudness and controlled true peaks.',
-    'Act markers below let you return to the exact moment each decision was made.',
-    'The final act returns to the frozen perimeter and asks the only question the file cannot answer.',
-    'Watch to the epilogue, because the transmission never actually stopped.',
-    'Sources, transcript and reconstruction notes are linked in the description.'
-  ]
-};
-
-const TONE_TAG_POOL: Record<SeoToneStyle, string[]> = {
-  'Dark Mystery': [
-    'dark mystery', 'documentary 4k', 'investigative doc', 'unsolved history', 'audio anomaly',
-    'declassified archive', 'true mystery story', 'forensic investigation', 'cinematic doc',
-    'eerie history', 'unexplained signal', 'cold case files', 'sealed archive', 'night shift log',
-    'telemetry anomaly'
-  ],
-  'Cozy Ambient': [
-    'cozy ambience', '3 hours ambience', '4k ambient loop', 'fireplace sounds', 'snowstorm window',
-    'sleep sounds', 'study ambience', 'deep focus', 'no ads ambience', 'winter cabin',
-    'crackling fire', 'white noise sleep', 'relaxing ambience', 'seamless loop', 'calm room tone'
-  ],
-  'Historical Doc': [
-    'historical documentary', 'history 4k', 'archive footage', 'declassified history',
-    'documentary film', 'primary sources', 'cold war history', 'historical reconstruction',
-    'oral history', 'timeline documentary', 'research documentary', 'history deep dive',
-    'archival records', 'educational documentary', 'narrated history'
-  ],
-  'Cinematic Drama': [
-    'cinematic documentary', 'dramatic reconstruction', '4k film', 'cinema grade',
-    'true story drama', 'narrated film', 'atmospheric film', 'storytelling documentary',
-    'period reconstruction', 'sound design', 'anamorphic look', 'slow cinema',
-    'character study', 'archive drama', 'epilogue'
-  ]
-};
-
-const GENERIC_TAG_POOL = [
-  'aether studio', 'histoviva', '4k ultra hd', 'full documentary', 'long form',
-  'no commentary cuts', 'continuous narration', 'chapter markers', 'transcript included',
-  'source list', 'deep dive', 'unedited timeline', 'broadcast loudness', 'english narration',
-  'documentary 2026'
+/* ---------- анти-штампы и генерация строго из scriptContext ---------- */
+const BANNED_PHRASES = [
+  /delve/i, /tapestry/i, /testament/i, /unravel the myster/i, /embark/i, /journey into/i,
+  /погрузим/i, /завеса тайны/i, /приоткро/i, /невероятн/i
 ];
 
-const buildToneDescription = (
-  tone: SeoToneStyle,
-  projectName: string,
-  scriptContext: string,
-  chapterLabels: string[]
-): string => {
-  const cleanProject = String(projectName || '').replace(/[а-яёА-ЯЁ]+/g, '').trim();
-  const subject =
-    cleanProject && cleanProject.length > 6
-      ? cleanProject.toLowerCase()
-      : TONE_SUBJECT_FALLBACK[tone];
-
-  const sentences = TONE_DESCRIPTION_SENTENCES[tone].map(s => s.replace('{subject}', subject));
-
-  const firstChapter = chapterLabels.find(Boolean);
-  if (firstChapter) {
-    sentences.splice(2, 0, `The opening act, "${firstChapter}", sets the reference point for everything that follows.`);
-  }
-
-  const contextWords = String(scriptContext || '')
-    .replace(/[а-яёА-ЯЁ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(w => w.length > 5)
-    .slice(0, 6)
-    .join(', ');
-  if (contextWords) {
-    sentences.push(`Recurring threads in this film include ${contextWords.toLowerCase()}.`);
-  }
-
-  const filler = [
-    'Chapter markers, a plain-text transcript and the full source list are attached below the player.',
-    'The runtime is uninterrupted, so the piece can be watched in one sitting or resumed from any act.',
-    'If a detail here contradicts a source you hold, post it and the correction will be pinned.'
-  ];
-
-  let out = sentences.join(' ');
-  let fillerIdx = 0;
-  while (countWords(out) < DESC_MIN && fillerIdx < filler.length) {
-    out += ' ' + filler[fillerIdx];
-    fillerIdx += 1;
-  }
-
-  if (countWords(out) > DESC_MAX) {
-    const parts = out.split(/(?<=\.)\s+/);
-    while (parts.length > 3 && countWords(parts.join(' ')) > DESC_MAX) parts.pop();
-    out = parts.join(' ');
-  }
-
-  return out.trim();
+const pickSentences = (text: string, max: number): string[] => {
+  const clean = String(text || '').replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+  return clean
+    .split(/(?<=[.!?…])\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 40 && s.length < 260 && !BANNED_PHRASES.some(re => re.test(s)))
+    .slice(0, max);
 };
 
-const buildToneTags = (tone: SeoToneStyle, baseTags: string, projectName: string): string => {
-  const fromBase = String(baseTags || '')
-    .split(',')
-    .map(t => t.trim())
-    .filter(Boolean);
-  const projectTag = String(projectName || '')
-    .replace(/[а-яёА-ЯЁ]+/g, '')
-    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
-    .trim()
-    .toLowerCase();
+const keywordFrom = (text: string, fallback: string): string => {
+  const words = String(text || '')
+    .replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 5);
+  const freq = new Map<string, number>();
+  for (const w of words) freq.set(w.toLowerCase(), (freq.get(w.toLowerCase()) || 0) + 1);
+  const top = Array.from(freq.entries()).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : fallback;
+};
 
-  const ordered = [...fromBase, ...TONE_TAG_POOL[tone], ...GENERIC_TAG_POOL];
-  if (projectTag.length > 3) ordered.push(projectTag.slice(0, 28));
+type TitleAngle = 'fact' | 'paradox' | 'hook';
 
-  const seen = new Set<string>();
-  const picked: string[] = [];
-  for (const tag of ordered) {
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const next = [...picked, tag].join(', ');
-    if (next.length > TAGS_MAX_CHARS) continue;
-    picked.push(tag);
-    if (picked.length >= TAGS_TARGET) break;
+const TITLE_ANGLES: Record<
+  TitleAngle,
+  { label: string; en: (s: string, n: number) => string; ru: (s: string, n: number) => string }
+> = {
+  fact: {
+    label: 'Факт / тайна',
+    en: (s, n) => `The ${s} Files: What ${n} Declassified Pages Actually Show`,
+    ru: (s, n) => `Досье «${s}»: что на самом деле показывают ${n} рассекреченных страниц`
+  },
+  paradox: {
+    label: 'Масштаб / парадокс',
+    en: (s, n) => `${s}: The Official Report Lists ${n} Items — the Tape Contradicts Them`,
+    ru: (s, n) => `${s}: в отчёте ${n} пункта — на плёнке другое`
+  },
+  hook: {
+    label: 'Короткий хук',
+    en: s => `${s}: The Signal That Did Not Stop`,
+    ru: s => `${s}: сигнал, который не остановился`
   }
-  return picked.join(', ').slice(0, TAGS_MAX_CHARS);
 };
 
 export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
@@ -326,6 +204,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   exportReleaseCardMdEnabled = true,
   onExportReleaseCardMdEnabledChange,
   onApplyTitleToThumbnail,
+  onApplyTitleToSlot,
   onNotify
 }) => {
   const [internalSeoState, setInternalSeoState] = useState<YoutubeSeoState>(() =>
@@ -380,6 +259,12 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   );
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string>('');
+  const [titleRuMap, setTitleRuMap] = useState<Record<string, string>>({});
+  const [angleMap, setAngleMap] = useState<Record<string, TitleAngle>>({
+    A: 'fact',
+    B: 'paradox',
+    C: 'hook'
+  });
 
   const computedChaptersFromManifest = useMemo(() => {
     const defaultEnglishChapterTitles: Record<SeoToneStyle, string[]> = {
@@ -416,7 +301,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         'Epilogue: The Unbroken Transmission'
       ]
     };
-
     const presetNames = defaultEnglishChapterTitles[tone];
 
     if (chapterSourceMode === 'loop' && slotsCount > 0) {
@@ -495,57 +379,100 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
     window.setTimeout(() => setCopiedKey(''), 2000);
   };
 
-  const chapterLabels = useMemo(
-    () =>
-      chaptersText
-        .split('\n')
-        .map(line => line.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s*[-–]?\s*/, '').trim())
-        .filter(Boolean),
-    [chaptersText]
+  /* ---------- генераторы на основе scriptContext ---------- */
+  const sceneCountSafe = Math.max(0, narrativeScenes.length);
+
+  const buildTitleForAngle = useCallback(
+    (angle: TitleAngle) => {
+      const subject = keywordFrom(
+        scriptContext,
+        (projectName || 'Documentary').trim() || 'Documentary'
+      );
+      const n = Math.max(3, sceneCountSafe || 12);
+      const t = TITLE_ANGLES[angle];
+      return { en: t.en(subject, n), ru: t.ru(subject, n) };
+    },
+    [scriptContext, projectName, sceneCountSafe]
   );
+
+  const buildContextDescription = useCallback(
+    (nextTone: SeoToneStyle) => {
+      const sentences = pickSentences(scriptContext, 6);
+      const head =
+        nextTone === 'Cozy Ambient'
+          ? 'A continuous ambience program recorded and mastered in 4K, without cuts or interruptions.'
+          : `A ${nextTone.toLowerCase()} reconstruction built from primary sources, assembled scene by scene in 4K.`;
+      const tail =
+        'Chapter markers, a plain-text transcript and the source list are attached below the player. The runtime is uninterrupted, so the film can be watched in one sitting or resumed from any chapter.';
+      let out = `${head} ${sentences.join(' ')} ${tail}`.trim();
+      const words = out.split(/\s+/);
+      if (words.length < DESC_MIN) {
+        out = `${out} ${pickSentences(scriptContext, 12).slice(sentences.length).join(' ')}`.trim();
+      }
+      const w = out.split(/\s+/);
+      if (w.length > DESC_MAX) out = `${w.slice(0, DESC_MAX).join(' ').replace(/[,;]$/, '')}.`;
+      return out;
+    },
+    [scriptContext]
+  );
+
+  const buildContextTags = useCallback(
+    (nextTone: SeoToneStyle) => {
+      const base = (SEO_PRESETS_BY_TONE[nextTone]?.tags || '')
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean)
+        .filter(t => !BANNED_PHRASES.some(re => re.test(t)));
+      const kw = keywordFrom(scriptContext, '');
+      const extra = kw ? [kw, `${kw} documentary`, `${kw} 4k`] : [];
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const t of [...extra, ...base]) {
+        const k = t.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(t);
+        if (out.length >= TAGS_TARGET) break;
+      }
+      let joined = out.join(', ');
+      if (joined.length > TAGS_MAX_CHARS) {
+        joined = joined.slice(0, TAGS_MAX_CHARS).replace(/,[^,]*$/, '');
+      }
+      return joined;
+    },
+    [scriptContext]
+  );
+
+  const regenerateVariant = (id: 'A' | 'B' | 'C') => {
+    const order: TitleAngle[] = ['fact', 'paradox', 'hook'];
+    const next = order[(order.indexOf(angleMap[id] || 'fact') + 1) % order.length];
+    const pair = buildTitleForAngle(next);
+    setAngleMap(prev => ({ ...prev, [id]: next }));
+    setTitles(prev => prev.map(t => (t.id === id ? { ...t, title: pair.en.slice(0, 100) } : t)));
+    setTitleRuMap(prev => ({ ...prev, [id]: pair.ru }));
+    onNotify(`Вариант ${id} перегенерирован под угол «${TITLE_ANGLES[next].label}»`, 'success');
+  };
 
   const applyTonePresetsLocally = useCallback(
     (selectedTone: SeoToneStyle) => {
-      const selected = SEO_PRESETS_BY_TONE[selectedTone];
-      const cleanProj = String(projectName || '').replace(/[а-яёА-ЯЁ]+/g, '').trim();
-      const fallbackBase = cleanProj.length > 4 ? cleanProj : 'Documentary Film (4K)';
-
-      const nextDescription = buildToneDescription(
-        selectedTone,
-        projectName,
-        scriptContext,
-        chapterLabels
-      );
-      const nextTags = buildToneTags(selectedTone, selected?.tags || '', projectName);
-
+      const pairA = buildTitleForAngle('fact');
+      const pairB = buildTitleForAngle('paradox');
+      const pairC = buildTitleForAngle('hook');
+      setAngleMap({ A: 'fact', B: 'paradox', C: 'hook' });
+      setTitleRuMap({ A: pairA.ru, B: pairB.ru, C: pairC.ru });
       updateSeoState(prev => ({
         ...prev,
         tone: selectedTone,
         titles: [
-          {
-            id: 'A',
-            category: 'Intrigue',
-            categoryRu: 'Интрига (Intrigue)',
-            title: clampTitle(prev.titles[0]?.title || `${fallbackBase}: The Sealed File`)
-          },
-          {
-            id: 'B',
-            category: 'Contradiction',
-            categoryRu: 'Противоречие (Contradiction)',
-            title: clampTitle(prev.titles[1]?.title || `${fallbackBase}: What Really Happened`)
-          },
-          {
-            id: 'C',
-            category: 'Drama',
-            categoryRu: 'Драма (Cinematic Drama)',
-            title: clampTitle(prev.titles[2]?.title || `Inside ${fallbackBase}`)
-          }
+          { id: 'A', category: 'Intrigue', categoryRu: 'Интрига (Intrigue)', title: pairA.en.slice(0, 100) },
+          { id: 'B', category: 'Contradiction', categoryRu: 'Противоречие (Contradiction)', title: pairB.en.slice(0, 100) },
+          { id: 'C', category: 'Drama', categoryRu: 'Драма (Cinematic Drama)', title: pairC.en.slice(0, 100) }
         ],
-        description: nextDescription,
-        tagsString: nextTags
+        description: buildContextDescription(selectedTone),
+        tagsString: buildContextTags(selectedTone)
       }));
     },
-    [updateSeoState, projectName, scriptContext, chapterLabels]
+    [updateSeoState, buildTitleForAngle, buildContextDescription, buildContextTags]
   );
 
   const handleGenerateWithGemini = async () => {
@@ -555,64 +482,54 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
         const [tc, ...rest] = line.split(' - ');
         return { timecode: tc || '00:00:00', label: rest.join(' - ') || 'Scene' };
       });
-
       const res = await fetch('/api/gemini/seo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scriptText: scriptContext || projectName,
           tone,
-          chaptersInput: chaptersList
+          chaptersInput: chaptersList,
+          wantRuTitles: true
         })
       });
-
       if (res.ok) {
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
           if (Array.isArray(d.titles) && d.titles.length >= 3) {
             setTitles([
-              {
-                id: 'A',
-                category: 'Intrigue',
-                categoryRu: 'Интрига (Intrigue)',
-                title: clampTitle(String(d.titles[0]?.title || ''))
-              },
-              {
-                id: 'B',
-                category: 'Contradiction',
-                categoryRu: 'Противоречие (Contradiction)',
-                title: clampTitle(String(d.titles[1]?.title || ''))
-              },
-              {
-                id: 'C',
-                category: 'Drama',
-                categoryRu: 'Драма (Cinematic Drama)',
-                title: clampTitle(String(d.titles[2]?.title || ''))
-              }
+              { id: 'A', category: 'Intrigue', categoryRu: 'Интрига (Intrigue)', title: clampTitle(String(d.titles[0]?.title || ''), 100) },
+              { id: 'B', category: 'Contradiction', categoryRu: 'Противоречие (Contradiction)', title: clampTitle(String(d.titles[1]?.title || ''), 100) },
+              { id: 'C', category: 'Drama', categoryRu: 'Драма (Cinematic Drama)', title: clampTitle(String(d.titles[2]?.title || ''), 100) }
             ]);
           }
-
+          if (Array.isArray(d.titlesRu) && d.titlesRu.length >= 3) {
+            setTitleRuMap({
+              A: String(d.titlesRu[0] || ''),
+              B: String(d.titlesRu[1] || ''),
+              C: String(d.titlesRu[2] || '')
+            });
+          }
           const remoteDesc = typeof d.description === 'string' ? d.description.trim() : '';
           setDescription(
-            countWords(remoteDesc) >= DESC_MIN
+            remoteDesc && !BANNED_PHRASES.some(re => re.test(remoteDesc))
               ? remoteDesc
-              : buildToneDescription(tone, projectName, scriptContext, chapterLabels)
+              : buildContextDescription(tone)
           );
-
           if (Array.isArray(d.chapters) && d.chapters.length > 0) {
             setChaptersText(d.chapters.join('\n'));
           }
-
           const remoteTags = typeof d.tags === 'string' ? d.tags.trim() : '';
-          setTagsString(buildToneTags(tone, remoteTags, projectName));
-
-          onNotify(`✨ Gemini сформировал англоязычный SEO-пакет в стиле «${tone}»!`, 'success');
+          setTagsString(
+            remoteTags && !BANNED_PHRASES.some(re => re.test(remoteTags))
+              ? remoteTags.slice(0, TAGS_MAX_CHARS)
+              : buildContextTags(tone)
+          );
+          onNotify(`✨ Gemini сформировал SEO-пакет (EN + RU) в стиле «${tone}»!`, 'success');
           setIsGenerating(false);
           return;
         }
       }
-
       applyTonePresetsLocally(tone);
       onNotify(`✨ SEO-пакет сформирован в стиле «${tone}» (US English)!`, 'success');
     } catch {
@@ -624,7 +541,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   };
 
   const descriptionWordCount = useMemo(() => countWords(description), [description]);
-
   const tagsListCount = useMemo(
     () => safeCount(tagsString.split(',').map(t => t.trim()).filter(Boolean).length),
     [tagsString]
@@ -654,13 +570,11 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       .split(/\n{2,}|\r?\n/)
       .map(p => p.replace(/\[[^\]]*\]/g, '').trim())
       .filter(p => p.length > 25);
-
     const defaultHooks = [
       'Everything you were told about this classified mountain outpost is missing one crucial detail recorded at the fourteenth second of the tape.',
       'When the inspection team unlocked the subterranean vault twenty-four hours later, every transmitter was still broadcasting at full power.',
       'Nobody had clearance to enter the command room, yet the signal returned at the exact same minute every single night.'
     ];
-
     const candidates = rawParagraphs.length >= 2 ? rawParagraphs : defaultHooks;
     const picked: string[] = [candidates[0]];
     const rest = candidates.slice(1).sort((a, b) => {
@@ -669,7 +583,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       return scoreB - scoreA;
     });
     picked.push(...rest.slice(0, 2));
-
     let cursorSec = 0;
     return picked.slice(0, 3).map((text, idx) => {
       const words = text.split(/\s+/).filter(Boolean).length;
@@ -722,7 +635,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
 
   const exactRhythmMapChaptersTxt = useMemo(() => {
     if (hasVerbaFlowChapters) return String(externalChaptersTxt).trim();
-
     if (scenesCount > 0) {
       const timings = computeContinuousSceneTimings(narrativeScenes);
       const chapterCount = Math.min(8, Math.max(3, Math.ceil(narrativeScenes.length / 3)));
@@ -736,7 +648,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       });
       return lines.join('\n');
     }
-
     return computedChaptersFromManifest
       .split('\n')
       .map(line => line.replace(/^00:/, '').replace(' - ', ' '))
@@ -773,7 +684,8 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       '',
       `--- 1. CLICKABLE A/B TITLES (TARGET ${TITLE_TARGET} CHARS) ---`,
       ...titles.map(
-        t => `[Variant ${t.id} • ${t.category}] (${t.title.length}/${TITLE_TARGET} chars):\n${t.title}`
+        t =>
+          `[Variant ${t.id} • ${t.category}] (${safeCount(t.title.length)}/${TITLE_TARGET} chars):\n${t.title}`
       ),
       '',
       `--- 2. SEO DESCRIPTION (${descriptionWordCount} WORDS) ---`,
@@ -786,7 +698,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       tagsString.trim(),
       ''
     ].join('\n');
-
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -806,7 +717,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       (tone === 'Cozy Ambient'
         ? 'Ambient Sanctuary (4K Atmospheric Matte)'
         : 'Historical Storytelling (Oil Painting / Graphic Novel)');
-
     const mdContent = buildEnglishReleaseCardMarkdown({
       projectName: projectName || 'AETHER COMBINE 4K RELEASE',
       releaseTitle: activeReleaseTitle.trim(),
@@ -829,7 +739,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
       activeSubtitleLanguages,
       endScreenSafeZone: effectiveEndScreen
     });
-
     const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -841,9 +750,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
   };
 
   const handleDownloadOutputChaptersTxt = () => {
-    const blob = new Blob([exactRhythmMapChaptersTxt + '\n'], {
-      type: 'text/plain;charset=utf-8'
-    });
+    const blob = new Blob([exactRhythmMapChaptersTxt + '\n'], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -887,12 +794,11 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <span>📦 YouTube SEO &amp; Упаковка (SEO Hub • Strictly Natural US English)</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Автоматическая генерация: 3 A/B заголовка (до {TITLE_TARGET} симв.), SEO-описание
-            ({DESC_MIN}–{DESC_MAX} слов), кликабельные главы по манифесту и до {TAGS_TARGET} тегов
-            (до {TAGS_MAX_CHARS} симв.)
+            Генерация строго по загруженному сценарию: 3 A/B заголовка (EN + RU-перевод, до{' '}
+            {TITLE_TARGET} симв.), SEO-описание ({DESC_MIN}–{DESC_MAX} слов), кликабельные главы и до{' '}
+            {TAGS_TARGET} тегов (до {TAGS_MAX_CHARS} симв.)
           </p>
         </div>
-
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
@@ -900,21 +806,13 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             disabled={isGenerating}
             className="min-h-[42px] bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
-            {isGenerating ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4" />
-            )}
-            <span>{isGenerating ? 'Генерация Gemini (EN)...' : '✨ Сгенерировать SEO через Gemini (EN)'}</span>
+            {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            <span>{isGenerating ? 'Генерация Gemini (EN+RU)...' : '✨ Сгенерировать SEO через Gemini'}</span>
           </button>
           <button
             type="button"
             onClick={() =>
-              copyWithToast(
-                releaseCardText,
-                'release-card',
-                'Карточка релиза (Title + Description + Timestamps + Tags)'
-              )
+              copyWithToast(releaseCardText, 'release-card', 'Карточка релиза (Title + Description + Timestamps + Tags)')
             }
             className="min-h-[42px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer shadow-lg shadow-sky-500/20"
           >
@@ -972,18 +870,20 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-              а) Основной Video Title (<code className="text-amber-300">video_title</code>) &amp; A/B Заголовки
+              а) Основной Video Title (<code className="text-amber-300">video_title</code>) &amp; A/B/C
+              заголовки (EN + RU)
             </h3>
           </div>
           <span className="text-[11px] font-mono text-amber-300">
-            Populated dynamically from manifest video_title • Natural US English
+            Строится по scriptContext • без ИИ-штампов
           </span>
         </div>
 
         <div className="bg-[#111622] border border-white/[0.08] rounded-xl p-3.5 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-xs font-bold text-emerald-300">
-              Primary Video Title (<code className="text-amber-300">video_title</code> • Variant {selectedTitleId})
+              Primary Video Title (<code className="text-amber-300">video_title</code> • Variant{' '}
+              {selectedTitleId})
             </label>
             <span
               className={`text-[10.5px] font-mono tabular-nums ${
@@ -991,7 +891,6 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
               }`}
             >
               {safeCount(activeReleaseTitle.length)}/{TITLE_TARGET} chars
-              {activeReleaseTitle.length > TITLE_TARGET ? ' · обрезается в ленте' : ''}
             </span>
           </div>
           <input
@@ -1011,6 +910,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
           {titles.map((item, idx) => {
             const len = safeCount(item.title.length);
             const isValidLen = len <= TITLE_TARGET;
+            const angle = angleMap[item.id] || 'fact';
             return (
               <div
                 key={item.id}
@@ -1054,30 +954,65 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                       Обрезать до {TITLE_TARGET} символов по слову
                     </button>
                   )}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold text-slate-400 block">
+                      Перевод на русский (RU, для автора):
+                    </span>
+                    <input
+                      type="text"
+                      value={titleRuMap[item.id] || ''}
+                      onChange={e => setTitleRuMap(prev => ({ ...prev, [item.id]: e.target.value }))}
+                      placeholder="Точный смысл варианта на русском…"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-lg px-3 py-2 text-xs text-cyan-200 outline-none"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => copyWithToast(item.title, `title-${item.id}`, `Заголовок ${item.id}`)}
-                    className="min-h-[40px] flex-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                  >
-                    {copiedKey === `title-${item.id}` ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                    <span>Копировать</span>
-                  </button>
-                  {onApplyTitleToThumbnail && (
+                <div className="space-y-2 pt-1 border-t border-white/[0.06]">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => onApplyTitleToThumbnail(item.title)}
-                      className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg text-[11px] cursor-pointer transition"
-                      title="Передать этот YouTube-заголовок в мокап 4K Превью"
+                      onClick={() => regenerateVariant(item.id as 'A' | 'B' | 'C')}
+                      title="Переключить угол: факт/тайна → масштаб/парадокс → короткий хук"
+                      className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-white/[0.08] text-[10.5px] font-semibold text-slate-200 flex items-center gap-1 cursor-pointer transition"
                     >
-                      В Превью →
+                      <RefreshCw className="w-3 h-3 text-amber-300" />
+                      <span>↻ {TITLE_ANGLES[angle].label}</span>
                     </button>
-                  )}
+                    {(['A', 'B', 'C'] as const).map(slot => (
+                      <button
+                        key={`to-cover-${item.id}-${slot}`}
+                        type="button"
+                        onClick={() => onApplyTitleToSlot?.(slot, item.title, scriptContext)}
+                        className="min-h-[34px] px-2 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/35 text-[10.5px] font-semibold text-cyan-200 cursor-pointer transition"
+                      >
+                        На обложку {slot}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => copyWithToast(item.title, `title-${item.id}`, `Заголовок ${item.id}`)}
+                      className="min-h-[40px] flex-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                    >
+                      {copiedKey === `title-${item.id}` ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>Копировать</span>
+                    </button>
+                    {onApplyTitleToThumbnail && (
+                      <button
+                        type="button"
+                        onClick={() => onApplyTitleToThumbnail(item.title)}
+                        className="min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-2.5 rounded-lg text-[11px] cursor-pointer transition"
+                        title="Передать этот YouTube-заголовок в мокап 4K Превью"
+                      >
+                        В Превью →
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1114,12 +1049,10 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             {!descInRange && (
               <button
                 type="button"
-                onClick={() =>
-                  setDescription(buildToneDescription(tone, projectName, scriptContext, chapterLabels))
-                }
+                onClick={() => setDescription(buildContextDescription(tone))}
                 className="min-h-[36px] w-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/35 text-emerald-200 rounded-lg text-[11px] font-semibold cursor-pointer transition"
               >
-                Довести описание до {DESC_MIN}–{DESC_MAX} слов по текущей тональности
+                Довести описание до {DESC_MIN}–{DESC_MAX} слов по текущему сценарию
               </button>
             )}
           </div>
@@ -1128,11 +1061,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             onClick={() => copyWithToast(description, 'seo-desc', 'SEO-описание (EN)')}
             className="min-h-[42px] w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
           >
-            {copiedKey === 'seo-desc' ? (
-              <Check className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
+            {copiedKey === 'seo-desc' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             <span>Копировать SEO-описание (US English)</span>
           </button>
         </div>
@@ -1183,11 +1112,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             onClick={() => copyWithToast(chaptersText, 'seo-chapters', 'Кликабельные главы (Timestamps)')}
             className="min-h-[42px] w-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
           >
-            {copiedKey === 'seo-chapters' ? (
-              <Check className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
+            {copiedKey === 'seo-chapters' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             <span>Копировать таймкоды (Chapters)</span>
           </button>
         </div>
@@ -1230,20 +1155,16 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
               onClick={() => copyWithToast(tagsString, 'seo-tags', `Теги YouTube (${tagsListCount})`)}
               className="min-h-[42px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition"
             >
-              {copiedKey === 'seo-tags' ? (
-                <Check className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <Copy className="w-4 h-4" />
-              )}
+              {copiedKey === 'seo-tags' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               <span>Копировать теги ({tagsCharCount}/{TAGS_MAX_CHARS})</span>
             </button>
             {tagsListCount < TAGS_TARGET && (
               <button
                 type="button"
-                onClick={() => setTagsString(buildToneTags(tone, tagsString, projectName))}
+                onClick={() => setTagsString(buildContextTags(tone))}
                 className="min-h-[42px] bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/35 text-emerald-200 px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition"
               >
-                Добрать до {TAGS_TARGET} релевантных тегов
+                Добрать до {TAGS_TARGET} релевантных тегов из сценария
               </button>
             )}
           </div>
@@ -1277,9 +1198,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   type="button"
                   onClick={() => setSelectedTitleId(tid)}
                   className={`min-h-[36px] sm:min-h-[30px] px-2.5 py-1 rounded font-bold cursor-pointer transition ${
-                    selectedTitleId === tid
-                      ? 'bg-sky-500 text-slate-950'
-                      : 'text-slate-400 hover:text-slate-200'
+                    selectedTitleId === tid ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   Заголовок {tid}
@@ -1289,11 +1208,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
             <button
               type="button"
               onClick={() =>
-                copyWithToast(
-                  releaseCardText,
-                  'release-card',
-                  'Карточка релиза (Title + Description + Timestamps + Tags)'
-                )
+                copyWithToast(releaseCardText, 'release-card', 'Карточка релиза (Title + Description + Timestamps + Tags)')
               }
               className="min-h-[42px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition shadow-lg shadow-sky-500/20"
             >
@@ -1372,11 +1287,8 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   type="checkbox"
                   checked={isChaptersExportChecked}
                   onChange={e => {
-                    if (onExportOutputChaptersEnabledChange) {
-                      onExportOutputChaptersEnabledChange(e.target.checked);
-                    } else {
-                      setLocalExportChapters(e.target.checked);
-                    }
+                    if (onExportOutputChaptersEnabledChange) onExportOutputChaptersEnabledChange(e.target.checked);
+                    else setLocalExportChapters(e.target.checked);
                   }}
                   className="accent-indigo-400 w-3.5 h-3.5 shrink-0"
                 />
@@ -1389,11 +1301,8 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   type="checkbox"
                   checked={isReleaseCardMdChecked}
                   onChange={e => {
-                    if (onExportReleaseCardMdEnabledChange) {
-                      onExportReleaseCardMdEnabledChange(e.target.checked);
-                    } else {
-                      setLocalExportReleaseMd(e.target.checked);
-                    }
+                    if (onExportReleaseCardMdEnabledChange) onExportReleaseCardMdEnabledChange(e.target.checked);
+                    else setLocalExportReleaseMd(e.target.checked);
                   }}
                   className="accent-emerald-400 w-3.5 h-3.5 shrink-0"
                 />
@@ -1443,7 +1352,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 📱 Настройки Авто-Shorts (9:16 + Динамические субтитры)
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Выделяет 2–3 цепляющих абзаца из VerbaFlow и записывает{' '}
+                Выделяет 2–3 цепляющих абзаца из сценария и записывает{' '}
                 <code className="text-amber-300">shorts_export</code> в{' '}
                 <code className="text-amber-300">manifest.json</code>
               </p>
@@ -1482,9 +1391,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                 min={42}
                 max={96}
                 value={shortsFontSize}
-                onChange={e =>
-                  setShortsFontSize(Math.max(42, Math.min(96, Number(e.target.value) || 68)))
-                }
+                onChange={e => setShortsFontSize(Math.max(42, Math.min(96, Number(e.target.value) || 68)))}
                 className="w-full bg-transparent font-mono font-bold text-amber-300 outline-none tabular-nums"
               />
             </div>
@@ -1516,9 +1423,7 @@ export const YouTubeSeoView: React.FC<YouTubeSeoViewProps> = ({
                   <span className="text-amber-300 font-bold">
                     #{idx + 1} • SHORT_9x16_0{seg.segment_index} — {seg.hook_type}
                   </span>
-                  <span className="text-emerald-400 tabular-nums whitespace-nowrap">
-                    ~{seg.duration_sec} сек
-                  </span>
+                  <span className="text-emerald-400 tabular-nums whitespace-nowrap">~{seg.duration_sec} сек</span>
                 </div>
                 <p className="text-[11px] text-slate-300 line-clamp-2">{seg.script_excerpt}</p>
               </div>
