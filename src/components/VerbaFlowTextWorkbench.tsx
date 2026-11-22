@@ -90,6 +90,8 @@ interface VerbaFlowTextWorkbenchProps {
     chaptersCount: number,
     totalDurationFormatted: string
   ) => void;
+  onImportManifestFile?: (file: File) => void;
+  onScriptFileLoaded?: (text: string) => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -109,42 +111,12 @@ const MODE_OPTIONS: Array<{ id: VerbaRewriteMode; label: string; hint: string }>
   { id: 'gentle_edit', label: 'Бережная редактура', hint: 'Чистка клише и ё' }
 ];
 
-const SUBMODULES: Array<{
-  id: SubmoduleId;
-  emoji: string;
-  title: string;
-  subtitle: string;
-}> = [
-  {
-    id: 'rewrite',
-    emoji: '🔄',
-    title: 'Рерайтинг & Анти-ИИ',
-    subtitle: 'Тональность, ритмика, факты'
-  },
-  {
-    id: 'hooks',
-    emoji: '🪝',
-    title: 'YouTube-Хуки & Переделка',
-    subtitle: '15-сек хук и пак из 5'
-  },
-  {
-    id: 'voiceprep',
-    emoji: '🎙️',
-    title: 'Дикторский цех',
-    subtitle: 'Числа прописью, «Ё», паузы'
-  },
-  {
-    id: 'scenes',
-    emoji: '🎬',
-    title: 'Видео-промты по сценам',
-    subtitle: 'Тайминг (words/2.2), камера, SFX'
-  },
-  {
-    id: 'xray',
-    emoji: '🛡️',
-    title: 'Проверка (Цветовой рентген)',
-    subtitle: 'Штампы, вода, повторы'
-  }
+const SUBMODULES: Array<{ id: SubmoduleId; emoji: string; title: string; subtitle: string }> = [
+  { id: 'rewrite', emoji: '🔄', title: 'Рерайтинг & Анти-ИИ', subtitle: 'Тональность, ритмика, факты' },
+  { id: 'hooks', emoji: '🪝', title: 'YouTube-Хуки & Переделка', subtitle: '15-сек хук и пак из 5' },
+  { id: 'voiceprep', emoji: '🎙️', title: 'Дикторский цех', subtitle: 'Числа прописью, «Ё», паузы' },
+  { id: 'scenes', emoji: '🎬', title: 'Видео-промты по сценам', subtitle: 'Тайминг (words/2.2), камера, SFX' },
+  { id: 'xray', emoji: '🛡️', title: 'Проверка (Цветовой рентген)', subtitle: 'Штампы, вода, повторы' }
 ];
 
 const DEFAULT_DEMO_SAMPLE_RU =
@@ -177,6 +149,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   onSendScenesToTimeline,
   onSendToYoutubeSeo,
   onSendChaptersToYoutubeSeo,
+  onImportManifestFile,
+  onScriptFileLoaded,
   onNotify
 }) => {
   const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>('rewrite');
@@ -208,9 +182,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     } else {
       setLocalSubtitleLangs(next);
     }
-    if (!exists) {
-      setPreviewSrtLang(lang);
-    }
+    if (!exists) setPreviewSrtLang(lang);
   };
 
   const handleDownloadSingleSidecarSrt = (lang: V21SubtitleLang) => {
@@ -250,8 +222,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastEngineLabel, setLastEngineLabel] = useState<string>('Локальный движок готов');
 
-  // 0. Загрузка документов (.pdf, .txt, .md) и авто-разбивка на главы
   const docFileInputRef = useRef<HTMLInputElement | null>(null);
+  const scriptFileInputRef = useRef<HTMLInputElement | null>(null);
   const [isReadingDocument, setIsReadingDocument] = useState<boolean>(false);
   const [loadedDocumentMeta, setLoadedDocumentMeta] = useState<{
     name: string;
@@ -263,20 +235,17 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     totalDurationFormatted: string;
   } | null>(null);
 
-  // 1. Настройки Рерайтинг & Анти-ИИ
   const [tone, setTone] = useState<VerbaTone>('doc');
   const [rewriteMode, setRewriteMode] = useState<VerbaRewriteMode>('humanize');
   const [preserveFacts, setPreserveFacts] = useState<boolean>(true);
   const [numbersToWords, setNumbersToWords] = useState<boolean>(false);
 
-  // 2. Настройки Хуков
   const [hookGenerationMode, setHookGenerationMode] = useState<'single15' | 'pack5'>('pack5');
   const [hookCards, setHookCards] = useState<VerbaHookCard[]>(() =>
     localGenerateHooks(sourceText, 'doc', 'ru').hooks
   );
   const [appliedHookId, setAppliedHookId] = useState<string>('');
 
-  // 3. Настройки Дикторского цеха
   const [stripAds, setStripAds] = useState<boolean>(true);
   const [stripTimecodes, setStripTimecodes] = useState<boolean>(true);
   const [stripStageNotes, setStripStageNotes] = useState<boolean>(true);
@@ -287,12 +256,10 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const [voiceReadyText, setVoiceReadyText] = useState<string>('');
   const [voiceStats, setVoiceStats] = useState<VoiceoverCleanStats | null>(null);
 
-  // 4. Видео-промты по сценам
   const [sceneCards, setSceneCards] = useState<VerbaScenePromptCard[]>(() =>
     localSliceToScenes(sourceText, 'doc', 'ru')
   );
 
-  // 5. Цветовой рентген
   const [selectedXrayIndex, setSelectedXrayIndex] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<string>('');
 
@@ -304,17 +271,14 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       lowerName.endsWith('.md') ||
       lowerName.endsWith('.markdown') ||
       file.type.startsWith('text/');
-
     if (!isPdf && !isText) {
       onNotify('Поддерживаются файлы .pdf, .txt и .md!', 'error');
       return;
     }
-
     setIsReadingDocument(true);
     try {
       let extracted = '';
       let pagesCount: number | undefined;
-
       if (isPdf) {
         const buffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
@@ -338,15 +302,12 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           const pageLines = sortedY
             .map(y => (linesMap.get(y) || []).join(' ').replace(/\s{2,}/g, ' ').trim())
             .filter(Boolean);
-          if (pageLines.length > 0) {
-            pageTexts.push(pageLines.join('\n'));
-          }
+          if (pageLines.length > 0) pageTexts.push(pageLines.join('\n'));
         }
         extracted = pageTexts.join('\n\n').trim();
       } else {
         extracted = (await file.text()).replace(/\r\n/g, '\n').trim();
       }
-
       if (!extracted) {
         onNotify(
           isPdf
@@ -356,7 +317,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         );
         return;
       }
-
       onSourceTextChange(extracted);
       setWorkingText(extracted);
       setSceneCards(localSliceToScenes(extracted, tone, outputLanguage));
@@ -378,6 +338,29 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     } finally {
       setIsReadingDocument(false);
     }
+  };
+
+  /** P1: кнопка «Загрузить сценарий»: .json → общий импорт манифеста, .txt/.md → редактор + синхронизация. */
+  const handleScriptFileSelected = async (file: File) => {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.json')) {
+      if (onImportManifestFile) {
+        onImportManifestFile(file);
+        onNotify(`📦 JSON «${file.name}» передан в общий импорт манифеста студии.`, 'info');
+      } else {
+        onNotify('JSON-манифест можно импортировать кнопкой в цехе «Многочасовой Луп».', 'info');
+      }
+      return;
+    }
+    const text = (await file.text()).replace(/\r\n/g, '\n').trim();
+    if (!text) {
+      onNotify('Файл сценария пуст!', 'error');
+      return;
+    }
+    onSourceTextChange(text);
+    setWorkingText(text);
+    setSceneCards(localSliceToScenes(text, tone, outputLanguage));
+    onScriptFileLoaded?.(text);
   };
 
   const handleSplitDocumentChapters = () => {
@@ -419,13 +402,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       sceneCards.length > 0 ? sceneCards : localSliceToScenes(baseScript, tone, outputLanguage);
     const antiRepeatVectors = pickAntiRepeatCameraVectors(rawScenes.length);
     let cursorSec = 0;
-
     const formatMMSS = (sec: number) => {
       const m = Math.floor(sec / 60);
       const s = Math.round(sec % 60);
       return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     };
-
     return rawScenes.map((sc, idx) => {
       const wc = Math.max(1, extractWordTokens(sc.scriptLine).length);
       const syncedDuration = calculateSceneDurationFromWords(wc);
@@ -446,10 +427,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         duration: syncedDuration,
         camera_movement: camMove,
         visual_style: sc.visualStyle || 'Historical Oil Painting & Chiaroscuro',
-        transition: {
-          type: 'crossfade',
-          duration_sec: 0.6
-        },
+        transition: { type: 'crossfade', duration_sec: 0.6 },
         text_overlay: sc.scriptLine,
         ai_video_prompt: sc.promptEn.includes(camMove)
           ? sc.promptEn
@@ -490,7 +468,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     navigator.clipboard.writeText(val);
     setCopiedId(id);
     onNotify(message, 'success');
-    setTimeout(() => setCopiedId(''), 1800);
+    window.setTimeout(() => setCopiedId(''), 1800);
   };
 
   const handleSelectLanguage = (lang: VerbaLanguage) => {
@@ -499,22 +477,18 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
     if (base) {
       const nextHooks = localGenerateHooks(base, tone, lang);
       setHookCards(nextHooks.hooks);
-      const nextScenes = localSliceToScenes(base, tone, lang);
-      setSceneCards(nextScenes);
+      setSceneCards(localSliceToScenes(base, tone, lang));
       if (voiceReadyText) {
-        const nextVoice = prepareVoiceoverScript(
-          lang === 'en' ? nextHooks.rewrittenBody : base,
-          {
-            stripAds,
-            stripTimecodes,
-            stripStageNotes,
-            numbersToWords: voiceNumbersToWords,
-            expandAbbr,
-            restoreYo: lang === 'ru' && restoreYo,
-            insertBreathingPauses,
-            language: lang
-          }
-        );
+        const nextVoice = prepareVoiceoverScript(lang === 'en' ? nextHooks.rewrittenBody : base, {
+          stripAds,
+          stripTimecodes,
+          stripStageNotes,
+          numbersToWords: voiceNumbersToWords,
+          expandAbbr,
+          restoreYo: lang === 'ru' && restoreYo,
+          insertBreathingPauses,
+          language: lang
+        });
         setVoiceReadyText(nextVoice.text);
         setVoiceStats(nextVoice.stats);
       }
@@ -567,9 +541,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         }
       }
     } catch {
-      /* Переходим на локальный лингвистический fallback */
+      /* локальный fallback */
     }
-
     const fallbackOut = localRewriteScript(input, {
       tone,
       mode: rewriteMode,
@@ -642,9 +615,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         }
       }
     } catch {
-      /* Локальный fallback */
+      /* локальный fallback */
     }
-
     const local = localGenerateHooks(input, tone, outputLanguage);
     setHookCards(local.hooks);
     if (hookGenerationMode === 'single15') {
@@ -689,7 +661,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             language: 'en'
           })
         : rawBase;
-
     const { text, stats } = prepareVoiceoverScript(baseForLang, {
       stripAds,
       stripTimecodes,
@@ -721,12 +692,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       const resp = await fetch('/api/gemini/verbaflow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'scenes',
-          text: base,
-          tone,
-          language: outputLanguage
-        })
+        body: JSON.stringify({ action: 'scenes', text: base, tone, language: outputLanguage })
       });
       if (resp.ok) {
         const json = await resp.json();
@@ -788,9 +754,8 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
         }
       }
     } catch {
-      /* Локальный fallback */
+      /* локальный fallback */
     }
-
     const localScenes = localSliceToScenes(base, tone, outputLanguage);
     setSceneCards(localScenes);
     setLastEngineLabel('Локальный лингвистический обработчик');
@@ -853,7 +818,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
             language: 'en'
           })
         : base;
-
     const prepared = prepareVoiceoverScript(baseForLang, {
       stripAds: true,
       stripTimecodes: true,
@@ -907,9 +871,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
   const handleDownloadVoiceTxt = () => {
     const content =
       voiceReadyText ||
-      prepareVoiceoverScript(workingText || sourceText, {
-        language: outputLanguage
-      }).text;
+      prepareVoiceoverScript(workingText || sourceText, { language: outputLanguage }).text;
     if (!content.trim()) return;
     const fileName =
       outputLanguage === 'en' ? 'verbaflow_voiceover_us_en.txt' : 'verbaflow_voiceover_ru.txt';
@@ -965,6 +927,26 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                 <span>🇺🇸 English (US Native)</span>
               </button>
             </div>
+            <input
+              ref={scriptFileInputRef}
+              type="file"
+              accept=".txt,.md,.markdown,.json,text/plain,text/markdown,application/json"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) void handleScriptFileSelected(f);
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => scriptFileInputRef.current?.click()}
+              title="Загрузить сценарий с диска: .txt/.md — сразу в редактор, .json — в общий импорт манифеста"
+              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#131B2E] hover:bg-[#19233b] border border-amber-400/35 text-amber-300 text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+            >
+              <Upload className="w-4 h-4 shrink-0" />
+              <span>Загрузить сценарий (.txt / .md / .json)</span>
+            </button>
             <span className="text-xs text-slate-400 font-medium">{lastEngineLabel}</span>
           </div>
           <p className="text-xs text-slate-400 max-w-3xl">
@@ -1009,7 +991,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
-        {/* Карточка 1: Человечность (Анти-ИИ) */}
         <motion.div
           layout
           className="rounded-xl bg-[#131B2E]/90 border border-white/[0.08] p-4 flex flex-col justify-between gap-2"
@@ -1058,7 +1039,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
         </motion.div>
 
-        {/* Карточка 2: Без воды (Плотность) */}
         <motion.div
           layout
           className="rounded-xl bg-[#131B2E]/90 border border-white/[0.08] p-4 flex flex-col justify-between gap-2"
@@ -1101,7 +1081,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
         </motion.div>
 
-        {/* Карточка 3: Уникальность */}
         <motion.div
           layout
           className="rounded-xl bg-[#131B2E]/90 border border-white/[0.08] p-4 flex flex-col justify-between gap-2"
@@ -1140,7 +1119,6 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
           </div>
         </motion.div>
 
-        {/* Карточка 4: Объём и тайминг диктора (130 сл/мин) */}
         <motion.div
           layout
           className="rounded-xl bg-[#131B2E]/90 border border-white/[0.08] p-4 flex flex-col justify-between gap-2"
@@ -1875,9 +1853,11 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     </h3>
                     <p className="text-xs text-slate-400">
                       Авто-расчёт{' '}
-                      <code className="text-emerald-300">duration = words / 2.2 сек</code> под темп
-                      диктора и чередование векторов камеры (
-                      <code className="text-amber-300">zoom_in / zoom_out / pan_left / pan_right</code>{' '}
+                      <code className="text-emerald-300 font-mono">duration = words / 2.2 сек</code>{' '}
+                      под темп диктора и чередование векторов камеры (
+                      <code className="text-amber-300 font-mono">
+                        zoom_in / zoom_out / pan_left / pan_right
+                      </code>{' '}
                       без повторов)
                     </p>
                   </div>
@@ -2098,9 +2078,7 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                     <span className="text-slate-500">Введите текст для рентген-анализа...</span>
                   ) : (
                     xrayTokens.map((tok, idx) => {
-                      if (tok.kind === 'normal') {
-                        return <span key={idx}>{tok.text}</span>;
-                      }
+                      if (tok.kind === 'normal') return <span key={idx}>{tok.text}</span>;
                       const isSelected = selectedXrayIndex === idx;
                       const styleMap: Record<'cliche' | 'water' | 'repeat', string> = {
                         cliche:
@@ -2164,241 +2142,4 @@ export const VerbaFlowTextWorkbench: React.FC<VerbaFlowTextWorkbenchProps> = ({
                         <button
                           type="button"
                           onClick={() => handleReplaceXrayToken(selectedXrayIndex, '')}
-                          className="min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/40 text-xs font-semibold text-rose-200 cursor-pointer"
-                        >
-                          Удалить фрагмент
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                {(telemetry.clichesFound.length > 0 || telemetry.waterFound.length > 0) && (
-                  <div className="rounded-xl bg-[#131B2E]/70 border border-white/[0.08] p-4 space-y-2.5">
-                    <div className="text-xs font-bold text-slate-200">
-                      Быстрые правки (клик по фразе в тексте выше или здесь):
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {telemetry.clichesFound.map((c, idx) => (
-                        <button
-                          key={`cliche-btn-${idx}`}
-                          type="button"
-                          onClick={() => {
-                            const rep = c.replacements[0] || '';
-                            const escaped = c.phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            const next = workingText
-                              .replace(new RegExp(escaped, 'gi'), rep)
-                              .replace(/[ \t]{2,}/g, ' ')
-                              .trim();
-                            setWorkingText(next);
-                            onNotify(
-                              rep
-                                ? `Штамп «${c.phrase}» заменён на «${rep}»`
-                                : `Штамп «${c.phrase}» удалён`,
-                              'success'
-                            );
-                          }}
-                          className="min-h-[40px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 text-xs text-rose-200 cursor-pointer"
-                        >
-                          Убрать «{c.phrase}» ({safeCount(c.count)}×)
-                        </button>
-                      ))}
-                      {telemetry.waterFound.map((w, idx) => (
-                        <button
-                          key={`water-btn-${idx}`}
-                          type="button"
-                          onClick={() => {
-                            const escaped = w.phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            const next = workingText
-                              .replace(new RegExp(`${escaped},?\\s*`, 'gi'), '')
-                              .replace(/[ \t]{2,}/g, ' ')
-                              .trim();
-                            setWorkingText(next);
-                            onNotify(`Удалена вода «${w.phrase}»`, 'success');
-                          }}
-                          className="min-h-[40px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-xs text-sky-200 cursor-pointer"
-                        >
-                          Высушить «{w.phrase}» ({safeCount(w.count)}×)
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      <div className="rounded-2xl bg-[#0b0f19]/95 border border-white/[0.08] backdrop-blur-md p-4 sm:p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
-          <div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
-              <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>Multi-Language Sidecar SRT Export &amp; Strict Scene Sync (v2.2-FINAL)</span>
-            </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Раздельный экспорт субтитров{' '}
-              <code className="text-cyan-300">&lt;project_name&gt;_&lt;LANG&gt;.srt</code> строго по{' '}
-              <code className="text-emerald-300">[voice_start → voice_end]</code> (Zero Overlap, без
-              вшивания в кадр)
-            </p>
-          </div>
-          <span className="text-[10.5px] font-mono bg-cyan-500/15 border border-cyan-400/35 text-cyan-200 px-2.5 py-1 rounded-lg whitespace-nowrap">
-            {activeSubLangs.length} языков • {narrativeScenes.length} сцен
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <label className="flex items-center gap-2.5 bg-[#111827]/90 border border-white/[0.08] hover:border-cyan-400/40 rounded-xl px-3.5 py-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={activeStrictLock}
-              onChange={e => {
-                if (onStrictSceneDurationLockChange) {
-                  onStrictSceneDurationLockChange(e.target.checked);
-                } else {
-                  setLocalStrictLock(e.target.checked);
-                }
-              }}
-              className="accent-cyan-400 w-4 h-4 shrink-0"
-            />
-            <div>
-              <span className="font-bold text-cyan-200 block">
-                Strict Scene Duration Lock (prevent voice speed stretching)
-              </span>
-              <span className="text-[10.5px] text-slate-400">
-                Фиксирует длину дикторских фраз под хронометраж сцен (без atempo / растягивания
-                голоса)
-              </span>
-            </div>
-          </label>
-          <label className="flex items-center gap-2.5 bg-[#111827]/90 border border-white/[0.08] hover:border-emerald-400/40 rounded-xl px-3.5 py-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={activeExportSeparate && !activeBurnIn}
-              onChange={e => {
-                const checked = e.target.checked;
-                if (onExportSeparateSrtFilesChange) onExportSeparateSrtFilesChange(checked);
-                else setLocalExportSeparate(checked);
-                if (onSidecarBurnInVideoChange) onSidecarBurnInVideoChange(!checked);
-                else setLocalBurnInVideo(!checked);
-              }}
-              className="accent-emerald-400 w-4 h-4 shrink-0"
-            />
-            <div>
-              <span className="font-bold text-emerald-300 block">
-                Multi-Language Sidecar SRT Generator (burn_in_video: false,
-                export_separate_srt_files: true)
-              </span>
-              <span className="text-[10.5px] text-slate-400">
-                Отдельные дорожки для YouTube CC без хардсаба поверх 4K-кадра
-              </span>
-            </div>
-          </label>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-              Активные языки субтитров (кликните для включения/исключения):
-            </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleDownloadSingleSidecarSrt(previewSrtLang)}
-                className="min-h-[34px] px-3 py-1 rounded-lg bg-[#111827] hover:bg-slate-800 border border-white/[0.12] text-cyan-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Скачать {sanitizeSlugForFilename(projectName)}_{previewSrtLang}.srt</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadAllSidecarSrt}
-                className="min-h-[34px] px-3.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 hover:brightness-110 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Экспортировать все ({activeSubLangs.length} .SRT)</span>
-              </button>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {V21_SUBTITLE_LANGUAGES.map(lang => {
-              const isSelected = activeSubLangs.includes(lang);
-              const isInspecting = previewSrtLang === lang;
-              return (
-                <div
-                  key={lang}
-                  className="inline-flex items-center rounded-xl overflow-hidden border border-white/[0.08] bg-[#111827]"
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleSubLang(lang)}
-                    className={`px-3 py-1.5 text-xs font-mono font-bold transition cursor-pointer ${
-                      isSelected
-                        ? 'bg-emerald-500/20 text-emerald-300 border-r border-emerald-400/30'
-                        : 'text-slate-400 hover:text-slate-200 border-r border-white/[0.06]'
-                    }`}
-                    title={`Включить/отключить ${V21_SUBTITLE_LANG_LABELS[lang]}`}
-                  >
-                    {isSelected ? '✓ ' : ''}
-                    {lang}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewSrtLang(lang)}
-                    className={`px-2 py-1.5 text-[10px] font-mono cursor-pointer transition ${
-                      isInspecting
-                        ? 'bg-cyan-500/25 text-cyan-200 font-bold'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                    title={`Просмотреть и редактировать реплики ${lang}`}
-                  >
-                    {V21_SUBTITLE_LANG_LABELS[lang]}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {narrativeScenes.length > 0 && (
-          <div className="rounded-xl bg-[#080c14]/90 border border-white/[0.08] p-3 space-y-2 max-h-60 overflow-y-auto custom-scroll">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400 pb-1 border-b border-white/[0.06]">
-              <span>
-                Редактор реплик • Язык: <strong className="text-cyan-300">{previewSrtLang}</strong>{' '}
-                (из <code className="text-amber-300">timeline[].subtitles.{previewSrtLang}</code>)
-              </span>
-              <span className="whitespace-nowrap">
-                Первые {Math.min(narrativeScenes.length, 40)} сцен
-              </span>
-            </div>
-            {narrativeScenes.slice(0, 40).map((sc, sIdx) => {
-              const currentLine =
-                sc.subtitles?.[previewSrtLang] ||
-                sc.subtitles?.[previewSrtLang.toLowerCase()] ||
-                (previewSrtLang === 'EN' ? sc.text_overlay : '') ||
-                '';
-              return (
-                <div
-                  key={`${sc.scene_id}-${sIdx}`}
-                  className="grid grid-cols-12 gap-2 items-center text-xs"
-                >
-                  <span className="col-span-3 sm:col-span-2 font-mono text-[10.5px] text-amber-300 truncate">
-                    #{sIdx + 1} {sc.scene_id} ({sc.duration}s)
-                  </span>
-                  <input
-                    type="text"
-                    value={currentLine}
-                    onChange={e => onUpdateSceneSubtitle?.(sIdx, previewSrtLang, e.target.value)}
-                    placeholder={`Текст субтитров [${previewSrtLang}] для ${sc.scene_id}...`}
-                    className="col-span-9 sm:col-span-10 bg-[#111827] border border-white/[0.08] focus:border-cyan-400 rounded-lg px-2.5 py-1 text-xs text-slate-100 outline-none"
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+                          className="min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/40 text-
