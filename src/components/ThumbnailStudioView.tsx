@@ -39,19 +39,14 @@ interface ThumbnailStudioViewProps {
   onConsumeExternalFontStyle?: () => void;
   externalCoverAImageUrl?: string | null;
   onConsumeExternalCoverAImage?: () => void;
+  externalSlotTitlePatch?: { slot: 'A' | 'B' | 'C'; title: string; nonce: number } | null;
+  onConsumeExternalSlotTitlePatch?: () => void;
   onSendToArtEditor?: (imageDataUrl: string, slotLabel: string) => void;
   youtubeMockTitle?: string;
   scriptContext?: string;
   manifestThumbnailSlots?: { A?: string; B?: string; C?: string } | null;
   endScreenSafeZone?: string;
   manifestDurationBadge?: string;
-  externalSlotTitle?: {
-    slot: ThumbnailSlotId;
-    title: string;
-    context?: string;
-    nonce?: number;
-  } | null;
-  onConsumeExternalSlotTitle?: () => void;
   onNotify: (msg: string, type?: 'info' | 'error' | 'success') => void;
 }
 
@@ -90,7 +85,7 @@ export class FluxGenerationError extends Error {
 /**
  Загружает изображение через fetch -> blob -> URL.createObjectURL (с прокси-fallback),
  чтобы Canvas 4K экспорт (3840x2160) не падал с CORS tainted canvas.
-*/
+ */
 async function fetchImageAsBlobObjectUrl(
   rawUrl: string,
   cropTo16x9: boolean = false
@@ -144,7 +139,10 @@ async function fetchImageAsBlobObjectUrl(
   }
 }
 
-/** AI Horde Flux.1-Schnell: POST /generate/async -> polling /generate/check -> /generate/status. */
+/**
+ AI Horde Flux.1-Schnell: POST /generate/async -> polling /generate/check -> /generate/status.
+ Авто-даунгрейд 1344x768 -> 704x384 при KudosUpfront.
+ */
 export async function generateViaAiHordeFlux(
   promptText: string,
   options?: {
@@ -170,15 +168,23 @@ export async function generateViaAiHordeFlux(
       }),
       signal: options?.signal
     });
-    const data = (await res.json().catch(() => ({}))) as { id?: string; message?: string; rc?: string };
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      message?: string;
+      rc?: string;
+    };
     return { res, data };
   };
+
   let requestedWidth = 1344;
   let requestedHeight = 768;
   let { res: submitRes, data: submitData } = await submitJob(requestedWidth, requestedHeight);
+
   if (
     (!submitRes.ok || !submitData.id) &&
-    (submitRes.status === 403 || submitData.rc === 'KudosUpfront' || /kudos/i.test(submitData.message || ''))
+    (submitRes.status === 403 ||
+      submitData.rc === 'KudosUpfront' ||
+      /kudos/i.test(submitData.message || ''))
   ) {
     requestedWidth = 704;
     requestedHeight = 384;
@@ -190,14 +196,20 @@ export async function generateViaAiHordeFlux(
     submitRes = retry.res;
     submitData = retry.data;
   }
+
   if (!submitRes.ok || !submitData.id) {
     throw new FluxGenerationError(
       submitData.message || `AI Horde отклонил запрос (${submitRes.status})`,
       submitRes.status
     );
   }
+
   const jobId = submitData.id;
-  options?.onProgress?.(`AI Horde задача создана (ID ${jobId.slice(0, 8)}), опрос каждые 3с...`, 'Очередь AI Horde...');
+  options?.onProgress?.(
+    `AI Horde задача создана (ID ${jobId.slice(0, 8)}), опрос каждые 3с...`,
+    'Очередь AI Horde...'
+  );
+
   const maxWaitMs = 5 * 60 * 1000;
   const startedAt = Date.now();
   while (true) {
@@ -221,21 +233,33 @@ export async function generateViaAiHordeFlux(
       }, 3000);
       options?.signal?.addEventListener('abort', onAbort, { once: true });
     });
-    const checkRes = await fetch(`${AI_HORDE_BASE_URL}/generate/check/${encodeURIComponent(jobId)}`, {
-      headers: { 'Client-Agent': 'AetherCombine:1.0:studio' },
-      signal: options?.signal
-    });
+
+    const checkRes = await fetch(
+      `${AI_HORDE_BASE_URL}/generate/check/${encodeURIComponent(jobId)}`,
+      { headers: { 'Client-Agent': 'AetherCombine:1.0:studio' }, signal: options?.signal }
+    );
     if (!checkRes.ok) {
-      throw new FluxGenerationError(`Ошибка проверки статуса AI Horde (${checkRes.status})`, checkRes.status);
+      throw new FluxGenerationError(
+        `Ошибка проверки статуса AI Horde (${checkRes.status})`,
+        checkRes.status
+      );
     }
     const checkData = (await checkRes.json().catch(() => ({}))) as {
-      done?: boolean; faulted?: boolean; is_possible?: boolean; finished?: number; queue_position?: number; wait_time?: number;
+      done?: boolean;
+      faulted?: boolean;
+      is_possible?: boolean;
+      finished?: number;
+      queue_position?: number;
+      wait_time?: number;
     };
-    if (checkData.faulted) throw new FluxGenerationError('AI Horde воркер вернул faulted при генерации.', 502);
+    if (checkData.faulted) {
+      throw new FluxGenerationError('AI Horde воркер вернул faulted при генерации.', 502);
+    }
     if (checkData.is_possible === false) {
       throw new FluxGenerationError('Сейчас нет свободных воркеров Flux.1-Schnell на AI Horde.', 503);
     }
-    const qPos = typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
+    const qPos =
+      typeof checkData.queue_position === 'number' ? `#${checkData.queue_position}` : 'в работе';
     const eta = typeof checkData.wait_time === 'number' ? `~${checkData.wait_time}с` : '...';
     const doneCnt = checkData.finished ?? 0;
     options?.onProgress?.(
@@ -244,19 +268,27 @@ export async function generateViaAiHordeFlux(
     );
     if (checkData.done === true) break;
   }
+
   options?.onProgress?.('Забираем 4 готовых кадра (1344×768) из AI Horde...', 'Загрузка 4 кадров...');
-  const statusRes = await fetch(`${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`, {
-    headers: { 'Client-Agent': 'AetherCombine:1.0:studio' },
-    signal: options?.signal
-  });
+  const statusRes = await fetch(
+    `${AI_HORDE_BASE_URL}/generate/status/${encodeURIComponent(jobId)}`,
+    { headers: { 'Client-Agent': 'AetherCombine:1.0:studio' }, signal: options?.signal }
+  );
   if (!statusRes.ok) {
-    throw new FluxGenerationError(`Ошибка получения результатов AI Horde (${statusRes.status})`, statusRes.status);
+    throw new FluxGenerationError(
+      `Ошибка получения результатов AI Horde (${statusRes.status})`,
+      statusRes.status
+    );
   }
   const statusData = (await statusRes.json().catch(() => ({}))) as {
     generations?: Array<{ img?: string; model?: string }>;
   };
-  const rawUrls = (statusData.generations || []).map(g => g.img).filter((u): u is string => Boolean(u && u.trim()));
-  if (!rawUrls.length) throw new FluxGenerationError('AI Horde завершился без изображений.', 502);
+  const rawUrls = (statusData.generations || [])
+    .map(g => g.img)
+    .filter((u): u is string => Boolean(u && u.trim()));
+  if (!rawUrls.length) {
+    throw new FluxGenerationError('AI Horde завершился без изображений.', 502);
+  }
   const needsUpscaleTo1344 = requestedWidth < 1344;
   const blobUrls = await Promise.all(
     rawUrls.slice(0, 4).map(url => fetchImageAsBlobObjectUrl(url, needsUpscaleTo1344))
@@ -278,7 +310,11 @@ export async function generateViaCloudflareFlux(
     signal
   });
   const result = (await response.json().catch(() => ({}))) as {
-    ok?: boolean; statusCode?: number; modelUsed?: string; images?: string[]; error?: string;
+    ok?: boolean;
+    statusCode?: number;
+    modelUsed?: string;
+    images?: string[];
+    error?: string;
   };
   if (!response.ok || !result.ok || !Array.isArray(result.images) || !result.images.length) {
     throw new FluxGenerationError(
@@ -286,8 +322,13 @@ export async function generateViaCloudflareFlux(
       result.statusCode || response.status
     );
   }
-  const blobUrls = await Promise.all(result.images.slice(0, 4).map(imgUrl => fetchImageAsBlobObjectUrl(imgUrl, true)));
-  return { images: blobUrls, modelUsed: 'Cloudflare Workers AI • @cf/black-forest-labs/flux-1-schnell' };
+  const blobUrls = await Promise.all(
+    result.images.slice(0, 4).map(imgUrl => fetchImageAsBlobObjectUrl(imgUrl, true))
+  );
+  return {
+    images: blobUrls,
+    modelUsed: 'Cloudflare Workers AI • @cf/black-forest-labs/flux-1-schnell'
+  };
 }
 
 /** Императивный рендер сетки 2x2 в произвольный DOM-контейнер. */
@@ -305,7 +346,14 @@ export function renderThumbnailsGrid(
     card.className =
       'relative group rounded-xl overflow-hidden border-2 border-slate-700/60 bg-slate-900 cursor-pointer transition-all duration-200 hover:border-cyan-400/80 hover:scale-[1.02]';
     card.dataset.index = String(index);
-    card.innerHTML = `<img src="${imgSrc}" alt="Вариант превью ${index + 1}" class="w-full aspect-video object-cover" /> <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2"> <span class="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded">Вариант #${index + 1}</span> <a href="${imgSrc}" download="thumbnail_${index + 1}.jpg" class="text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-2 py-1 rounded shadow">Скачать</a> </div> <div class="selection-indicator hidden absolute top-2 right-2 bg-cyan-500 text-black text-xs font-bold rounded-full p-1 shadow-lg">✓</div>`;
+    card.innerHTML = `
+      <img src="${imgSrc}" alt="Вариант превью ${index + 1}" class="w-full aspect-video object-cover" />
+      <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2">
+        <span class="text-xs font-semibold text-white bg-black/60 px-2 py-0.5 rounded">Вариант #${index + 1}</span>
+        <a href="${imgSrc}" download="thumbnail_${index + 1}.jpg" class="text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-2 py-1 rounded shadow">Скачать</a>
+      </div>
+      <div class="selection-indicator hidden absolute top-2 right-2 bg-cyan-500 text-black text-xs font-bold rounded-full p-1 shadow-lg">✓</div>
+    `;
     card.addEventListener('click', e => {
       const target = e.target as HTMLElement | null;
       if (target && target.tagName.toLowerCase() === 'a') return;
@@ -356,11 +404,16 @@ function drawCoverImageToCanvas(
 /** roundRect с фолбэком для Safari < 16 / старых WebView. */
 function pathRoundRect(
   ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
 ): void {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
-  const native = (ctx as CanvasRenderingContext2D & { roundRect?: (...a: number[]) => void }).roundRect;
+  const native = (ctx as CanvasRenderingContext2D & { roundRect?: (...a: number[]) => void })
+    .roundRect;
   if (typeof native === 'function') {
     native.call(ctx, x, y, w, h, rr);
     return;
@@ -384,10 +437,18 @@ function renderProcedural16x9ArtworkDataUrl(
   c.height = 1080;
   const ctx = c.getContext('2d');
   if (!ctx) return '';
-  const seed = Array.from(promptText || 'aether').reduce((acc, ch, i) => acc + ch.charCodeAt(0) * (i + 3), 17);
+  const seed = Array.from(promptText || 'aether').reduce(
+    (acc, ch, i) => acc + ch.charCodeAt(0) * (i + 3),
+    17
+  );
   const themeIdx = variantIndex % 4;
+
   const drawMountainLayer = (
-    baseY: number, amplitude: number, freq: number, phase: number, fillStyle: string | CanvasGradient
+    baseY: number,
+    amplitude: number,
+    freq: number,
+    phase: number,
+    fillStyle: string | CanvasGradient
   ) => {
     ctx.beginPath();
     ctx.moveTo(0, c.height);
@@ -403,6 +464,7 @@ function renderProcedural16x9ArtworkDataUrl(
     ctx.fillStyle = fillStyle;
     ctx.fill();
   };
+
   if (themeIdx === 0) {
     const sky = ctx.createLinearGradient(0, 0, c.width * 0.3, c.height);
     sky.addColorStop(0, '#020612');
@@ -411,15 +473,15 @@ function renderProcedural16x9ArtworkDataUrl(
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, c.width, c.height);
     const moonGlow = ctx.createRadialGradient(1320, 310, 20, 1320, 310, 720);
-    moonGlow.addColorStop(0, 'rgba(56,189,248,0.36)');
-    moonGlow.addColorStop(0.45, 'rgba(14,165,233,0.14)');
+    moonGlow.addColorStop(0, 'rgba(56, 189, 248, 0.36)');
+    moonGlow.addColorStop(0.45, 'rgba(14, 165, 233, 0.14)');
     moonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = moonGlow;
     ctx.fillRect(0, 0, c.width, c.height);
     drawMountainLayer(890, 210, 0.0032, 0.8, '#081326');
     drawMountainLayer(970, 150, 0.0046, 2.4, '#050c1a');
     ctx.save();
-    ctx.strokeStyle = 'rgba(186,230,253,0.16)';
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.16)';
     for (let i = 0; i < 160; i++) {
       const sx = ((i * 211 + seed) % (c.width + 400)) - 200;
       const sy = (i * 97 + seed * 3) % c.height;
@@ -434,7 +496,7 @@ function renderProcedural16x9ArtworkDataUrl(
       const px = (i * 173 + seed * 7) % c.width;
       const py = (i * 131 + seed * 5) % c.height;
       const r = 1.5 + ((i * 7) % 8);
-      ctx.fillStyle = `rgba(224,242,254,${0.12 + (i % 5) * 0.08})`;
+      ctx.fillStyle = `rgba(224, 242, 254, ${0.12 + (i % 5) * 0.08})`;
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
@@ -450,24 +512,24 @@ function renderProcedural16x9ArtworkDataUrl(
     const hearthX = c.width * 0.65;
     const hearthY = c.height * 0.62;
     const core = ctx.createRadialGradient(hearthX, hearthY, 30, hearthX, hearthY, 820);
-    core.addColorStop(0, 'rgba(251,191,36,0.72)');
-    core.addColorStop(0.28, 'rgba(245,158,11,0.42)');
-    core.addColorStop(0.6, 'rgba(194,65,12,0.16)');
+    core.addColorStop(0, 'rgba(251, 191, 36, 0.72)');
+    core.addColorStop(0.28, 'rgba(245, 158, 11, 0.42)');
+    core.addColorStop(0.6, 'rgba(194, 65, 12, 0.16)');
     core.addColorStop(1, 'transparent');
     ctx.fillStyle = core;
     ctx.fillRect(0, 0, c.width, c.height);
     const rim = ctx.createRadialGradient(180, 260, 10, 180, 260, 560);
-    rim.addColorStop(0, 'rgba(56,189,248,0.22)');
+    rim.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
     rim.addColorStop(1, 'transparent');
     ctx.fillStyle = rim;
     ctx.fillRect(0, 0, c.width, c.height);
-    ctx.fillStyle = 'rgba(8,4,3,0.78)';
+    ctx.fillStyle = 'rgba(8, 4, 3, 0.78)';
     ctx.fillRect(0, 880, c.width, 200);
     for (let i = 0; i < 140; i++) {
       const px = hearthX + Math.sin(i * 1.9 + seed) * (120 + (i % 7) * 85);
       const py = c.height - ((i * 89 + seed * 3) % 920);
       const r = 1.5 + (i % 5);
-      ctx.fillStyle = i % 3 === 0 ? 'rgba(253,224,71,0.75)' : 'rgba(251,146,60,0.52)';
+      ctx.fillStyle = i % 3 === 0 ? 'rgba(253, 224, 71, 0.75)' : 'rgba(251, 146, 60, 0.52)';
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
@@ -482,13 +544,13 @@ function renderProcedural16x9ArtworkDataUrl(
     for (let i = 0; i < 160; i++) {
       const sx = (i * 229 + seed * 11) % c.width;
       const sy = (i * 71 + seed * 7) % (c.height * 0.65);
-      ctx.fillStyle = `rgba(226,232,240,${0.25 + (i % 4) * 0.18})`;
+      ctx.fillStyle = `rgba(226, 232, 240, ${0.25 + (i % 4) * 0.18})`;
       ctx.fillRect(sx, sy, (i % 3) + 1, (i % 3) + 1);
     }
     const auroraBands = [
-      { y: 270, c1: 'rgba(16,185,129,0.48)', c2: 'rgba(6,182,212,0.08)', amp: 95 },
-      { y: 360, c1: 'rgba(34,211,238,0.42)', c2: 'rgba(139,92,246,0.08)', amp: 120 },
-      { y: 210, c1: 'rgba(52,211,153,0.30)', c2: 'rgba(56,189,248,0.04)', amp: 70 }
+      { y: 270, c1: 'rgba(16, 185, 129, 0.48)', c2: 'rgba(6, 182, 212, 0.08)', amp: 95 },
+      { y: 360, c1: 'rgba(34, 211, 238, 0.42)', c2: 'rgba(139, 92, 246, 0.08)', amp: 120 },
+      { y: 210, c1: 'rgba(52, 211, 153, 0.30)', c2: 'rgba(56, 189, 248, 0.04)', amp: 70 }
     ];
     auroraBands.forEach((band, bIdx) => {
       const grad = ctx.createLinearGradient(0, band.y - 160, 0, band.y + 240);
@@ -499,7 +561,10 @@ function renderProcedural16x9ArtworkDataUrl(
       ctx.beginPath();
       ctx.moveTo(0, band.y + 220);
       for (let x = 0; x <= c.width; x += 32) {
-        const y = band.y + Math.sin(x * 0.0032 + bIdx * 1.4) * band.amp + Math.cos(x * 0.007 - bIdx) * 35;
+        const y =
+          band.y +
+          Math.sin(x * 0.0032 + bIdx * 1.4) * band.amp +
+          Math.cos(x * 0.007 - bIdx) * 35;
         ctx.lineTo(x, y);
       }
       ctx.lineTo(c.width, band.y + 260);
@@ -517,8 +582,8 @@ function renderProcedural16x9ArtworkDataUrl(
     ctx.fillStyle = dawn;
     ctx.fillRect(0, 0, c.width, c.height);
     const sunGlow = ctx.createRadialGradient(1380, 420, 30, 1380, 420, 920);
-    sunGlow.addColorStop(0, 'rgba(186,230,253,0.42)');
-    sunGlow.addColorStop(0.35, 'rgba(148,163,184,0.18)');
+    sunGlow.addColorStop(0, 'rgba(186, 230, 253, 0.42)');
+    sunGlow.addColorStop(0.35, 'rgba(148, 163, 184, 0.18)');
     sunGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = sunGlow;
     ctx.fillRect(0, 0, c.width, c.height);
@@ -527,30 +592,36 @@ function renderProcedural16x9ArtworkDataUrl(
       const fogY = 660 + m * 95;
       const fog = ctx.createLinearGradient(0, fogY - 90, 0, fogY + 120);
       fog.addColorStop(0, 'transparent');
-      fog.addColorStop(0.5, `rgba(203,213,225,${0.14 + m * 0.03})`);
+      fog.addColorStop(0.5, `rgba(203, 213, 225, ${0.14 + m * 0.03})`);
       fog.addColorStop(1, 'transparent');
       ctx.fillStyle = fog;
       ctx.fillRect(0, fogY - 90, c.width, 210);
     }
     drawMountainLayer(970, 135, 0.0044, 2.2, '#08101c');
   }
+
   if (stylePreset === 'truecrime_contrast') {
-    const crimeGlow = ctx.createRadialGradient(c.width * 0.72, c.height * 0.35, 40, c.width * 0.72, c.height * 0.35, 760);
-    crimeGlow.addColorStop(0, 'rgba(239,68,68,0.18)');
+    const crimeGlow = ctx.createRadialGradient(
+      c.width * 0.72, c.height * 0.35, 40, c.width * 0.72, c.height * 0.35, 760
+    );
+    crimeGlow.addColorStop(0, 'rgba(239, 68, 68, 0.18)');
     crimeGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = crimeGlow;
     ctx.fillRect(0, 0, c.width, c.height);
   } else if (stylePreset === 'scifi_neon') {
-    const neonGlow = ctx.createRadialGradient(c.width * 0.65, c.height * 0.5, 40, c.width * 0.65, c.height * 0.5, 700);
-    neonGlow.addColorStop(0, 'rgba(16,185,129,0.18)');
+    const neonGlow = ctx.createRadialGradient(
+      c.width * 0.65, c.height * 0.5, 40, c.width * 0.65, c.height * 0.5, 700
+    );
+    neonGlow.addColorStop(0, 'rgba(16, 185, 129, 0.18)');
     neonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = neonGlow;
     ctx.fillRect(0, 0, c.width, c.height);
   }
+
   const vignette = ctx.createLinearGradient(0, 0, c.width * 0.65, c.height);
-  vignette.addColorStop(0, 'rgba(2,6,14,0.42)');
-  vignette.addColorStop(0.6, 'rgba(2,6,14,0.1)');
-  vignette.addColorStop(1, 'rgba(2,6,14,0.75)');
+  vignette.addColorStop(0, 'rgba(2, 6, 14, 0.42)');
+  vignette.addColorStop(0.6, 'rgba(2, 6, 14, 0.1)');
+  vignette.addColorStop(1, 'rgba(2, 6, 14, 0.75)');
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.94);
@@ -686,12 +757,24 @@ const THUMB_ABC_SLOTS_STORAGE_KEY = 'aether_thumb_abc_slots_v2';
 const THUMB_ABC_SLOTS_LEGACY_KEY = 'aether_thumb_abc_slots_v1';
 
 const clampBgAdjust = (raw?: Partial<SlotBgAdjustConfig> | null): SlotBgAdjustConfig => ({
-  contrastPct: typeof raw?.contrastPct === 'number' ? Math.max(80, Math.min(165, Math.round(raw.contrastPct))) : 100,
-  brightnessPct: typeof raw?.brightnessPct === 'number' ? Math.max(85, Math.min(135, Math.round(raw.brightnessPct))) : 100,
-  vibrancePct: typeof raw?.vibrancePct === 'number' ? Math.max(90, Math.min(125, Math.round(raw.vibrancePct))) : 100
+  contrastPct:
+    typeof raw?.contrastPct === 'number'
+      ? Math.max(80, Math.min(165, Math.round(raw.contrastPct)))
+      : 100,
+  brightnessPct:
+    typeof raw?.brightnessPct === 'number'
+      ? Math.max(85, Math.min(135, Math.round(raw.brightnessPct)))
+      : 100,
+  vibrancePct:
+    typeof raw?.vibrancePct === 'number'
+      ? Math.max(90, Math.min(125, Math.round(raw.vibrancePct)))
+      : 100
 });
 
-const createDefaultSlotConfig = (slot: ThumbnailSlotId, projectTitleSeed: string): ThumbnailSlotConfig => {
+const createDefaultSlotConfig = (
+  slot: ThumbnailSlotId,
+  projectTitleSeed: string
+): ThumbnailSlotConfig => {
   const split = splitProjectTitleIntoTwoLines(projectTitleSeed);
   const defaultSplashColor = slot === 'B' ? '#18181B' : slot === 'C' ? '#D97706' : '#E10613';
   return {
@@ -721,6 +804,7 @@ const hydrateSlotConfig = (
 ): ThumbnailSlotConfig => {
   const base = createDefaultSlotConfig(slot, projectTitleSeed);
   if (!raw || typeof raw !== 'object') return base;
+
   let source = raw;
   const migratedTop =
     typeof source.topText === 'string'
@@ -734,8 +818,10 @@ const hydrateSlotConfig = (
       : typeof source.bottomLine === 'string'
         ? source.bottomLine.toUpperCase()
         : base.bottomText;
+
   const normalizeBadgePos = (pos: unknown): BadgePosition => (pos === 'right' ? 'right' : 'left');
   const hydratedPresetBadges = createDefaultPresetBadgesState();
+
   if (source.presetBadges && typeof source.presetBadges === 'object') {
     for (const preset of BADGE_PRESETS_CONFIG) {
       const savedItem = source.presetBadges[preset.id];
@@ -764,29 +850,52 @@ const hydrateSlotConfig = (
       }
     });
     if (leftoverCustom && typeof source.customBadgeText !== 'string') {
-      source = { ...source, customBadgeText: leftoverCustom, customBadgeEnabled: true, customBadgePosition: leftoverCustomPos };
+      source = {
+        ...source,
+        customBadgeText: leftoverCustom,
+        customBadgeEnabled: true,
+        customBadgePosition: leftoverCustomPos
+      };
     }
   }
+
   const resolvedColor =
     typeof source.splashColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(source.splashColor)
       ? source.splashColor.toUpperCase()
       : source.splashPreset || source.splashCustomColor
         ? legacyPresetToSplashColor(source.splashPreset, source.splashCustomColor)
         : base.splashColor;
+
   const hl = source.hookLayout || {};
   const customTextRaw = typeof source.customBadgeText === 'string' ? source.customBadgeText : '';
-  const customTextClean = /^(UNCENSORED|18\+)$/.test(customTextRaw.trim().toUpperCase()) ? '' : customTextRaw;
+  const customTextClean = /^(UNCENSORED|18\+)$/.test(customTextRaw.trim().toUpperCase())
+    ? ''
+    : customTextRaw;
+
   return {
     ...base,
     topText: migratedTop,
-    topColor: typeof source.topColor === 'string' && source.topColor.trim() ? source.topColor : base.topColor,
+    topColor:
+      typeof source.topColor === 'string' && source.topColor.trim()
+        ? source.topColor
+        : base.topColor,
     bottomText: migratedBottom,
-    bottomColor: typeof source.bottomColor === 'string' && source.bottomColor.trim() ? source.bottomColor : base.bottomColor,
+    bottomColor:
+      typeof source.bottomColor === 'string' && source.bottomColor.trim()
+        ? source.bottomColor
+        : base.bottomColor,
     splashShape: 'none',
     splashColor: resolvedColor,
-    splashPaddingPct: typeof source.splashPaddingPct === 'number' ? Math.max(50, Math.min(160, source.splashPaddingPct)) : base.splashPaddingPct,
-    splashShadowPct: typeof source.splashShadowPct === 'number' ? Math.max(0, Math.min(160, source.splashShadowPct)) : base.splashShadowPct,
-    badgesEnabled: typeof source.badgesEnabled === 'boolean' ? source.badgesEnabled : base.badgesEnabled,
+    splashPaddingPct:
+      typeof source.splashPaddingPct === 'number'
+        ? Math.max(50, Math.min(160, source.splashPaddingPct))
+        : base.splashPaddingPct,
+    splashShadowPct:
+      typeof source.splashShadowPct === 'number'
+        ? Math.max(0, Math.min(160, source.splashShadowPct))
+        : base.splashShadowPct,
+    badgesEnabled:
+      typeof source.badgesEnabled === 'boolean' ? source.badgesEnabled : base.badgesEnabled,
     presetBadges: hydratedPresetBadges,
     customBadgeText: customTextClean,
     customBadgeEnabled:
@@ -794,15 +903,33 @@ const hydrateSlotConfig = (
         ? source.customBadgeEnabled && customTextClean.trim().length > 0
         : base.customBadgeEnabled,
     customBadgePosition: normalizeBadgePos(source.customBadgePosition),
-    badgeScalePct: typeof source.badgeScalePct === 'number' ? Math.max(60, Math.min(150, source.badgeScalePct)) : base.badgeScalePct,
+    badgeScalePct:
+      typeof source.badgeScalePct === 'number'
+        ? Math.max(60, Math.min(150, source.badgeScalePct))
+        : base.badgeScalePct,
     hookLayout: {
       xPct: typeof hl.xPct === 'number' ? Math.max(6, Math.min(94, hl.xPct)) : DEFAULT_HOOK_LAYOUT.xPct,
       yPct: typeof hl.yPct === 'number' ? Math.max(8, Math.min(92, hl.yPct)) : DEFAULT_HOOK_LAYOUT.yPct,
-      topScalePct: typeof hl.topScalePct === 'number' ? Math.max(40, Math.min(180, hl.topScalePct)) : DEFAULT_HOOK_LAYOUT.topScalePct,
-      bottomScalePct: typeof hl.bottomScalePct === 'number' ? Math.max(40, Math.min(180, hl.bottomScalePct)) : DEFAULT_HOOK_LAYOUT.bottomScalePct,
-      autoFitBottomToTop: typeof hl.autoFitBottomToTop === 'boolean' ? hl.autoFitBottomToTop : DEFAULT_HOOK_LAYOUT.autoFitBottomToTop,
-      blockTiltDeg: typeof hl.blockTiltDeg === 'number' ? Math.max(-6, Math.min(6, hl.blockTiltDeg)) : DEFAULT_HOOK_LAYOUT.blockTiltDeg,
-      lineSpacingPct: typeof hl.lineSpacingPct === 'number' ? Math.max(70, Math.min(160, hl.lineSpacingPct)) : DEFAULT_HOOK_LAYOUT.lineSpacingPct
+      topScalePct:
+        typeof hl.topScalePct === 'number'
+          ? Math.max(40, Math.min(180, hl.topScalePct))
+          : DEFAULT_HOOK_LAYOUT.topScalePct,
+      bottomScalePct:
+        typeof hl.bottomScalePct === 'number'
+          ? Math.max(40, Math.min(180, hl.bottomScalePct))
+          : DEFAULT_HOOK_LAYOUT.bottomScalePct,
+      autoFitBottomToTop:
+        typeof hl.autoFitBottomToTop === 'boolean'
+          ? hl.autoFitBottomToTop
+          : DEFAULT_HOOK_LAYOUT.autoFitBottomToTop,
+      blockTiltDeg:
+        typeof hl.blockTiltDeg === 'number'
+          ? Math.max(-6, Math.min(6, hl.blockTiltDeg))
+          : DEFAULT_HOOK_LAYOUT.blockTiltDeg,
+      lineSpacingPct:
+        typeof hl.lineSpacingPct === 'number'
+          ? Math.max(70, Math.min(160, hl.lineSpacingPct))
+          : DEFAULT_HOOK_LAYOUT.lineSpacingPct
     },
     bgAdjust: clampBgAdjust(source.bgAdjust)
   };
@@ -817,8 +944,11 @@ const formatBytesLabel = (bytes: number): string => {
 const buildImpactCanvasFont = (fontSizePx: number): string => {
   const safePx = Math.max(1, Math.round(fontSizePx));
   const antonLoaded =
-    typeof document !== 'undefined' && Boolean(document.fonts?.check?.(`400 ${Math.min(48, safePx)}px "Anton"`));
-  if (antonLoaded) return `400 ${safePx}px "Anton", "Montserrat", Impact, "Arial Black", sans-serif`;
+    typeof document !== 'undefined' &&
+    Boolean(document.fonts?.check?.(`400 ${Math.min(48, safePx)}px "Anton"`));
+  if (antonLoaded) {
+    return `400 ${safePx}px "Anton", "Montserrat", Impact, "Arial Black", sans-serif`;
+  }
   return `900 ${safePx}px "Montserrat", "Anton", Impact, "Arial Black", sans-serif`;
 };
 
@@ -859,20 +989,26 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   onConsumeExternalFontStyle,
   externalCoverAImageUrl,
   onConsumeExternalCoverAImage,
+  externalSlotTitlePatch,
+  onConsumeExternalSlotTitlePatch,
   onSendToArtEditor,
   youtubeMockTitle,
   scriptContext,
   manifestThumbnailSlots,
   endScreenSafeZone,
   manifestDurationBadge,
-  externalSlotTitle,
-  onConsumeExternalSlotTitle,
   onNotify
 }) => {
   const [showEndScreenSafeZone, setShowEndScreenSafeZone] = useState<boolean>(true);
+
   useEffect(() => {
     setShowEndScreenSafeZone(true);
-  }, [manifestThumbnailSlots?.A, manifestThumbnailSlots?.B, manifestThumbnailSlots?.C, endScreenSafeZone]);
+  }, [
+    manifestThumbnailSlots?.A,
+    manifestThumbnailSlots?.B,
+    manifestThumbnailSlots?.C,
+    endScreenSafeZone
+  ]);
 
   const slotFilenames: Record<ThumbnailSlotId, string> = {
     A: manifestThumbnailSlots?.A || 'thumbnail_4k_3840x2160_A.jpg',
@@ -892,8 +1028,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [activeSlot, setActiveSlot] = useState<ThumbnailSlotId>('A');
   const [badgeFilterQuery, setBadgeFilterQuery] = useState<string>('');
   const [slotImages, setSlotImages] = useState<Record<ThumbnailSlotId, HTMLImageElement | null>>({
-    A: null, B: null, C: null
+    A: null,
+    B: null,
+    C: null
   });
+
   const projectTitleSeed = (youtubeMockTitle || thumbTitle || '').trim();
   const lastSyncedExternalTitleRef = useRef<string>(thumbTitle);
 
@@ -901,10 +1040,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     let parsed: Partial<Record<ThumbnailSlotId, PersistedSlotState>> | null = null;
     try {
       const rawV2 = localStorage.getItem(THUMB_ABC_SLOTS_STORAGE_KEY);
-      if (rawV2) parsed = JSON.parse(rawV2) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
-      else {
+      if (rawV2) {
+        parsed = JSON.parse(rawV2) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+      } else {
         const rawV1 = localStorage.getItem(THUMB_ABC_SLOTS_LEGACY_KEY);
-        if (rawV1) parsed = JSON.parse(rawV1) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+        if (rawV1) {
+          parsed = JSON.parse(rawV1) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+        }
       }
     } catch {
       parsed = null;
@@ -924,21 +1066,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     if (thumbTitle === lastSyncedExternalTitleRef.current) return;
     lastSyncedExternalTitleRef.current = thumbTitle;
     const split = splitProjectTitleIntoTwoLines(thumbTitle);
-    setSlotConfigs(prev => ({ ...prev, A: { ...prev.A, topText: split.line1, bottomText: split.line2 } }));
+    setSlotConfigs(prev => ({
+      ...prev,
+      A: { ...prev.A, topText: split.line1, bottomText: split.line2 }
+    }));
   }, [thumbTitle]);
 
-  /** P1: приём заголовка из YouTube SEO («На обложку A/B/C») в конкретный слот. */
   useEffect(() => {
-    if (!externalSlotTitle) return;
-    const split = splitProjectTitleIntoTwoLines(externalSlotTitle.title);
-    const slot = externalSlotTitle.slot;
+    if (!externalSlotTitlePatch) return;
+    const { slot, title } = externalSlotTitlePatch;
+    const split = splitProjectTitleIntoTwoLines(title);
     setSlotConfigs(prev => ({
       ...prev,
       [slot]: { ...prev[slot], topText: split.line1, bottomText: split.line2 }
     }));
     setActiveSlot(slot);
-    onConsumeExternalSlotTitle?.();
-  }, [externalSlotTitle, onConsumeExternalSlotTitle]);
+    onConsumeExternalSlotTitlePatch?.();
+  }, [externalSlotTitlePatch, onConsumeExternalSlotTitlePatch]);
 
   useEffect(() => {
     try {
@@ -977,12 +1121,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [draggingSlot, setDraggingSlot] = useState<ThumbnailSlotId | null>(null);
   const [hoveredSlot, setHoveredSlot] = useState<ThumbnailSlotId | null>(null);
   const [fontsReadyTick, setFontsReadyTick] = useState<number>(0);
+
   const [baseSharpenPct, setBaseSharpenPct] = useState<number>(0);
-  const [baseResolutionPreset, setBaseResolutionPreset] = useState<'original' | '1920x1080' | '2560x1440' | '3840x2160'>('original');
+  const [baseResolutionPreset, setBaseResolutionPreset] = useState<
+    'original' | '1920x1080' | '2560x1440' | '3840x2160'
+  >('original');
   const [isExportingFormat, setIsExportingFormat] = useState<string | null>(null);
   const [batchExportStatus, setBatchExportStatus] = useState<string>('');
-  const [lastExportReport, setLastExportReport] = useState<Record<ThumbnailSlotId, { formatLabel: string; filename: string; sizeText: string } | null>>({ A: null, B: null, C: null });
+  const [lastExportReport, setLastExportReport] = useState<
+    Record<ThumbnailSlotId, { formatLabel: string; filename: string; sizeText: string } | null>
+  >({ A: null, B: null, C: null });
   const [showCopyMenu, setShowCopyMenu] = useState<boolean>(false);
+
   const [batchVariants, setBatchVariants] = useState<string[]>(() => [
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_0', 0),
     renderProcedural16x9ArtworkDataUrl('mystery_dark', 'initial_1', 1),
@@ -1014,7 +1164,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [showCfSettings, setShowCfSettings] = useState<boolean>(() => {
     try {
       return Boolean(
-        localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) || sessionStorage.getItem(CF_API_TOKEN_SESSION_KEY)
+        localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) ||
+          sessionStorage.getItem(CF_API_TOKEN_SESSION_KEY)
       );
     } catch {
       return false;
@@ -1023,11 +1174,15 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const isCloudflareConfigured = Boolean(cfAccountId.trim() && cfApiToken.trim());
 
   const updateBatchVariantsSafely = useCallback((nextUrls: string[]) => {
-    const prevToRevoke = activeBlobUrlsRef.current.filter(u => u.startsWith('blob:') && !nextUrls.includes(u));
+    const prevToRevoke = activeBlobUrlsRef.current.filter(
+      u => u.startsWith('blob:') && !nextUrls.includes(u)
+    );
     activeBlobUrlsRef.current = nextUrls.filter(u => u.startsWith('blob:'));
     setBatchVariants(nextUrls);
     if (prevToRevoke.length > 0) {
-      window.setTimeout(() => prevToRevoke.forEach(u => URL.revokeObjectURL(u)), 1000);
+      window.setTimeout(() => {
+        prevToRevoke.forEach(u => URL.revokeObjectURL(u));
+      }, 1000);
     }
   }, []);
 
@@ -1063,17 +1218,23 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [feedViewportMode, setFeedViewportMode] = useState<'both' | 'desktop' | 'mobile'>('both');
   const [bwContrastFilter, setBwContrastFilter] = useState<boolean>(false);
   const [showYoutubeOverlay, setShowYoutubeOverlay] = useState<boolean>(true);
-  const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>((manifestDurationBadge || '').trim() || '3:00:00');
+  const [youtubeDurationBadge, setYoutubeDurationBadge] = useState<string>(
+    (manifestDurationBadge || '').trim() || '3:00:00'
+  );
   const [youtubeChannelName] = useState<string>('Aether Documentary 4K');
-  const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(youtubeMockTitle || thumbTitle || '4K Documentary Release');
+  const [youtubeVideoHeading, setYoutubeVideoHeading] = useState<string>(
+    youtubeMockTitle || thumbTitle || '4K Documentary Release'
+  );
 
   useEffect(() => {
     const next = (manifestDurationBadge || '').trim();
     if (next) setYoutubeDurationBadge(next);
   }, [manifestDurationBadge]);
 
-  const derivedDurationSec = parseDurationLabelToSeconds(manifestDurationBadge || youtubeDurationBadge) || 10800;
-  const effectiveEndScreenSafeZone = (endScreenSafeZone || '').trim() || computeEndScreenWindow(derivedDurationSec);
+  const derivedDurationSec =
+    parseDurationLabelToSeconds(manifestDurationBadge || youtubeDurationBadge) || 10800;
+  const effectiveEndScreenSafeZone =
+    (endScreenSafeZone || '').trim() || computeEndScreenWindow(derivedDurationSec);
 
   useEffect(() => {
     if (youtubeMockTitle) setYoutubeVideoHeading(youtubeMockTitle);
@@ -1084,7 +1245,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const [videoFileName, setVideoFileName] = useState<string>('');
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [seekTimeSec, setSeekTimeSec] = useState<number>(0);
-  const [promptStylePreset, setPromptStylePreset] = useState<'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'>('mystery_dark');
+
+  const [promptStylePreset, setPromptStylePreset] = useState<
+    'mystery_dark' | 'ambient_4k' | 'truecrime_contrast' | 'scifi_neon'
+  >('mystery_dark');
   const [customFluxPrompt, setCustomFluxPrompt] = useState<string>('');
   const [isGeneratingCovers, setIsGeneratingCovers] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
@@ -1113,7 +1277,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const clonedPresetBadges: Record<string, BadgeItemState> = {};
     for (const preset of BADGE_PRESETS_CONFIG) {
       const item = sourceCfg.presetBadges?.[preset.id];
-      clonedPresetBadges[preset.id] = { enabled: Boolean(item?.enabled), position: item?.position === 'right' ? 'right' : 'left' };
+      clonedPresetBadges[preset.id] = {
+        enabled: Boolean(item?.enabled),
+        position: item?.position === 'right' ? 'right' : 'left'
+      };
     }
     const clonedCfg: ThumbnailSlotConfig = {
       ...sourceCfg,
@@ -1131,7 +1298,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     if (sourceImg) setSlotImages(prev => ({ ...prev, [targetSlot]: sourceImg }));
     setShowCopyMenu(false);
     setActiveSlot(targetSlot);
-    onNotify(`📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`, 'success');
+    onNotify(
+      `📋 Настройки и фон слота ${activeSlot} скопированы в Вариант ${targetSlot}!`,
+      'success'
+    );
   };
 
   const generatedCoverPrompt = (() => {
@@ -1144,7 +1314,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       .replace(/[а-яёА-ЯЁ]+/g, '')
       .replace(/\s+/g, ' ')
       .trim();
-    const topicHint = rawContext.length > 5 ? rawContext.slice(0, 110) : 'cinematic historical documentary mystery, dramatic lighting';
+    const topicHint =
+      rawContext.length > 5
+        ? rawContext.slice(0, 110)
+        : 'cinematic historical documentary mystery, dramatic lighting';
     const styleMap = {
       mystery_dark:
         'High-CTR YouTube documentary thumbnail, cinematic dark mystery atmosphere, dramatic chiaroscuro, volumetric fog, shadowy silhouette in background, negative space for bold typography, 35mm f/1.4 lens, 8k photorealistic',
@@ -1155,10 +1328,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       scifi_neon:
         'Anomalous signal documentary thumbnail, atmospheric dust particles in light beam, anamorphic lens flare, high contrast silhouette, 8k realism'
     };
-    const hookWords = [activeConfig.topText, activeConfig.bottomText].filter(Boolean).join(' ').trim().split(/\s+/).slice(0, 3).join(' ');
-    const hookClause = hookWords ? `Composition focus for hook: "${hookWords.toUpperCase()}" |` : 'Pure clean artwork without embedded text overlays | ';
+    const hookWords = [activeConfig.topText, activeConfig.bottomText]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join(' ');
+    const hookClause = hookWords
+      ? `Composition focus for hook: "${hookWords.toUpperCase()}" | `
+      : 'Pure clean artwork without embedded text overlays | ';
     return `${styleMap[promptStylePreset]} | Subject context: "${topicHint}" | ${hookClause}Clean 16:9 composition without text or watermarks, clear silhouette readability on mobile 160x90px`;
   })();
+
   const activePromptText = customFluxPrompt.trim() || generatedCoverPrompt;
 
   const updateSlotLines = (slot: ThumbnailSlotId, nextTop: string, nextBottom: string) => {
@@ -1187,7 +1369,10 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const dyPct = ((moveEv.clientY - startY) / Math.max(1, rect.height)) * 100;
         const nextX = Math.max(6, Math.min(94, Number((initialLayout.xPct + dxPct).toFixed(1))));
         const nextY = Math.max(8, Math.min(92, Number((initialLayout.yPct + dyPct).toFixed(1))));
-        updateSlotConfig(slot, prev => ({ ...prev, hookLayout: { ...prev.hookLayout, xPct: nextX, yPct: nextY } }));
+        updateSlotConfig(slot, prev => ({
+          ...prev,
+          hookLayout: { ...prev.hookLayout, xPct: nextX, yPct: nextY }
+        }));
       };
       const onPointerUp = () => {
         window.removeEventListener('pointermove', onPointerMove);
@@ -1213,12 +1398,22 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       if (!canvas) return null;
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
+
       const w = canvas.width;
       const h = canvas.height;
       const scale = w / 1280;
       ctx.clearRect(0, 0, w, h);
+
       if (image) {
-        renderAdjustedBackgroundToCanvas(ctx, image, w, h, cfg.bgAdjust || DEFAULT_BG_ADJUST, baseSharpenPercent, drawCoverImageToCanvas);
+        renderAdjustedBackgroundToCanvas(
+          ctx,
+          image,
+          w,
+          h,
+          cfg.bgAdjust || DEFAULT_BG_ADJUST,
+          baseSharpenPercent,
+          drawCoverImageToCanvas
+        );
       } else {
         const bgGrad = ctx.createLinearGradient(0, 0, w, h);
         bgGrad.addColorStop(0, '#090d16');
@@ -1226,45 +1421,61 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         bgGrad.addColorStop(1, '#060911');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, w, h);
-        const radial = ctx.createRadialGradient(w * 0.62, h * 0.42, 20 * scale, w * 0.62, h * 0.42, 440 * scale);
-        radial.addColorStop(0, 'rgba(245,158,11,0.24)');
-        radial.addColorStop(0.6, 'rgba(56,189,248,0.08)');
-        radial.addColorStop(1, 'rgba(0,0,0,0)');
+        const radial = ctx.createRadialGradient(
+          w * 0.62, h * 0.42, 20 * scale, w * 0.62, h * 0.42, 440 * scale
+        );
+        radial.addColorStop(0, 'rgba(245, 158, 11, 0.24)');
+        radial.addColorStop(0.6, 'rgba(56, 189, 248, 0.08)');
+        radial.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = radial;
         ctx.fillRect(0, 0, w, h);
         ctx.fillStyle = '#64748b';
         ctx.font = `600 ${Math.round(20 * scale)}px Inter, sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText(
-          fallbackLabel ? `${fallbackLabel} — нажмите «Flux.1 AI Horde (2×2)»` : 'Нажмите «Flux.1 AI Horde (2×2)» или выберите кадр ниже',
+          fallbackLabel
+            ? `${fallbackLabel} — нажмите «Flux.1 AI Horde (2×2)»`
+            : 'Нажмите «Flux.1 AI Horde (2×2)» или выберите кадр ниже',
           w / 2,
           h * 0.45
         );
       }
+
       const topUpper = (cfg.topText || '').trim().toUpperCase();
       const bottomUpper = (cfg.bottomText || '').trim().toUpperCase();
       const hasHeadline = topUpper.length > 0 || bottomUpper.length > 0;
+
       if (hasHeadline) {
         const rawVx = (cfg.hookLayout.xPct / 100) * w;
         const rawVy = (cfg.hookLayout.yPct / 100) * h;
         const vignette = ctx.createRadialGradient(rawVx, rawVy, 40 * scale, rawVx, rawVy, 560 * scale);
-        vignette.addColorStop(0, 'rgba(4,7,15,0.46)');
-        vignette.addColorStop(0.65, 'rgba(4,7,15,0.16)');
-        vignette.addColorStop(1, 'rgba(0,0,0,0)');
+        vignette.addColorStop(0, 'rgba(4, 7, 15, 0.46)');
+        vignette.addColorStop(0.65, 'rgba(4, 7, 15, 0.16)');
+        vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = vignette;
         ctx.fillRect(0, 0, w, h);
       }
+
       const activeBadgeItems: Array<{ label: string; position: BadgePosition }> = [];
       if (cfg.badgesEnabled) {
         for (const preset of BADGE_PRESETS_CONFIG) {
           const state = cfg.presetBadges?.[preset.id];
-          if (state?.enabled) activeBadgeItems.push({ label: preset.text.toUpperCase(), position: state.position === 'right' ? 'right' : 'left' });
+          if (state?.enabled) {
+            activeBadgeItems.push({
+              label: preset.text.toUpperCase(),
+              position: state.position === 'right' ? 'right' : 'left'
+            });
+          }
         }
         const customTrimmed = (cfg.customBadgeText || '').trim().toUpperCase();
         if (cfg.customBadgeEnabled && customTrimmed.length > 0) {
-          activeBadgeItems.push({ label: customTrimmed, position: cfg.customBadgePosition === 'right' ? 'right' : 'left' });
+          activeBadgeItems.push({
+            label: customTrimmed,
+            position: cfg.customBadgePosition === 'right' ? 'right' : 'left'
+          });
         }
       }
+
       if (activeBadgeItems.length > 0) {
         const badgeUserScale = Math.max(0.6, Math.min(1.5, (cfg.badgeScalePct ?? 100) / 100));
         const badgeFontFamily = '"Montserrat", "Inter", sans-serif';
@@ -1272,13 +1483,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const topY = 28 * scale;
         const maxAvailableW = w - paddingX * 2;
         const maxAvailableH = h * 0.36;
+
         const measureTrackedWidth = (text: string, trackingPx: number): number => {
           const chars = Array.from(text);
           if (chars.length === 0) return 0;
           const glyphsW = chars.reduce((sum, ch) => sum + ctx.measureText(ch).width, 0);
           return glyphsW + Math.max(0, chars.length - 1) * trackingPx;
         };
-        const drawTrackedCenteredText = (text: string, centerXPos: number, centerYPos: number, trackingPx: number) => {
+
+        const drawTrackedCenteredText = (
+          text: string,
+          centerXPos: number,
+          centerYPos: number,
+          trackingPx: number
+        ) => {
           const chars = Array.from(text);
           if (chars.length === 0) return;
           const totalW = measureTrackedWidth(text, trackingPx);
@@ -1292,8 +1510,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             charCursor += cw + trackingPx;
           }
         };
-        interface MeasuredBadge { label: string; position: BadgePosition; w: number }
-        interface BadgeRowLayout { left: MeasuredBadge[]; right: MeasuredBadge[]; y: number }
+
+        interface MeasuredBadge {
+          label: string;
+          position: BadgePosition;
+          w: number;
+        }
+        interface BadgeRowLayout {
+          left: MeasuredBadge[];
+          right: MeasuredBadge[];
+          y: number;
+        }
+
         const computeBadgeLayout = (fitFactor: number) => {
           const effScale = scale * badgeUserScale * fitFactor;
           const fontPx = Math.max(8 * scale, 14 * effScale);
@@ -1303,11 +1531,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           const gapY = 10 * effScale;
           const badgeH = 42 * effScale;
           ctx.font = `800 ${Math.max(1, Math.round(fontPx))}px ${badgeFontFamily}`;
+
           const measured: MeasuredBadge[] = activeBadgeItems.map(item => ({
             label: item.label,
             position: item.position,
-            w: Math.min(maxAvailableW, Math.max(96 * effScale, measureTrackedWidth(item.label, trackingPx) + horizontalPad))
+            w: Math.min(
+              maxAvailableW,
+              Math.max(96 * effScale, measureTrackedWidth(item.label, trackingPx) + horizontalPad)
+            )
           }));
+
           const leftList = measured.filter(m => m.position === 'left');
           const rightList = measured.filter(m => m.position === 'right');
           const rows: BadgeRowLayout[] = [];
@@ -1321,6 +1554,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             const midGap = r.left.length > 0 && r.right.length > 0 ? gapX : 0;
             return lw + rw + midGap;
           };
+
           let leftRowIdx = 0;
           for (const item of leftList) {
             let row = ensureRow(leftRowIdx);
@@ -1334,6 +1568,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             }
             row.left.push(item);
           }
+
           let rightRowIdx = 0;
           for (const item of rightList) {
             let row = ensureRow(rightRowIdx);
@@ -1347,21 +1582,24 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
             }
             row.right.push(item);
           }
+
           rows.forEach((r, idx) => {
             r.y = topY + idx * (badgeH + gapY);
           });
           const totalH = rows.length > 0 ? rows.length * badgeH + (rows.length - 1) * gapY : 0;
           return { rows, totalH, badgeH, gapX, trackingPx, effScale };
         };
+
         let fitFactor = 1;
         let layout = computeBadgeLayout(fitFactor);
         if (layout.totalH > maxAvailableH && layout.totalH > 0) {
           fitFactor = Math.max(0.45, maxAvailableH / layout.totalH);
           layout = computeBadgeLayout(fitFactor);
         }
+
         const drawBadgeCapsule = (label: string, bx: number, by: number, bw: number) => {
           ctx.save();
-          ctx.fillStyle = 'rgba(10,14,24,0.88)';
+          ctx.fillStyle = 'rgba(10, 14, 24, 0.88)';
           ctx.strokeStyle = '#F59E0B';
           ctx.lineWidth = Math.max(1.5, 2 * layout.effScale);
           pathRoundRect(ctx, bx, by, bw, layout.badgeH, 8 * layout.effScale);
@@ -1371,6 +1609,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           drawTrackedCenteredText(label, bx + bw / 2, by + layout.badgeH * 0.52, layout.trackingPx);
           ctx.restore();
         };
+
         for (const row of layout.rows) {
           let leftCursorX = paddingX;
           for (const item of row.left) {
@@ -1386,7 +1625,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           }
         }
       }
+
       if (!hasHeadline) return null;
+
       const hl = cfg.hookLayout;
       const maxSafeW = w * 0.82;
       let fontSize1 = topUpper ? 88 * scale * (hl.topScalePct / 100) : 0;
@@ -1400,6 +1641,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           line1W = ctx.measureText(topUpper).width;
         }
       }
+
       let fontSize2 = bottomUpper ? 88 * scale * (hl.bottomScalePct / 100) : 0;
       let line2W = 0;
       if (bottomUpper) {
@@ -1417,10 +1659,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
           line2W = ctx.measureText(bottomUpper).width;
         }
       }
+
       const capH1 = topUpper ? fontSize1 * 0.78 : 0;
       const capH2 = bottomUpper ? fontSize2 * 0.78 : 0;
-      const avgFs = topUpper && bottomUpper ? (fontSize1 + fontSize2) * 0.5 : Math.max(fontSize1, fontSize2);
-      const lineGap = topUpper && bottomUpper ? Math.max(8 * scale, avgFs * 0.16 * (hl.lineSpacingPct / 100)) : 0;
+      const avgFs =
+        topUpper && bottomUpper ? (fontSize1 + fontSize2) * 0.5 : Math.max(fontSize1, fontSize2);
+      const lineGap =
+        topUpper && bottomUpper ? Math.max(8 * scale, avgFs * 0.16 * (hl.lineSpacingPct / 100)) : 0;
       const totalTextH = capH1 + lineGap + capH2;
       const skewOverhang = Math.max(fontSize1, fontSize2) * 0.16;
       const contentW = Math.max(line1W, line2W) + skewOverhang;
@@ -1429,19 +1674,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       const rawCx = (Math.max(6, Math.min(94, hl.xPct)) / 100) * w;
       const rawCy = (Math.max(8, Math.min(92, hl.yPct)) / 100) * h;
       const edgeMargin = 24 * scale;
-      const drawCx = estBoxW + edgeMargin * 2 < w ? Math.max(estBoxW / 2 + edgeMargin, Math.min(w - estBoxW / 2 - edgeMargin, rawCx)) : w / 2;
-      const drawCy = estBoxH + edgeMargin * 2 < h ? Math.max(estBoxH / 2 + edgeMargin, Math.min(h - estBoxH / 2 - edgeMargin, rawCy)) : h / 2;
+      const drawCx =
+        estBoxW + edgeMargin * 2 < w
+          ? Math.max(estBoxW / 2 + edgeMargin, Math.min(w - estBoxW / 2 - edgeMargin, rawCx))
+          : w / 2;
+      const drawCy =
+        estBoxH + edgeMargin * 2 < h
+          ? Math.max(estBoxH / 2 + edgeMargin, Math.min(h - estBoxH / 2 - edgeMargin, rawCy))
+          : h / 2;
       const tiltRad = (Math.max(-6, Math.min(6, hl.blockTiltDeg)) * Math.PI) / 180;
       const skewXSlope = Math.tan((-10 * Math.PI) / 180);
       const topYCenter = -totalTextH / 2 + capH1 / 2;
       const bottomYCenter = topUpper ? -totalTextH / 2 + capH1 + lineGap + capH2 / 2 : 0;
+
       ctx.save();
       ctx.translate(drawCx, drawCy);
       ctx.rotate(tiltRad);
       const finalW = estBoxW;
       const finalH = estBoxH;
+
       const drawDocumentaryImpactLine = (
-        text: string, fontSizePx: number, lineCenterY: number, hexColor: string, useSubtle3DGradient: boolean
+        text: string,
+        fontSizePx: number,
+        lineCenterY: number,
+        hexColor: string,
+        useSubtle3DGradient: boolean
       ) => {
         const fontStr = buildImpactCanvasFont(fontSizePx);
         const strokeWidth = Math.max(3, fontSizePx * 0.135);
@@ -1456,12 +1713,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.miterLimit = 2;
-        ctx.fillStyle = 'rgba(0,0,0,0.92)';
-        ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.92)';
         ctx.lineWidth = strokeWidth;
         ctx.strokeText(text, hardShadowOffX, hardShadowOffY);
         ctx.fillText(text, hardShadowOffX, hardShadowOffY);
-        ctx.shadowColor = 'rgba(0,0,0,0.78)';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
         ctx.shadowBlur = 10 * scale;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 2 * scale;
@@ -1470,13 +1727,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         ctx.strokeText(text, 0, 0);
         ctx.shadowBlur = 0;
         ctx.shadowOffsetY = 0;
-        ctx.fillStyle = buildVertical3DFill(ctx, hexColor, -fontSizePx * 0.42, fontSizePx * 0.42, useSubtle3DGradient);
+        ctx.fillStyle = buildVertical3DFill(
+          ctx,
+          hexColor,
+          -fontSizePx * 0.42,
+          fontSizePx * 0.42,
+          useSubtle3DGradient
+        );
         ctx.fillText(text, 0, 0);
         ctx.restore();
       };
-      if (topUpper) drawDocumentaryImpactLine(topUpper, fontSize1, topYCenter, cfg.topColor || '#FFFFFF', false);
-      if (bottomUpper) drawDocumentaryImpactLine(bottomUpper, fontSize2, bottomYCenter, cfg.bottomColor || '#FFD600', true);
+
+      if (topUpper) {
+        drawDocumentaryImpactLine(topUpper, fontSize1, topYCenter, cfg.topColor || '#FFFFFF', false);
+      }
+      if (bottomUpper) {
+        drawDocumentaryImpactLine(
+          bottomUpper,
+          fontSize2,
+          bottomYCenter,
+          cfg.bottomColor || '#FFD600',
+          true
+        );
+      }
       ctx.restore();
+
       const rawLeft = Math.max(0, drawCx - finalW / 2);
       const rawTop = Math.max(0, drawCy - finalH / 2);
       const rawRight = Math.min(w, drawCx + finalW / 2);
@@ -1490,7 +1765,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     },
     []
   );
-const renderSlotToCanvas = useCallback(
+
+  const renderSlotToCanvas = useCallback(
     (
       canvas: HTMLCanvasElement | null,
       slot: ThumbnailSlotId,
@@ -1504,11 +1780,7 @@ const renderSlotToCanvas = useCallback(
   );
 
   const renderAllCanvases = useCallback(() => {
-    const nextBox = renderSlotToCanvas(
-      mainCanvasRef.current,
-      activeSlot,
-      `Вариант ${activeSlot}`
-    );
+    const nextBox = renderSlotToCanvas(mainCanvasRef.current, activeSlot, `Вариант ${activeSlot}`);
     setActiveHookBox(prev => {
       if (!prev && !nextBox) return prev;
       if (
@@ -1720,7 +1992,10 @@ const renderSlotToCanvas = useCallback(
         const firstImg = new Image();
         firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
-        onNotify(`🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+        onNotify(
+          `🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`,
+          'success'
+        );
       } else {
         const objectUrl = URL.createObjectURL(file);
         const srcImg = new Image();
@@ -1745,7 +2020,7 @@ const renderSlotToCanvas = useCallback(
             ox: 0.05,
             oy: 0.02,
             filter: 'contrast(1.18) brightness(0.92)',
-            tint: 'rgba(14,165,233,0.16)'
+            tint: 'rgba(14, 165, 233, 0.16)'
           },
           {
             label: 'Янтарный драматик HDR',
@@ -1753,7 +2028,7 @@ const renderSlotToCanvas = useCallback(
             ox: 0,
             oy: 0.03,
             filter: 'contrast(1.22) saturate(1.2)',
-            tint: 'rgba(245,158,11,0.16)'
+            tint: 'rgba(245, 158, 11, 0.16)'
           }
         ];
         const slicedUrls = crops.map(cfg => {
@@ -1782,8 +2057,8 @@ const renderSlotToCanvas = useCallback(
             ctx.fillRect(0, 0, 1920, 1080);
           }
           const vig = ctx.createLinearGradient(0, 0, 1920 * 0.55, 1080);
-          vig.addColorStop(0, 'rgba(2,6,14,0.25)');
-          vig.addColorStop(1, 'rgba(2,6,14,0.55)');
+          vig.addColorStop(0, 'rgba(2, 6, 14, 0.25)');
+          vig.addColorStop(1, 'rgba(2, 6, 14, 0.55)');
           ctx.fillStyle = vig;
           ctx.fillRect(0, 0, 1920, 1080);
           return offscreen.toDataURL('image/jpeg', 0.94);
@@ -1797,7 +2072,10 @@ const renderSlotToCanvas = useCallback(
         const firstImg = new Image();
         firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
         firstImg.src = slicedUrls[0];
-        onNotify(`🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`, 'success');
+        onNotify(
+          `🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`,
+          'success'
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Ошибка обработки локального файла';
@@ -1865,7 +2143,9 @@ const renderSlotToCanvas = useCallback(
       generatedImg.src = paddedUrls[0];
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : 'Не удалось сгенерировать обложки через Flux.1-Schnell.';
+        err instanceof Error
+          ? err.message
+          : 'Не удалось сгенерировать обложки через Flux.1-Schnell.';
       setGenerationError(msg);
       if (err instanceof FluxGenerationError && err.status === 499) onNotify(msg, 'info');
       else onNotify(msg, 'error');
@@ -1943,7 +2223,10 @@ const renderSlotToCanvas = useCallback(
       a.href = dataUrl;
       a.download = `keyframe_4k_3840x2160_${Math.round(seekTimeSec)}s.jpg`;
       a.click();
-      onNotify(`📸 Честный 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) скачан!`, 'success');
+      onNotify(
+        `📸 Честный 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) скачан!`,
+        'success'
+      );
       return;
     }
     const capturedImg = new Image();
@@ -2158,7 +2441,10 @@ const renderSlotToCanvas = useCallback(
         }
       }
       if (summaryParts.length === 3) {
-        onNotify(`📦 Все 3 обложки A/B/C скачаны для YouTube (${summaryParts.join(' • ')})`, 'success');
+        onNotify(
+          `📦 Все 3 обложки A/B/C скачаны для YouTube (${summaryParts.join(' • ')})`,
+          'success'
+        );
       } else {
         onNotify('Часть обложек не удалось экспортировать.', 'error');
       }
@@ -2196,7 +2482,10 @@ const renderSlotToCanvas = useCallback(
   const copyCoverPromptForWebGenerator = () => {
     navigator.clipboard.writeText(activePromptText);
     setCopiedPrompt(true);
-    onNotify('📋 Промпт скопирован для вставки в веб-генератор (Leonardo.ai / Midjourney / Kling)!', 'success');
+    onNotify(
+      '📋 Промпт скопирован для вставки в веб-генератор (Leonardo.ai / Midjourney / Kling)!',
+      'success'
+    );
     window.setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
@@ -2247,7 +2536,10 @@ const renderSlotToCanvas = useCallback(
                 };
                 return {
                   ...prev,
-                  presetBadges: { ...prev.presetBadges, [preset.id]: { ...cur, enabled: !cur.enabled } }
+                  presetBadges: {
+                    ...prev.presetBadges,
+                    [preset.id]: { ...cur, enabled: !cur.enabled }
+                  }
                 };
               })
             }
@@ -2281,14 +2573,17 @@ const renderSlotToCanvas = useCallback(
                       };
                       return {
                         ...prev,
-                        presetBadges: { ...prev.presetBadges, [preset.id]: { ...cur, position: opt.value } }
+                        presetBadges: {
+                          ...prev.presetBadges,
+                          [preset.id]: { ...cur, position: opt.value }
+                        }
                       };
                     })
                   }
                   className={`min-h-[24px] px-1.5 py-0.5 rounded-md text-[9.5px] font-bold cursor-pointer transition ${
                     isSelected
                       ? 'bg-amber-400/20 border border-amber-400/60 text-[#FACC15]'
-                      : 'border border-transparent text-white/55 hover:text-white hover:bg-white/[0.04]'
+                      : 'border border-transparent text-white/50 hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   {opt.label}
@@ -2436,7 +2731,13 @@ const renderSlotToCanvas = useCallback(
                       <span>{tab.label}</span>
                     </span>
                     <span className="relative z-10 text-[9.5px] font-mono text-white/50 truncate max-w-full">
-                      {tab.id === 'A' ? (slotImages.A ? 'свой фон' : 'пусто') : hasOwnImage ? 'свой фон' : 'общий с A'}
+                      {tab.id === 'A'
+                        ? slotImages.A
+                          ? 'свой фон'
+                          : 'пусто'
+                        : hasOwnImage
+                          ? 'свой фон'
+                          : 'общий с A'}
                     </span>
                     <span
                       className="relative z-10 text-[8.5px] font-mono text-amber-200/75 truncate max-w-full px-1"
@@ -2547,6 +2848,7 @@ const renderSlotToCanvas = useCallback(
                 </button>
               </div>
             )}
+
             <div className="pt-1.5 border-t border-white/[0.08]">
               <button
                 type="button"
@@ -2613,6 +2915,7 @@ const renderSlotToCanvas = useCallback(
                 </div>
               )}
             </div>
+
             {generationError && (
               <div
                 role="alert"
@@ -2621,7 +2924,10 @@ const renderSlotToCanvas = useCallback(
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
                   <div className="flex-1 min-w-0">
-                    <p title={generationError} className="text-[11px] font-semibold leading-snug line-clamp-2 text-rose-200">
+                    <p
+                      title={generationError}
+                      className="text-[11px] font-semibold leading-snug line-clamp-2 text-rose-200"
+                    >
                       {generationError}
                     </p>
                   </div>
@@ -2728,13 +3034,18 @@ const renderSlotToCanvas = useCallback(
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-[11px] text-white/60">Свой фон для Варианта {activeSlot}:</label>
+                <label className="text-[11px] text-white/60">
+                  Свой фон для Варианта {activeSlot}:
+                </label>
                 {activeSlot !== 'A' && slotImages[activeSlot] && (
                   <button
                     type="button"
                     onClick={() => {
                       setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
-                      onNotify(`Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`, 'info');
+                      onNotify(
+                        `Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`,
+                        'info'
+                      );
                     }}
                     className="text-[10px] text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
                   >
@@ -2777,7 +3088,8 @@ const renderSlotToCanvas = useCallback(
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {LINE_COLOR_SWATCHES.map(swatch => {
-                    const isSelected = activeConfig.topColor.toUpperCase() === swatch.id.toUpperCase();
+                    const isSelected =
+                      activeConfig.topColor.toUpperCase() === swatch.id.toUpperCase();
                     return (
                       <motion.button
                         key={`top-swatch-${swatch.id}`}
@@ -2883,7 +3195,10 @@ const renderSlotToCanvas = useCallback(
                           type="button"
                           whileTap={{ scale: 0.94 }}
                           onClick={() =>
-                            updateSlotConfig(activeSlot, prev => ({ ...prev, bottomColor: swatch.id }))
+                            updateSlotConfig(activeSlot, prev => ({
+                              ...prev,
+                              bottomColor: swatch.id
+                            }))
                           }
                           title={swatch.label}
                           className={`min-h-[28px] px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
@@ -2906,7 +3221,10 @@ const renderSlotToCanvas = useCallback(
                     type="color"
                     value={activeConfig.bottomColor}
                     onChange={e =>
-                      updateSlotConfig(activeSlot, prev => ({ ...prev, bottomColor: e.target.value }))
+                      updateSlotConfig(activeSlot, prev => ({
+                        ...prev,
+                        bottomColor: e.target.value
+                      }))
                     }
                     aria-label="Цвет Строки 2"
                     className="w-4 h-4 bg-transparent border-0 cursor-pointer p-0"
@@ -2937,7 +3255,11 @@ const renderSlotToCanvas = useCallback(
                       const val = Number(e.target.value);
                       updateSlotConfig(activeSlot, prev => ({
                         ...prev,
-                        hookLayout: { ...prev.hookLayout, bottomScalePct: val, autoFitBottomToTop: false }
+                        hookLayout: {
+                          ...prev.hookLayout,
+                          bottomScalePct: val,
+                          autoFitBottomToTop: false
+                        }
                       }));
                     }}
                     className="w-full accent-amber-400 cursor-pointer"
@@ -3001,7 +3323,12 @@ const renderSlotToCanvas = useCallback(
                       { id: 'top_left', label: 'Левый верхний угол', x: 25, y: 24 },
                       { id: 'bottom_left', label: 'Левый нижний угол', x: 25, y: 76 },
                       { id: 'bottom_right', label: 'Правый нижний угол', x: 75, y: 76 }
-                    ] as Array<{ id: CornerPositionPresetId; label: string; x: number; y: number }>
+                    ] as Array<{
+                      id: CornerPositionPresetId;
+                      label: string;
+                      x: number;
+                      y: number;
+                    }>
                   ).map(corner => {
                     const isActive =
                       Math.abs(activeConfig.hookLayout.xPct - corner.x) <= 4 &&
@@ -3154,6 +3481,7 @@ const renderSlotToCanvas = useCallback(
                   </button>
                 </div>
               </div>
+
               {activeConfig.badgesEnabled && (
                 <>
                   <div className="flex items-center gap-2">
@@ -3176,7 +3504,11 @@ const renderSlotToCanvas = useCallback(
                               position: oldItem?.position === 'right' ? 'right' : 'left'
                             };
                           }
-                          return { ...prev, presetBadges: cleared, customBadgeEnabled: false };
+                          return {
+                            ...prev,
+                            presetBadges: cleared,
+                            customBadgeEnabled: false
+                          };
                         })
                       }
                       className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#0b0f19] hover:bg-rose-950/35 border border-white/[0.1] hover:border-rose-500/45 text-[10.5px] font-bold text-white/75 hover:text-rose-200 shrink-0 cursor-pointer transition"
@@ -3184,14 +3516,18 @@ const renderSlotToCanvas = useCallback(
                       Выключить все
                     </button>
                   </div>
+
                   {baseGroupPresets.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-white/55">База</div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-white/55">
+                        База
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {baseGroupPresets.map(renderPresetCard)}
                       </div>
                     </div>
                   )}
+
                   {ambienceGroupPresets.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300/80">
@@ -3202,11 +3538,13 @@ const renderSlotToCanvas = useCallback(
                       </div>
                     </div>
                   )}
+
                   {baseGroupPresets.length === 0 && ambienceGroupPresets.length === 0 && (
                     <div className="text-center py-3 text-[11px] text-white/45 bg-[#090D16] rounded-xl border border-white/[0.06]">
                       Нет бейджей, подходящих под «{badgeFilterQuery}»
                     </div>
                   )}
+
                   <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
@@ -3239,7 +3577,8 @@ const renderSlotToCanvas = useCallback(
                           updateSlotConfig(activeSlot, prev => ({
                             ...prev,
                             customBadgeText: val,
-                            customBadgeEnabled: val.trim().length > 0 ? true : prev.customBadgeEnabled
+                            customBadgeEnabled:
+                              val.trim().length > 0 ? true : prev.customBadgeEnabled
                           }));
                         }}
                         placeholder="СВОЙ ТЕКСТ КАПСУЛЫ..."
@@ -3281,6 +3620,7 @@ const renderSlotToCanvas = useCallback(
                       </div>
                     </div>
                   </div>
+
                   <div className="space-y-1 pt-0.5">
                     <div className="flex items-center justify-between text-[10.5px]">
                       <span className="text-white/70 font-semibold">Размер бейджей</span>
@@ -3344,8 +3684,12 @@ const renderSlotToCanvas = useCallback(
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-white/80 font-semibold">Резкость / микроконтраст базового кадра</span>
-                <span className="font-mono font-bold text-cyan-300 tabular-nums">{baseSharpenPct}%</span>
+                <span className="text-white/80 font-semibold">
+                  Резкость / микроконтраст базового кадра
+                </span>
+                <span className="font-mono font-bold text-cyan-300 tabular-nums">
+                  {baseSharpenPct}%
+                </span>
               </div>
               <input
                 type="range"
@@ -3357,6 +3701,7 @@ const renderSlotToCanvas = useCallback(
                 className="w-full accent-cyan-400 cursor-pointer"
               />
             </div>
+
             <div className="pt-3 border-t border-white/[0.08] space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
@@ -3386,7 +3731,10 @@ const renderSlotToCanvas = useCallback(
                 <button
                   type="button"
                   onClick={() =>
-                    updateSlotConfig(activeSlot, prev => ({ ...prev, bgAdjust: { ...DEFAULT_BG_ADJUST } }))
+                    updateSlotConfig(activeSlot, prev => ({
+                      ...prev,
+                      bgAdjust: { ...DEFAULT_BG_ADJUST }
+                    }))
                   }
                   className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#111827]/85 hover:bg-white/[0.08] border border-white/[0.1] text-white/75 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer transition"
                 >
@@ -3397,7 +3745,9 @@ const renderSlotToCanvas = useCallback(
               <div className="space-y-2 bg-[#111827]/75 border border-white/[0.06] rounded-xl p-3">
                 <div className="space-y-0.5">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-white/80 font-semibold">Контраст (Глубина теней и света)</span>
+                    <span className="text-white/80 font-semibold">
+                      Контраст (Глубина теней и света)
+                    </span>
                     <span className="font-mono font-bold text-amber-300 tabular-nums">
                       {activeConfig.bgAdjust.contrastPct}%
                     </span>
@@ -3409,7 +3759,10 @@ const renderSlotToCanvas = useCallback(
                     step="any"
                     value={activeConfig.bgAdjust.contrastPct}
                     onChange={e => {
-                      const snapped = Math.max(80, Math.min(165, Math.round(Number(e.target.value) / 5) * 5));
+                      const snapped = Math.max(
+                        80,
+                        Math.min(165, Math.round(Number(e.target.value) / 5) * 5)
+                      );
                       updateSlotConfig(activeSlot, prev => ({
                         ...prev,
                         bgAdjust: { ...prev.bgAdjust, contrastPct: snapped }
@@ -3432,7 +3785,10 @@ const renderSlotToCanvas = useCallback(
                     step="any"
                     value={activeConfig.bgAdjust.brightnessPct}
                     onChange={e => {
-                      const snapped = Math.max(85, Math.min(135, Math.round(Number(e.target.value) / 5) * 5));
+                      const snapped = Math.max(
+                        85,
+                        Math.min(135, Math.round(Number(e.target.value) / 5) * 5)
+                      );
                       updateSlotConfig(activeSlot, prev => ({
                         ...prev,
                         bgAdjust: { ...prev.bgAdjust, brightnessPct: snapped }
@@ -3455,7 +3811,10 @@ const renderSlotToCanvas = useCallback(
                     step="any"
                     value={activeConfig.bgAdjust.vibrancePct}
                     onChange={e => {
-                      const snapped = Math.max(90, Math.min(125, Math.round(Number(e.target.value) / 5) * 5));
+                      const snapped = Math.max(
+                        90,
+                        Math.min(125, Math.round(Number(e.target.value) / 5) * 5)
+                      );
                       updateSlotConfig(activeSlot, prev => ({
                         ...prev,
                         bgAdjust: { ...prev.bgAdjust, vibrancePct: snapped }
@@ -3482,7 +3841,8 @@ const renderSlotToCanvas = useCallback(
                   title={lastExportReport[activeSlot]?.filename}
                   className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-400/35 px-2 py-0.5 rounded-md tabular-nums"
                 >
-                  {lastExportReport[activeSlot]?.formatLabel}: {lastExportReport[activeSlot]?.sizeText}
+                  {lastExportReport[activeSlot]?.formatLabel}:{' '}
+                  {lastExportReport[activeSlot]?.sizeText}
                 </span>
               )}
             </div>
@@ -3539,7 +3899,9 @@ const renderSlotToCanvas = useCallback(
               ) : (
                 <Download className="w-4 h-4 text-amber-300 shrink-0" />
               )}
-              <span>{batchExportStatus || '📦 Скачать все 3 обложки A/B/C для YouTube (< 2 МБ)'}</span>
+              <span>
+                {batchExportStatus || '📦 Скачать все 3 обложки A/B/C для YouTube (< 2 МБ)'}
+              </span>
             </button>
             {onSendToArtEditor && (
               <button
@@ -3608,6 +3970,7 @@ const renderSlotToCanvas = useCallback(
                     </span>
                   </div>
                 </div>
+
                 <div className="aether-preview-frame group/previewActive">
                   <div className="relative w-full aspect-video rounded-[15px] overflow-hidden bg-[#05080f]">
                     <canvas
@@ -3625,7 +3988,9 @@ const renderSlotToCanvas = useCallback(
                         title="Зажмите и перетащите текст-хук в любую точку кадра"
                         onPointerDown={e => startHookDrag(e, activeSlot)}
                         onPointerEnter={() => setHoveredSlot(activeSlot)}
-                        onPointerLeave={() => setHoveredSlot(prev => (prev === activeSlot ? null : prev))}
+                        onPointerLeave={() =>
+                          setHoveredSlot(prev => (prev === activeSlot ? null : prev))
+                        }
                         style={{
                           left: `${activeHookBox.leftPct}%`,
                           top: `${activeHookBox.topPct}%`,
@@ -3641,4 +4006,822 @@ const renderSlotToCanvas = useCallback(
                         }`}
                       />
                     )}
-                    {showEndScreenSafeZone & 
+                    {showEndScreenSafeZone && (
+                      <div className="pointer-events-none absolute inset-0 z-10">
+                        <div className="absolute inset-[5%] border border-dashed border-emerald-400/35 rounded-lg" />
+                        <div className="absolute right-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/65 bg-cyan-500/10 flex flex-col items-center justify-center text-center p-1">
+                          <span className="text-[9px] font-mono font-bold text-cyan-200 uppercase">
+                            End Screen Card
+                          </span>
+                          <span className="text-[8px] font-mono text-cyan-300/80">
+                            {effectiveEndScreenSafeZone}
+                          </span>
+                        </div>
+                        <div className="absolute left-[6%] bottom-[16%] w-[30%] h-[30%] rounded-lg border border-dashed border-cyan-300/45 bg-cyan-500/5 flex flex-col items-center justify-center text-center p-1">
+                          <span className="text-[9px] font-mono font-bold text-cyan-200/85 uppercase">
+                            Next Video Slot
+                          </span>
+                        </div>
+                        <div className="absolute top-2.5 left-2.5 bg-[#0b0f19]/85 backdrop-blur-md border border-emerald-400/40 text-emerald-300 font-mono text-[9.5px] px-2 py-0.5 rounded-md">
+                          Safe-Zone • End Screen {effectiveEndScreenSafeZone}
+                        </div>
+                      </div>
+                    )}
+                    {showYoutubeOverlay && (
+                      <>
+                        <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-0 group-hover/previewActive:opacity-100 transition-opacity duration-300">
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-r border-b border-white/10" />
+                          <div className="border-b border-white/10" />
+                          <div className="border-r border-white/10" />
+                          <div className="border-r border-white/10" />
+                          <div />
+                        </div>
+                        <div className="pointer-events-none absolute bottom-2.5 right-2.5 bg-black/90 text-[#f8fafc] font-mono font-bold text-xs px-2 py-0.5 rounded-md shadow-md border border-white/15">
+                          {youtubeDurationBadge}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {activeHookBox && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/55 px-1">
+                    <span className="flex items-center gap-1.5">
+                      <Move className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        Перетащите заголовок Варианта {activeSlot} мышью или пальцем по кадру
+                      </span>
+                    </span>
+                    <span className="font-mono text-amber-300/90 tabular-nums">
+                      X:{Math.round(activeConfig.hookLayout.xPct)}% • Y:
+                      {Math.round(activeConfig.hookLayout.yPct)}% • S1:
+                      {activeConfig.hookLayout.topScalePct}% / S2:
+                      {activeConfig.hookLayout.bottomScalePct}%
+                    </span>
+                  </div>
+                )}
+
+                {showYoutubeOverlay && (
+                  <div className="flex items-start gap-3 pt-1 px-1">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-xs shrink-0 shadow-md">
+                      4K
+                    </div>
+                    <div className="space-y-0.5 min-w-0 flex-1">
+                      <input
+                        type="text"
+                        value={youtubeVideoHeading}
+                        onChange={e => setYoutubeVideoHeading(e.target.value)}
+                        className="w-full bg-transparent text-sm font-bold text-[#f8fafc] outline-none focus:border-b focus:border-emerald-400 truncate"
+                      />
+                      <div className="text-xs text-white/55 flex items-center gap-1.5 flex-wrap">
+                        <span>{youtubeChannelName}</span>
+                        <span className="text-[10px] bg-white/10 text-white/80 px-1.5 rounded-full">
+                          ✓
+                        </span>
+                        <span className="font-mono text-[11px]">
+                          • 428K views • 2h ago • Слот {activeSlot}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-[#f8fafc] uppercase tracking-wider flex items-center gap-2">
+                    <Columns className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Сравнение A / B / C в ленте YouTube</span>
+                  </h3>
+                  <p className="text-[11px] text-white/55 mt-0.5">
+                    Нажмите на любую карточку, чтобы перейти к редактированию слота
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 bg-[#080c14]/90 border border-white/[0.08] rounded-xl p-1">
+                  {(
+                    [
+                      { id: 'both', label: 'Все форматы' },
+                      { id: 'desktop', label: 'Десктоп 16:9' },
+                      { id: 'mobile', label: 'Мобильный' }
+                    ] as const
+                  ).map(mode => (
+                    <button
+                      key={`feed-mode-${mode.id}`}
+                      type="button"
+                      onClick={() => setFeedViewportMode(mode.id)}
+                      className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[10.5px] font-bold cursor-pointer transition ${
+                        feedViewportMode === mode.id
+                          ? 'bg-amber-400/20 text-amber-200 border border-amber-400/45'
+                          : 'text-white/60 hover:text-white'
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(feedViewportMode === 'both' || feedViewportMode === 'desktop') && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-white/60">
+                    <span className="font-bold uppercase tracking-wider text-white/80">
+                      🖥️ Десктопная лента YouTube (16:9)
+                    </span>
+                    <span className="font-mono text-[10px]">Desktop Home Feed Grid</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                    {(
+                      [
+                        {
+                          slot: 'A' as const,
+                          ref: feedCanvasARef,
+                          badge: '🅰️ Вариант A',
+                          borderActive: 'border-amber-400/70 ring-1 ring-amber-400/35'
+                        },
+                        {
+                          slot: 'B' as const,
+                          ref: feedCanvasBRef,
+                          badge: '🅱️ Вариант B',
+                          borderActive: 'border-emerald-400/70 ring-1 ring-emerald-400/35'
+                        },
+                        {
+                          slot: 'C' as const,
+                          ref: feedCanvasCRef,
+                          badge: '🅲 Вариант C',
+                          borderActive: 'border-cyan-400/70 ring-1 ring-cyan-400/35'
+                        }
+                      ]
+                    ).map(item => {
+                      const isCurrent = activeSlot === item.slot;
+                      return (
+                        <div
+                          key={`desktop-feed-card-${item.slot}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setActiveSlot(item.slot)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setActiveSlot(item.slot);
+                            }
+                          }}
+                          className={`rounded-2xl p-2.5 bg-[#080c14]/85 border transition cursor-pointer space-y-2.5 ${
+                            isCurrent ? item.borderActive : 'border-white/[0.08] hover:border-white/25'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[10.5px] font-bold">
+                            <span className="text-[#f8fafc]">{item.badge}</span>
+                            <span className="font-mono text-white/50">
+                              {isCurrent ? 'ACTIVE' : 'Клик → Ред.'}
+                            </span>
+                          </div>
+                          <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black border border-white/[0.08]">
+                            <canvas
+                              ref={item.ref}
+                              width={640}
+                              height={360}
+                              className={`w-full h-full object-cover ${
+                                bwContrastFilter ? 'grayscale contrast-125' : ''
+                              }`}
+                            />
+                            <div className="pointer-events-none absolute bottom-1.5 right-1.5 bg-black/90 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded">
+                              {youtubeDurationBadge}
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2 pt-0.5">
+                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-slate-950 font-black font-mono text-[9px] shrink-0">
+                              4K
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-[#f8fafc] line-clamp-2 leading-snug">
+                                {youtubeVideoHeading}
+                              </p>
+                              <p className="text-[10.5px] text-white/50 truncate mt-0.5">
+                                {youtubeChannelName} • 428K views
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(feedViewportMode === 'both' || feedViewportMode === 'mobile') && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-white/60">
+                    <span className="font-bold uppercase tracking-wider text-white/80 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Мобильная лента YouTube (реальный масштаб)</span>
+                    </span>
+                    <span className="font-mono text-[10px]">160×90 px Readability</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(
+                      [
+                        { slot: 'A' as const, ref: mobileFeedCanvasARef, tag: '🅰️ A' },
+                        { slot: 'B' as const, ref: mobileFeedCanvasBRef, tag: '🅱️ B' },
+                        { slot: 'C' as const, ref: mobileFeedCanvasCRef, tag: '🅲 C' }
+                      ]
+                    ).map(item => (
+                      <button
+                        key={`mobile-feed-card-${item.slot}`}
+                        type="button"
+                        onClick={() => setActiveSlot(item.slot)}
+                        className={`text-left rounded-2xl p-2.5 bg-[#090d16]/95 border flex items-center gap-3 cursor-pointer transition ${
+                          activeSlot === item.slot
+                            ? 'border-amber-400/60 bg-amber-500/[0.06]'
+                            : 'border-white/[0.08] hover:border-white/25'
+                        }`}
+                      >
+                        <div className="relative w-[144px] h-[81px] sm:w-[160px] sm:h-[90px] rounded-lg overflow-hidden bg-black border border-white/15 shrink-0">
+                          <canvas
+                            ref={item.ref}
+                            width={320}
+                            height={180}
+                            className={`w-full h-full block ${
+                              bwContrastFilter ? 'grayscale contrast-125' : ''
+                            }`}
+                          />
+                          <div className="pointer-events-none absolute bottom-1 right-1 bg-black/90 text-white font-mono text-[9px] font-bold px-1 rounded">
+                            {youtubeDurationBadge}
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <span className="text-[10.5px] font-mono font-bold text-amber-300 block">
+                            {item.tag} •{' '}
+                            {slotConfigs[item.slot].badgesEnabled
+                              ? BADGE_PRESETS_CONFIG.filter(
+                                  p => slotConfigs[item.slot].presetBadges?.[p.id]?.enabled
+                                ).length +
+                                (slotConfigs[item.slot].customBadgeEnabled &&
+                                slotConfigs[item.slot].customBadgeText.trim()
+                                  ? 1
+                                  : 0)
+                              : 0}{' '}
+                            бейдж(а)
+                          </span>
+                          <p className="text-[11px] font-semibold text-[#f8fafc] line-clamp-2 leading-tight">
+                            {youtubeVideoHeading}
+                          </p>
+                          <p className="text-[10px] text-white/45 truncate">
+                            {slotConfigs[item.slot].topText || '(Без текста)'}
+                            {slotConfigs[item.slot].bottomText
+                              ? ` + ${slotConfigs[item.slot].bottomText}`
+                              : ''}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="aether-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-4">
+              <div className="relative w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/15 bg-black shrink-0 shadow-lg">
+                <canvas
+                  ref={mobileCanvasRef}
+                  width={320}
+                  height={180}
+                  className={`w-[160px] h-[90px] block ${
+                    bwContrastFilter ? 'grayscale contrast-125' : ''
+                  }`}
+                />
+                <div className="pointer-events-none absolute bottom-1 right-1 bg-black/90 text-white font-mono text-[9px] font-bold px-1 rounded">
+                  {youtubeDurationBadge}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs font-bold text-[#f8fafc] flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Мобильный масштаб • Слот {activeSlot} (160×90 px)</span>
+                </span>
+                <p className="text-xs text-white/55 max-w-md leading-relaxed">
+                  Контроль читаемости заголовка, верхнего ряда бейджей и таймкода{' '}
+                  <code className="font-mono text-amber-300">{youtubeDurationBadge}</code> в ленте
+                  смартфона.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/55">Таймкод:</span>
+              <input
+                type="text"
+                value={youtubeDurationBadge}
+                onChange={e => setYoutubeDurationBadge(e.target.value)}
+                className="w-24 min-h-[40px] bg-[#080c14] border border-white/[0.1] rounded-xl px-3 py-1.5 text-xs font-mono text-amber-300 outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="aether-surface rounded-2xl p-5 sm:p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <Grid className="w-5 h-5 text-cyan-400 shrink-0" />
+            <div>
+              <h3 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+                Галерея сцен и обложек 2×2 (Flux.1 • 16:9)
+              </h3>
+              <p className="text-xs text-white/55">
+                Выберите любую карточку для установки в мастер-слот (window.selectedMasterThumbnail)
+                {lastModelUsed ? ` • ${lastModelUsed}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={localMediaInputRef}
+              type="file"
+              accept="video/*,image/png,image/jpeg,image/webp,.mp4,.mov,.webm,.png,.jpg,.jpeg"
+              onChange={handleSliceLocalMediaToGrid}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => localMediaInputRef.current?.click()}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
+              className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-amber-400/40 text-amber-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
+            >
+              {isSlicingLocalMedia ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              <span>Кадр из локального видео/арта</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleGenerateProceduralBatchFallback(activeSlot)}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
+              className="min-h-[44px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-[#f8fafc] font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            >
+              <span>🎨 4 локальных фона</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleGenerateFluxCover(activeSlot)}
+              disabled={isGeneratingCovers || isSlicingLocalMedia}
+              className="min-h-[44px] btn-primary-action px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
+            >
+              {isGeneratingCovers ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Wand2 className="w-4 h-4" />
+              )}
+              <span>
+                {isGeneratingCovers
+                  ? buttonQueueStatus || 'Ожидание AI Horde...'
+                  : isCloudflareConfigured
+                    ? 'Cloudflare Flux (2×2)'
+                    : 'Flux.1 AI Horde (2×2)'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {generationError && (
+          <div
+            role="alert"
+            className="w-full max-w-md rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 border bg-rose-950/75 border-rose-500/60 text-rose-200"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span title={generationError} className="truncate font-semibold">
+                {generationError}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGenerationError(null)}
+              className="text-[11px] text-white/55 hover:text-white shrink-0 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {isGeneratingCovers || isSlicingLocalMedia ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 py-2 text-xs font-bold text-cyan-300">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span className="font-mono">
+                {isSlicingLocalMedia
+                  ? 'Нарезка 4 вариантов превью (16:9) из локального видео/арта...'
+                  : generationStatusText || 'Генерация 4 чистых 16:9 обложек (Flux.1-Schnell)...'}
+              </span>
+              {isGeneratingCovers && (
+                <button
+                  type="button"
+                  onClick={handleCancelGeneration}
+                  className="min-h-[36px] bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/50 text-rose-200 px-3 py-1 rounded-lg text-[11px] cursor-pointer"
+                >
+                  Отменить
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4">
+              {[0, 1, 2, 3].map(skeletonIdx => (
+                <div
+                  key={`skeleton-${skeletonIdx}`}
+                  className="aspect-video w-full rounded-2xl bg-[#080c14]/90 border border-white/[0.08] animate-pulse flex flex-col items-center justify-center gap-2 p-4"
+                >
+                  <Wand2 className="w-6 h-6 text-cyan-400/60 animate-bounce" />
+                  <span className="text-[11px] font-mono text-white/55 text-center">
+                    {isSlicingLocalMedia
+                      ? `Подготовка кадра #${skeletonIdx + 1}...`
+                      : `Flux.1-Schnell 1344×768 • Вариант #${skeletonIdx + 1}...`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div
+            id="flux-thumbnails-grid-container"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full my-4"
+          >
+            {batchVariants.map((imgSrc, index) => {
+              const isMaster = selectedMasterVariantIdx === index;
+              const isAttached = attachedToYoutubeIdx === index;
+              const sceneLabel = variantLabels[index] || `Вариант #${index + 1}`;
+              return (
+                <div
+                  key={`grid-variant-${index}`}
+                  data-index={index}
+                  onClick={e => {
+                    const target = e.target as HTMLElement | null;
+                    if (target && target.tagName.toLowerCase() === 'a') return;
+                    handleSelectBatchVariant(index, activeSlot);
+                  }}
+                  className={`scene-card-interactive relative group rounded-2xl overflow-hidden border bg-[#080c14]/90 cursor-pointer flex flex-col justify-between ${
+                    isMaster
+                      ? 'border-cyan-400 ring-2 ring-cyan-400/40 shadow-[0_12px_32px_-8px_rgba(6,182,212,0.45)]'
+                      : 'border-white/[0.08] hover:border-cyan-400/60'
+                  }`}
+                >
+                  <div className="relative w-full aspect-video overflow-hidden">
+                    <img
+                      src={imgSrc}
+                      alt={`${sceneLabel} (${index + 1})`}
+                      className={`w-full aspect-video object-cover ${
+                        bwContrastFilter ? 'grayscale contrast-125' : ''
+                      }`}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
+                      <span className="text-xs font-mono font-semibold text-white bg-black/70 px-2.5 py-1 rounded-lg truncate max-w-[55%]">
+                        {sceneLabel}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setZoomedVariantIdx(index);
+                          }}
+                          className="min-h-[36px] text-xs bg-slate-900/90 hover:bg-black text-cyan-300 border border-cyan-400/40 font-bold px-2.5 py-1 rounded-lg shadow cursor-pointer"
+                        >
+                          🔍 Увеличить
+                        </button>
+                        <a
+                          href={imgSrc}
+                          download={`thumbnail_${index + 1}.jpg`}
+                          onClick={e => e.stopPropagation()}
+                          className="min-h-[36px] flex items-center text-xs bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-bold px-2.5 py-1 rounded-lg shadow"
+                        >
+                          Скачать
+                        </a>
+                      </div>
+                    </div>
+                    <div
+                      className={`selection-indicator ${
+                        isMaster ? '' : 'hidden'
+                      } absolute top-2.5 right-2.5 bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950 text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg`}
+                    >
+                      ✓
+                    </div>
+                  </div>
+                  <div className="p-3 bg-[#0f1623]/90 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs min-w-0">
+                      <span className="font-mono font-bold text-[#f8fafc] shrink-0">
+                        #{index + 1}
+                      </span>
+                      <span
+                        className="text-[11px] text-white/55 truncate max-w-[180px]"
+                        title={sceneLabel}
+                      >
+                        {sceneLabel}
+                      </span>
+                      {isMaster && (
+                        <span className="text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-400/35 px-2 py-0.5 rounded-full shrink-0">
+                          MASTER
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setZoomedVariantIdx(index);
+                        }}
+                        aria-label={`Увеличить вариант #${index + 1}`}
+                        title="Увеличить кадр"
+                        className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-cyan-300 text-xs font-bold flex items-center justify-center cursor-pointer"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDownloadVariantFromGrid(index);
+                        }}
+                        className="min-h-[40px] btn-primary-action py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>📥 Скачать 4K</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleAttachToYoutubeRelease(index);
+                        }}
+                        className={`min-h-[40px] font-bold py-1.5 px-3 rounded-xl text-[11px] flex items-center gap-1.5 cursor-pointer border ${
+                          isAttached
+                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                            : 'bg-white/[0.05] hover:bg-white/[0.1] border-white/[0.1] text-cyan-300'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{isAttached ? '✓ В релизе' : 'В релиз'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <div className="aether-surface rounded-2xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowVideoExtractor(prev => !prev)}
+            className="w-full min-h-[56px] p-4 sm:p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center shrink-0">
+                <Camera className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-[#f8fafc] truncate">
+                  1. Авто-экстрактор 4K стоп-кадра из видео
+                </h3>
+                <p className="text-[11px] text-white/55 truncate">
+                  Точный захват кадра по секунде в честном разрешении 3840×2160
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-mono text-amber-300/85">3840×2160</span>
+              <ChevronDown
+                className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                  showVideoExtractor ? 'rotate-180 text-amber-400' : ''
+                }`}
+              />
+            </div>
+          </button>
+          {showVideoExtractor && (
+            <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleSelectVideoForExtraction}
+                  className="text-xs text-white/60 file:mr-3 file:min-h-[40px] file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-gradient-to-r file:from-amber-400 file:to-orange-500 file:text-slate-950 cursor-pointer"
+                />
+                {videoFileName && (
+                  <span className="text-[11px] font-mono text-emerald-300 truncate max-w-xs">
+                    Файл: {videoFileName}
+                  </span>
+                )}
+              </div>
+              {videoUrl ? (
+                <div className="space-y-3">
+                  <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/[0.1]">
+                    <video
+                      ref={videoRef}
+                      src={videoUrl}
+                      onLoadedMetadata={e => setVideoDuration(e.currentTarget.duration || 10)}
+                      className="w-full h-full object-contain"
+                      controls
+                      muted
+                    />
+                  </div>
+                  <div className="bg-[#080c14]/80 border border-white/[0.08] rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-[#f8fafc] font-semibold">
+                        Таймкод секунды стоп-кадра:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={videoDuration || 3600}
+                          step={0.1}
+                          value={seekTimeSec}
+                          onChange={e => handleSeekVideo(Number(e.target.value) || 0)}
+                          className="w-20 min-h-[38px] bg-[#0f1623] border border-amber-400/40 rounded-lg px-2 py-1 text-xs font-mono text-amber-300 text-center outline-none"
+                        />
+                        <span className="text-[11px] font-mono text-white/55">
+                          / {videoDuration.toFixed(1)}s
+                        </span>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={videoDuration || 10}
+                      step={0.05}
+                      value={seekTimeSec}
+                      onChange={e => handleSeekVideo(Number(e.target.value))}
+                      className="w-full accent-amber-400 cursor-pointer"
+                    />
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('A')}
+                        className="min-h-[44px] btn-artistic-premium py-2 px-2.5 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Слот A (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('B')}
+                        className="min-h-[44px] bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 font-bold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Слот B (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('C')}
+                        className="min-h-[44px] bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 font-bold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
+                      >
+                        📸 В Слот C (4K)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => capture4KKeyframe('download')}
+                        className="min-h-[44px] bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[#f8fafc] font-semibold py-2 px-2.5 rounded-xl text-xs cursor-pointer"
+                      >
+                        💾 Скачать 4K
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#080c14]/70 border border-dashed border-white/[0.1] rounded-xl p-6 text-center space-y-1">
+                  <Film className="w-7 h-7 text-amber-400/70 mx-auto mb-1" />
+                  <p className="text-xs font-semibold text-[#f8fafc]">
+                    Загрузите видеофайл (.mp4 / .mov / .webm) для авто-экстракта 4K стоп-кадра
+                  </p>
+                  <p className="text-[11px] text-white/55">
+                    Точный выбор секунды и мгновенный захват кадра в 3840×2160 без потери четкости
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="aether-surface rounded-2xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowPromptGenerator(prev => !prev)}
+            className="w-full min-h-[56px] p-4 sm:p-5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-white/[0.02]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center shrink-0">
+                <Layers className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-[#f8fafc] truncate">
+                  2. Конструктор визуального промпта (Flux.1 / Midjourney)
+                </h3>
+                <p className="text-[11px] text-white/55 truncate">
+                  Пресеты атмосферы и тонкая настройка English-промпта 16:9
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-mono text-emerald-300/85">PROMPT LAB</span>
+              <ChevronDown
+                className={`w-4 h-4 text-white/60 transition-transform duration-200 ${
+                  showPromptGenerator ? 'rotate-180 text-emerald-400' : ''
+                }`}
+              />
+            </div>
+          </button>
+          {showPromptGenerator && (
+            <div className="px-5 pb-5 pt-2 border-t border-white/[0.08] space-y-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/55 uppercase block">
+                  Визуальный стиль (пилюли-пресеты):
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { id: 'mystery_dark', label: '🕵️ Dark Mystery (Chiaroscuro)' },
+                    { id: 'ambient_4k', label: '❄️ Cozy Ambient 4K (Огонь vs Лёд)' },
+                    { id: 'truecrime_contrast', label: '📁 True Crime (Гриф SECRET)' },
+                    { id: 'scifi_neon', label: '📡 Anomalous Signal (Неон)' }
+                  ].map(preset => {
+                    const active = promptStylePreset === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setPromptStylePreset(
+                            preset.id as
+                              | 'mystery_dark'
+                              | 'ambient_4k'
+                              | 'truecrime_contrast'
+                              | 'scifi_neon'
+                          );
+                          setCustomFluxPrompt('');
+                        }}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold text-left border cursor-pointer ${
+                          active
+                            ? 'btn-artistic-premium'
+                            : 'bg-[#080c14]/80 border-white/[0.08] text-white/70 hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono text-white/55 uppercase block">
+                  Промпт для Flux.1-Schnell (1344×768 / 16:9):
+                </label>
+                <textarea
+                  rows={4}
+                  value={activePromptText}
+                  onChange={e => setCustomFluxPrompt(e.target.value)}
+                  className="w-full bg-[#080c14]/90 border border-white/[0.1] focus:border-emerald-400 rounded-xl p-3.5 text-xs font-mono text-emerald-300 leading-relaxed outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleGenerateFluxCover(activeSlot)}
+                  disabled={isGeneratingCovers}
+                  className="min-h-[44px] btn-primary-action py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>
+                    {isGeneratingCovers
+                      ? buttonQueueStatus || 'Ожидание AI Horde...'
+                      : 'Сгенерировать 2×2 по промпту'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={copyCoverPromptForWebGenerator}
+                  className="min-h-[44px] btn-artistic-premium py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {copiedPrompt ? (
+                    <>
+                      <Check className="w-4 h-4" /> Промпт скопирован!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" /> 📋 Скопировать промпт
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
