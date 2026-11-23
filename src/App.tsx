@@ -4411,9 +4411,9 @@ export default function App() {
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
             encodeManifestBase64={encodeManifestBase64}
-            terminalStatus={terminalRunnerStatus}
+            terminalStatus={renderStatus.visible ? 'idle' : terminalRunnerStatus}
             terminalSeconds={renderStatus.seconds}
-            terminalLogs={terminalLogs}
+            terminalLogs={renderStatus.visible ? [] : terminalLogs}
             terminalRunUrl={renderStatus.runUrl}
             onClearTerminalLogs={clearTerminalLogs}
             onCancelRenderRun={cancelActiveRenderRun}
@@ -6665,21 +6665,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-
-            <LiveTerminal
-              status={terminalRunnerStatus}
-              elapsedSeconds={renderStatus.seconds}
-              logs={terminalLogs}
-              runUrl={renderStatus.runUrl}
-              onClearLogs={clearTerminalLogs}
-              onCopyLogs={() => {
-                navigator.clipboard.writeText(
-                  terminalLogs.map(l => sanitizeLogText(l.text)).join('\n')
-                );
-                showToast('Лог скопирован (секреты замаскированы)', 'info');
-              }}
-              onCancelRun={cancelActiveRenderRun}
-            />
 
             <div className="bg-[#0b0f17] border border-sky-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
