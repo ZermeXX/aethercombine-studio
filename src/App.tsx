@@ -4411,9 +4411,10 @@ export default function App() {
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
             encodeManifestBase64={encodeManifestBase64}
-            terminalStatus={renderStatus.visible ? 'idle' : terminalRunnerStatus}
-            terminalSeconds={renderStatus.seconds}
-            terminalLogs={renderStatus.visible ? [] : terminalLogs}
+            hideEmbeddedTerminal={true}
+            terminalStatus="idle"
+            terminalSeconds={0}
+            terminalLogs={[]}
             terminalRunUrl={renderStatus.runUrl}
             onClearTerminalLogs={clearTerminalLogs}
             onCancelRenderRun={cancelActiveRenderRun}
