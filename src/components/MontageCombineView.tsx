@@ -31,7 +31,6 @@ import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
 import { AnimatedNumber, AnimatedDurationText } from './MotionMetrics';
 import {
-  LiveTerminal,
   TerminalLogEntry,
   TerminalRunnerState,
   formatTerminalTime
@@ -5483,16 +5482,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
         </div>
 
-        {/* Интерактивный студийный терминал (LiveTerminal) на месте бывшего JSON-манифеста */}
-        <LiveTerminal
-          status={terminalStatus}
-          elapsedSeconds={terminalSeconds}
-          logs={terminalLogs}
-          runUrl={terminalRunUrl}
-          onClearLogs={onClearTerminalLogs}
-          onCopyLogs={() => onNotify('Лог терминала скопирован в буфер обмена', 'info')}
-          onCancelRun={onCancelRenderRun}
-        />
       </div>
     </div>
   );
