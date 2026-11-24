@@ -4411,7 +4411,6 @@ export default function App() {
             onStartRenderStatus={showStatusBar}
             onNotify={showToast}
             encodeManifestBase64={encodeManifestBase64}
-            hideEmbeddedTerminal={true}
             terminalStatus="idle"
             terminalSeconds={0}
             terminalLogs={[]}
