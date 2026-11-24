@@ -14,27 +14,10 @@ export default defineConfig(() => {
     },
     build: {
       target: 'es2022',
-      chunkSizeWarningLimit: 1600,
-      rollupOptions: {
-        output: {
-          manualChunks(id: string) {
-            if (id.includes('node_modules')) {
-              if (id.includes('pdfjs-dist')) return 'vendor-pdfjs';
-              if (id.includes('motion')) return 'vendor-motion';
-              if (id.includes('lucide-react')) return 'vendor-icons';
-              if (
-                id.includes('react-dom') ||
-                id.includes('scheduler') ||
-                id.includes('/react/')
-              ) {
-                return 'vendor-react';
-              }
-              return 'vendor';
-            }
-            return undefined;
-          },
-        },
-      },
+      // Vite 8 (Rolldown) не поддерживает rollup manualChunks; бандл студии
+      // (pdfjs + motion + lucide + canvas) сознательно единый (~1.68 MB min).
+      // Поднимаем порог предупреждения, чтобы оно не шумело в CI/логе.
+      chunkSizeWarningLimit: 2000,
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
