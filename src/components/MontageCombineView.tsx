@@ -318,6 +318,27 @@ export interface ShortsAutoSliceConfig {
   upload_to_gdrive: boolean;
 }
 
+type BroadcastConfig = {
+  enabled: boolean;
+  style: 'histoviva_broadcast_en';
+  emblem_path: string;
+  show_sec: [number, number];
+  anim_sec: number;
+  bar_bg_rgba: [number, number, number, number];
+};
+function normalizeBroadcastConfig(value: unknown): BroadcastConfig {
+  const c = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const num = (v: unknown, fallback: number, max: number) => typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(0, v)) : fallback;
+  const show = Array.isArray(c.show_sec) ? c.show_sec : [];
+  const start = num(show[0], 0.5, 3600);
+  const end = Math.max(start + 0.05, num(show[1], 5.5, 3600));
+  const rgba = Array.isArray(c.bar_bg_rgba) ? c.bar_bg_rgba : [];
+  return { enabled: c.enabled !== false, style: 'histoviva_broadcast_en',
+    emblem_path: typeof c.emblem_path === 'string' && c.emblem_path.trim() ? c.emblem_path.trim() : 'aether_art_150x150_A.png',
+    show_sec: [start, end], anim_sec: Math.min((end-start)/2, num(c.anim_sec, 0.55, 10)),
+    bar_bg_rgba: [Math.round(num(rgba[0],10,255)), Math.round(num(rgba[1],14,255)), Math.round(num(rgba[2],18,255)), Math.round(num(rgba[3],214,255))] };
+}
+
 export interface NarrativeExportSettings {
   resolution: '4k' | '1080p' | '720p';
   aspect_ratio: '16:9' | '9:16';
@@ -332,6 +353,7 @@ export interface NarrativeExportSettings {
   fps: 24 | 30 | 60;
   audio_bitrate_kbps: 320 | 256 | 192;
   preview_duration_sec?: number;
+  lower_third_config?: BroadcastConfig;
   subtitles?: SubtitlesFlexibleConfig;
 }
 
@@ -2255,6 +2277,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           fps,
           crf,
           bitrate_mbps,
+          lower_third_config: normalizeBroadcastConfig(exp?.lower_third_config ?? prev.lower_third_config),
           preview_duration_sec: typeof exp?.preview_duration_sec === 'number' && Number.isFinite(exp.preview_duration_sec) && exp.preview_duration_sec >= 0 ? exp.preview_duration_sec : 0,
           audio_bitrate_kbps: exp?.audio_bitrate_kbps === 192 || exp?.audio_bitrate_kbps === 256 || exp?.audio_bitrate_kbps === 320 ? exp.audio_bitrate_kbps : prev.audio_bitrate_kbps
         };
@@ -2989,7 +3012,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {})
       },
       subtitles: resolvedSubtitles,
-      text_overlay: sc.text_overlay,
+      text_overlay: sc.text_overlay?.trim() || [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
       video_ambient_mute: resolvedMute,
       video_ambient_gain_db: resolvedAmbientGainDb,
       ...(sc.sfx_gain_db !== undefined ? { sfx_gain_db: sc.sfx_gain_db } : {}),
@@ -3064,6 +3087,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       },
       export_settings: {
         ...exportSettings,
+        lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config),
         profile: exportSettings.profile || 'high',
         pix_fmt: exportSettings.pix_fmt || 'yuv420p',
         cfr: exportSettings.cfr ?? true,
@@ -3382,7 +3406,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         voiceover_volume: sc.voiceover_volume,
         ambient_volume: sc.ambient_volume,
         ...(sc.ambient_audio ? { ambient_audio: sc.ambient_audio } : {}),
-        text_overlay: [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
+        text_overlay: sc.text_overlay,
         ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
         ...(sc.voice_end !== undefined ? { voice_end: sc.voice_end } : {}),
         ...(sc.historical_date ? { historical_date: sc.historical_date } : {}),
@@ -3408,13 +3432,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       audio_bitrate_kbps: exportSettings.audio_bitrate_kbps,
       bitrate_mbps: exportSettings.bitrate_mbps,
       preview_duration_sec: exportSettings.preview_duration_sec ?? 0,
-      lower_third_config: {
-        enabled: true,
-        style: lowerThirdStyle,
-        emblem_path: 'aether_art_150x150_A.png',
-        show_sec: [0.5, 5.5],
-        anim_sec: 0.55
-      }
+      lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config)
     };
 
     const compactSubtitles: Record<string, unknown> = {
@@ -4397,6 +4415,31 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 onChange={e => setExportSettings(prev => ({ ...prev, preview_duration_sec: Math.max(0, Number(e.target.value) || 0) }))}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100" />
             </div>
+            {(() => {
+              const cfg = normalizeBroadcastConfig(exportSettings.lower_third_config);
+              const patch = (next: Partial<BroadcastConfig>) => setExportSettings(prev => ({ ...prev, lower_third_config: normalizeBroadcastConfig({ ...normalizeBroadcastConfig(prev.lower_third_config), ...next }) }));
+              const sample = narrativeScenes.find(sc => sc.text_overlay?.trim() || sc.historical_location || sc.historical_date);
+              const lines = (sample?.text_overlay?.trim() || [sample?.historical_location, sample?.historical_date].filter(Boolean).join('\n') || 'UPANO VALLEY\n500 BC – 600 AD').split('\n');
+              return <div className="border border-amber-500/30 rounded-lg p-3 space-y-2 text-xs text-slate-200">
+                <div className="flex items-center justify-between"><strong>HISTOVIVA Broadcast V8</strong>
+                  <label><input type="checkbox" checked={cfg.enabled} onChange={e => patch({enabled:e.target.checked})}/> Включить</label></div>
+                <div className="aspect-video bg-slate-800 flex items-end p-[5%]">
+                  {cfg.enabled && <div className="w-full flex border border-amber-500 text-white" style={{backgroundColor:'rgba('+cfg.bar_bg_rgba.slice(0,3).join(',')+','+cfg.bar_bg_rgba[3]/255+')'}}>
+                    <div className="bg-gradient-to-br from-red-800 to-red-950 w-[12%] flex items-center justify-center text-amber-300 font-serif text-lg">H</div>
+                    <div className="flex-1 px-2 py-1 border-l border-amber-500"><div className="font-bold uppercase truncate">{lines[0]}</div><div className="text-amber-200 text-[10px] truncate">{lines[1] || ''}</div></div>
+                  </div>}
+                </div>
+                <div className="text-[10px] text-slate-400">Схематичный предпросмотр; эмблема H — условный знак.</div>
+                <label className="block">Файл эмблемы <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value={cfg.emblem_path} onChange={e=>patch({emblem_path:e.target.value})}/></label>
+                <div className="grid grid-cols-3 gap-2">
+                  <label>Начало, сек.<input className="w-full bg-slate-950 rounded" type="number" min={0} step={0.1} value={cfg.show_sec[0]} onChange={e=>patch({show_sec:[Number(e.target.value),cfg.show_sec[1]]})}/></label>
+                  <label>Конец, сек.<input className="w-full bg-slate-950 rounded" type="number" min={0} step={0.1} value={cfg.show_sec[1]} onChange={e=>patch({show_sec:[cfg.show_sec[0],Number(e.target.value)]})}/></label>
+                  <label>Анимация, сек.<input className="w-full bg-slate-950 rounded" type="number" min={0} step={0.05} value={cfg.anim_sec} onChange={e=>patch({anim_sec:Number(e.target.value)})}/></label>
+                </div>
+                <label className="flex items-center gap-2">Фон <input type="color" value={'#'+cfg.bar_bg_rgba.slice(0,3).map(v=>v.toString(16).padStart(2,'0')).join('')} onChange={e=>patch({bar_bg_rgba:[parseInt(e.target.value.slice(1,3),16),parseInt(e.target.value.slice(3,5),16),parseInt(e.target.value.slice(5,7),16),cfg.bar_bg_rgba[3]]})}/></label>
+                <label className="flex items-center gap-2">Непрозрачность фона <input type="range" min={0} max={255} value={cfg.bar_bg_rgba[3]} onChange={e=>patch({bar_bg_rgba:[cfg.bar_bg_rgba[0],cfg.bar_bg_rgba[1],cfg.bar_bg_rgba[2],Number(e.target.value)]})}/>{Math.round(cfg.bar_bg_rgba[3]/255*100)}%</label>
+              </div>;
+            })()}
             {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs Draft 720p ultrafast vs H.265 preset medium CRF 22) */}
             <div>
               <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
