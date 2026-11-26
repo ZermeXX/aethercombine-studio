@@ -318,6 +318,26 @@ export interface ShortsAutoSliceConfig {
   upload_to_gdrive: boolean;
 }
 
+type BrandIdentityConfig = {
+  enabled?: boolean;
+  name: string;
+  episode_label: string;
+};
+function normalizeBrandIdentity(value: unknown): BrandIdentityConfig {
+  const c = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    ...(typeof c.enabled === 'boolean' ? { enabled: c.enabled } : {}),
+    name: typeof c.name === 'string' && c.name.trim() ? c.name.trim() : 'HISTOVIVA',
+    episode_label: typeof c.episode_label === 'string' ? c.episode_label.trim() : ''
+  };
+}
+function resolveBrandIdentity(value: unknown, project: string): Required<BrandIdentityConfig> {
+  const c = normalizeBrandIdentity(value);
+  const match = /^histoviva_(EP\d+)_(.+)/i.exec(project);
+  return { enabled: c.enabled ?? /^histoviva/i.test(project), name: c.name,
+    episode_label: c.episode_label || (match ? match[1] + ' | ' + match[2].replace(/_/g, ' ') : project) };
+}
+
 type BroadcastConfig = {
   enabled: boolean;
   style: 'histoviva_broadcast_en';
@@ -354,6 +374,7 @@ export interface NarrativeExportSettings {
   audio_bitrate_kbps: 320 | 256 | 192;
   preview_duration_sec?: number;
   lower_third_config?: BroadcastConfig;
+  brand_identity?: BrandIdentityConfig;
   subtitles?: SubtitlesFlexibleConfig;
 }
 
@@ -2278,6 +2299,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           crf,
           bitrate_mbps,
           lower_third_config: normalizeBroadcastConfig(exp?.lower_third_config ?? prev.lower_third_config),
+          brand_identity: normalizeBrandIdentity(exp?.brand_identity ?? (exp?.lower_third_config as Record<string, unknown> | undefined)?.brand_identity),
           preview_duration_sec: typeof exp?.preview_duration_sec === 'number' && Number.isFinite(exp.preview_duration_sec) && exp.preview_duration_sec >= 0 ? exp.preview_duration_sec : 0,
           audio_bitrate_kbps: exp?.audio_bitrate_kbps === 192 || exp?.audio_bitrate_kbps === 256 || exp?.audio_bitrate_kbps === 320 ? exp.audio_bitrate_kbps : prev.audio_bitrate_kbps
         };
@@ -3088,6 +3110,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       export_settings: {
         ...exportSettings,
         lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config),
+        brand_identity: resolveBrandIdentity(exportSettings.brand_identity, projectName.trim() || 'Narrative Movie 4K'),
         profile: exportSettings.profile || 'high',
         pix_fmt: exportSettings.pix_fmt || 'yuv420p',
         cfr: exportSettings.cfr ?? true,
@@ -3432,7 +3455,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       audio_bitrate_kbps: exportSettings.audio_bitrate_kbps,
       bitrate_mbps: exportSettings.bitrate_mbps,
       preview_duration_sec: exportSettings.preview_duration_sec ?? 0,
-      lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config)
+      lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config),
+      brand_identity: resolveBrandIdentity(exportSettings.brand_identity, projectName.trim() || 'Narrative Movie 4K')
     };
 
     const compactSubtitles: Record<string, unknown> = {
@@ -4438,6 +4462,28 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 </div>
                 <label className="flex items-center gap-2">Фон <input type="color" value={'#'+cfg.bar_bg_rgba.slice(0,3).map(v=>v.toString(16).padStart(2,'0')).join('')} onChange={e=>patch({bar_bg_rgba:[parseInt(e.target.value.slice(1,3),16),parseInt(e.target.value.slice(3,5),16),parseInt(e.target.value.slice(5,7),16),cfg.bar_bg_rgba[3]]})}/></label>
                 <label className="flex items-center gap-2">Непрозрачность фона <input type="range" min={0} max={255} value={cfg.bar_bg_rgba[3]} onChange={e=>patch({bar_bg_rgba:[cfg.bar_bg_rgba[0],cfg.bar_bg_rgba[1],cfg.bar_bg_rgba[2],Number(e.target.value)]})}/>{Math.round(cfg.bar_bg_rgba[3]/255*100)}%</label>
+              </div>;
+            })()}
+            {(() => {
+              const cfg = normalizeBrandIdentity(exportSettings.brand_identity);
+              const resolved = resolveBrandIdentity(cfg, projectName.trim() || 'Narrative Movie 4K');
+              const patch = (next: Partial<BrandIdentityConfig>) => setExportSettings(prev => ({ ...prev, brand_identity: { ...normalizeBrandIdentity(prev.brand_identity), ...next } }));
+              return <div className="border border-amber-500/30 rounded-lg p-3 space-y-2 text-xs text-slate-200">
+                <strong>HISTOVIVA Brand Identity V8</strong>
+                <div className="aspect-video bg-slate-800 flex justify-end items-start p-[3%]">
+                  {resolved.enabled && <div className="w-[34%] flex items-center gap-2 rounded border border-white/40 bg-slate-700/60 p-2">
+                    <div className="text-amber-300 font-serif text-xl shrink-0">H</div>
+                    <div className="min-w-0"><div className="font-bold uppercase truncate">{resolved.name}</div><div className="text-[9px] uppercase truncate">{resolved.episode_label}</div></div>
+                  </div>}
+                </div>
+                <label className="block">Режим брендинга
+                  <select className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value={cfg.enabled === undefined ? 'auto' : cfg.enabled ? 'on' : 'off'} onChange={e=>patch({enabled:e.target.value === 'auto' ? undefined : e.target.value === 'on'})}>
+                    <option value="auto">Авто — проекты HISTOVIVA</option><option value="on">Включён</option><option value="off">Выключен</option>
+                  </select>
+                </label>
+                <label className="block">Название канала<input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value={cfg.name} onChange={e=>patch({name:e.target.value})}/></label>
+                <label className="block">Номер и название эпизода<input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value={cfg.episode_label} placeholder={resolveBrandIdentity({...cfg,episode_label:''},projectName).episode_label} onChange={e=>patch({episode_label:e.target.value})}/></label>
+                <div className="text-[10px] text-slate-400">Пустое название эпизода — авто из имени проекта. Эмблема общая с Broadcast V8: {normalizeBroadcastConfig(exportSettings.lower_third_config).emblem_path}. H в предпросмотре — условный знак. Брендинг независим от нижней плашки.</div>
               </div>;
             })()}
             {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs Draft 720p ultrafast vs H.265 preset medium CRF 22) */}
