@@ -369,6 +369,7 @@ export interface NarrativeExportSettings {
   preset?: 'veryfast' | 'ultrafast' | 'medium';
   draft_mode?: boolean;
   bitrate_mbps: number;
+  bitrate_cap?: 'on' | 'off';
   crf: number;
   fps: 24 | 30 | 60;
   audio_bitrate_kbps: 320 | 256 | 192;
@@ -376,6 +377,21 @@ export interface NarrativeExportSettings {
   lower_third_config?: BroadcastConfig;
   brand_identity?: BrandIdentityConfig;
   subtitles?: SubtitlesFlexibleConfig;
+}
+
+const V8_EXPORT_PROFILES = {
+  Draft: { resolution: '720p', preset: 'ultrafast', crf: 26, bitrate_mbps: 6, audio_bitrate_kbps: 192, draft_mode: true },
+  Standard: { resolution: '1080p', preset: 'veryfast', crf: 20, bitrate_mbps: 12, audio_bitrate_kbps: 256, draft_mode: false },
+  Cinema: { resolution: '4k', preset: 'veryfast', crf: 18, bitrate_mbps: 35, audio_bitrate_kbps: 320, draft_mode: false },
+  Master: { resolution: '4k', preset: 'medium', crf: 16, bitrate_mbps: 45, audio_bitrate_kbps: 320, draft_mode: false }
+} as const;
+function normalizeV8Export(settings: NarrativeExportSettings): NarrativeExportSettings {
+  return { ...settings, video_codec: 'libx264', aspect_ratio: '16:9', profile: 'high', pix_fmt: 'yuv420p', cfr: true,
+    preset: settings.preset === 'medium' || settings.preset === 'ultrafast' ? settings.preset : 'veryfast',
+    bitrate_cap: settings.bitrate_cap === 'off' ? 'off' : 'on',
+    bitrate_mbps: Number.isFinite(settings.bitrate_mbps) ? Math.min(120, Math.max(4, settings.bitrate_mbps)) : 35,
+    crf: Number.isFinite(settings.crf) ? Math.min(28, Math.max(14, Math.round(settings.crf))) : 18,
+    preview_duration_sec: Number.isFinite(settings.preview_duration_sec) ? Math.max(0, settings.preview_duration_sec ?? 0) : 0 };
 }
 
 export interface NarrativeMontageManifest {
@@ -2298,6 +2314,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           fps,
           crf,
           bitrate_mbps,
+          bitrate_cap: exp?.bitrate_cap === 'off' ? 'off' : 'on',
+          preset: exp?.preset === 'medium' || exp?.preset === 'ultrafast' ? exp.preset : 'veryfast',
+          draft_mode: typeof exp?.draft_mode === 'boolean' ? exp.draft_mode : resolution === '720p',
           lower_third_config: normalizeBroadcastConfig(exp?.lower_third_config ?? prev.lower_third_config),
           brand_identity: normalizeBrandIdentity(exp?.brand_identity ?? (exp?.lower_third_config as Record<string, unknown> | undefined)?.brand_identity),
           preview_duration_sec: typeof exp?.preview_duration_sec === 'number' && Number.isFinite(exp.preview_duration_sec) && exp.preview_duration_sec >= 0 ? exp.preview_duration_sec : 0,
@@ -3108,17 +3127,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: effectiveMasterAudioDurationSec
       },
       export_settings: {
-        ...exportSettings,
+        ...normalizeV8Export(exportSettings),
         lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config),
         brand_identity: resolveBrandIdentity(exportSettings.brand_identity, projectName.trim() || 'Narrative Movie 4K'),
-        profile: exportSettings.profile || 'high',
-        pix_fmt: exportSettings.pix_fmt || 'yuv420p',
-        cfr: exportSettings.cfr ?? true,
-        preset: exportSettings.draft_mode
-          ? 'ultrafast'
-          : exportSettings.video_codec === 'libx264'
-          ? 'veryfast'
-          : 'medium',
         subtitles: subtitlesConfigObject
       },
       anti_desync_locks: {
@@ -3368,11 +3379,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       '1080p': '1920x1080',
       '720p': '1280x720'
     };
-    const presetVal = exportSettings.draft_mode
-      ? 'ultrafast'
-      : exportSettings.video_codec === 'libx264'
-      ? 'veryfast'
-      : 'medium';
+    const effectiveExport = normalizeV8Export(exportSettings);
+    const presetVal = effectiveExport.preset;
 
     const compactTimeline = fullManifest.timeline.map((sc, idx) => {
       const cleanedSubtitles: Record<string, string> = {};
@@ -3443,18 +3451,19 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
     const compactExpSettings: Record<string, unknown> = {
       resolution: exportSettings.resolution,
-      aspect_ratio: exportSettings.aspect_ratio,
-      video_codec: exportSettings.video_codec,
-      profile: exportSettings.profile || 'high',
-      pix_fmt: exportSettings.pix_fmt || 'yuv420p',
-      cfr: exportSettings.cfr ?? true,
+      aspect_ratio: effectiveExport.aspect_ratio,
+      video_codec: effectiveExport.video_codec,
+      profile: effectiveExport.profile,
+      pix_fmt: effectiveExport.pix_fmt,
+      cfr: effectiveExport.cfr,
       preset: presetVal,
       draft_mode: Boolean(exportSettings.draft_mode),
-      crf: exportSettings.crf,
-      fps: exportSettings.fps,
+      crf: effectiveExport.crf,
+      fps: effectiveExport.fps,
       audio_bitrate_kbps: exportSettings.audio_bitrate_kbps,
-      bitrate_mbps: exportSettings.bitrate_mbps,
-      preview_duration_sec: exportSettings.preview_duration_sec ?? 0,
+      bitrate_mbps: effectiveExport.bitrate_mbps,
+      bitrate_cap: effectiveExport.bitrate_cap,
+      preview_duration_sec: effectiveExport.preview_duration_sec,
       lower_third_config: normalizeBroadcastConfig(exportSettings.lower_third_config),
       brand_identity: resolveBrandIdentity(exportSettings.brand_identity, projectName.trim() || 'Narrative Movie 4K')
     };
@@ -3488,9 +3497,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       total_duration_sec: fullManifest.total_duration_sec,
       render_settings: {
         resolution: resMap[exportSettings.resolution] || '3840x2160',
-        video_codec: exportSettings.video_codec,
-        fps: exportSettings.fps,
-        crf: exportSettings.crf,
+        video_codec: effectiveExport.video_codec,
+        fps: effectiveExport.fps,
+        crf: effectiveExport.crf,
         preset: presetVal,
         audio_bitrate: `${exportSettings.audio_bitrate_kbps}k`,
         loudness_normalization: {
@@ -4486,52 +4495,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 <div className="text-[10px] text-slate-400">Пустое название эпизода — авто из имени проекта. Эмблема общая с Broadcast V8: {normalizeBroadcastConfig(exportSettings.lower_third_config).emblem_path}. H в предпросмотре — условный знак. Брендинг независим от нижней плашки.</div>
               </div>;
             })()}
-            {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs Draft 720p ultrafast vs H.265 preset medium CRF 22) */}
-            <div>
-              <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
-                Селектор видеокодека и режима сборки (H.264 / Draft 720p ultrafast / H.265):
-              </label>
-              <select
-                value={
-                  exportSettings.draft_mode
-                    ? 'draft_720p'
-                    : exportSettings.video_codec
-                }
-                onChange={e => {
-                  const val = e.target.value;
-                  if (val === 'draft_720p') {
-                    setExportSettings(prev => ({
-                      ...prev,
-                      resolution: '720p',
-                      video_codec: 'libx264',
-                      preset: 'ultrafast',
-                      draft_mode: true,
-                      crf: 26
-                    }));
-                  } else {
-                    const codec = val as 'libx264' | 'libx265';
-                    setExportSettings(prev => ({
-                      ...prev,
-                      resolution: prev.resolution === '720p' ? '4k' : prev.resolution,
-                      video_codec: codec,
-                      preset: codec === 'libx264' ? 'veryfast' : 'medium',
-                      draft_mode: false,
-                      crf: codec === 'libx264' ? 20 : 22
-                    }));
-                  }
-                }}
-                className="w-full bg-slate-900 border border-indigo-500/40 rounded-lg px-3 py-2 text-xs font-mono text-indigo-200 outline-none focus:border-indigo-400"
-              >
-                <option value="libx264">
-                  H.264 (libx264, veryfast, CRF 20) — Скоростной монтаж (по умолчанию)
-                </option>
-                <option value="draft_720p">
-                  ⚡ Черновик Draft 720p ultrafast (libx264, preset ultrafast, CRF 26) — Быстрая проверка за 1 минуту
-                </option>
-                <option value="libx265">
-                  H.265 (libx265, preset medium, CRF 22) — Архивное сжатие
-                </option>
-              </select>
+            <div className="border border-indigo-500/40 rounded-lg p-3 space-y-2">
+              <div className="text-xs font-bold text-indigo-200">Export Profiles V8 · H.264 / 16:9</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(Object.keys(V8_EXPORT_PROFILES) as (keyof typeof V8_EXPORT_PROFILES)[]).map(key => <button key={key} type="button" className="bg-slate-800 rounded p-2 text-xs text-slate-100" onClick={()=>setExportSettings(prev=>normalizeV8Export({...prev,...V8_EXPORT_PROFILES[key],bitrate_cap:'on',preview_duration_sec:0}))}>{key} · {V8_EXPORT_PROFILES[key].resolution} · CRF {V8_EXPORT_PROFILES[key].crf}</button>)}
+              </div>
+              <label className="block text-xs text-slate-300">Preset <select className="bg-slate-900 rounded p-1" value={normalizeV8Export(exportSettings).preset} onChange={e=>setExportSettings(prev=>normalizeV8Export({...prev,preset:e.target.value as NarrativeExportSettings['preset']}))}><option value="ultrafast">ultrafast</option><option value="veryfast">veryfast</option><option value="medium">medium</option></select></label>
+              <label className="text-xs text-slate-300"><input type="checkbox" checked={exportSettings.bitrate_cap !== 'off'} onChange={e=>setExportSettings(prev=>({...prev,bitrate_cap:e.target.checked?'on':'off'}))}/> Ограничение битрейта (пиковый лимит ≈ 130% указанного)</label>
+              <div className="text-[10px] text-slate-400">Master: H.264, YUV420P, CFR. Preview: 1280×720. Audio: AAC stereo 48 kHz. H.265 и вертикальный Master не поддерживаются текущим Render V8.</div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -4547,7 +4518,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                       ...prev,
                       resolution: res,
                       draft_mode: res === '720p',
-                      preset: res === '720p' ? 'ultrafast' : prev.video_codec === 'libx264' ? 'veryfast' : 'medium'
+                      preset: res === '720p' ? 'ultrafast' : 'veryfast',
+                      video_codec: 'libx264'
                     }));
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
@@ -4563,17 +4535,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   Формат кадра:
                 </label>
                 <select
-                  value={exportSettings.aspect_ratio}
-                  onChange={e =>
-                    setExportSettings(prev => ({
-                      ...prev,
-                      aspect_ratio: e.target.value as '16:9' | '9:16'
-                    }))
-                  }
+                  value="16:9"
+                  disabled
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-indigo-400"
                 >
                   <option value="16:9">16:9 Горизонтальный</option>
-                  <option value="9:16">9:16 Shorts / Reels</option>
                 </select>
               </div>
 
