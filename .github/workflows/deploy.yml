@@ -29,6 +29,12 @@ jobs:
       - name: Install Dependencies
         run: bun install
 
+      - name: TypeScript Check
+        run: bun run typecheck
+
+      - name: Manifest V8 Tests
+        run: bun test tests/manifest-v8.test.ts
+
       - name: Build Project
         run: bun run build
 
