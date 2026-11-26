@@ -46,16 +46,34 @@ import {
 } from '../utils/englishExport';
 import {
   V21PipelineLocks,
-  V21_XFADE_OPTIONS,
   VOICEOVER_LEAD_IN_SEC,
   VOICEOVER_SENTENCE_PAD_SEC,
   computeContinuousSceneTimings,
-  normalizeV21TransitionType,
   normalizeSceneSubtitlesMap,
   parseV21ManifestObject
 } from '../utils/manifestV21';
 import { serializeCompactDispatchJson } from '../utils/manifestDispatch';
 import type { AetherCombineDraftSlice } from '../utils/aetherPersistence';
+
+const V8_TRANSITIONS = [
+  { value: 'fade', label: 'Fade / затемнение' },
+  { value: 'dip_to_black', label: 'Через чёрный' },
+  { value: 'dip_to_white', label: 'Через белый' },
+  { value: 'cut', label: 'Склейка' },
+  { value: 'none', label: 'Без эффекта' }
+] as const;
+function normalizeV8Transition(value: unknown): typeof V8_TRANSITIONS[number]['value'] {
+  const mode = String(value ?? 'fade').trim().toLowerCase();
+  if (mode === 'cut' || mode === 'hard_cut') return 'cut';
+  if (mode === 'none') return 'none';
+  if (['fadeblack', 'fade_black', 'dip_to_black'].includes(mode)) return 'dip_to_black';
+  if (['fadewhite', 'fade_white', 'dip_to_white'].includes(mode)) return 'dip_to_white';
+  return 'fade';
+}
+function normalizeV8TransitionDuration(value: unknown, mode: string): number {
+  if (mode === 'cut' || mode === 'none') return 0;
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0.5;
+}
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down' | 'static';
 const normalizeCameraZoom = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? Math.min(1.5, Math.max(1, value)) : 1.12;
@@ -127,6 +145,8 @@ export interface NarrativeSceneItem {
       | 'crossfade'
       | 'dissolve'
       | 'fade'
+      | 'dip_to_black'
+      | 'dip_to_white'
       | 'fadeblack'
       | 'fadewhite'
       | 'wipeleft'
@@ -760,7 +780,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
       {/* 4. Динамический переход FFmpeg (xfade) + Статус Mute / SFX + Титр */}
       <div className="col-span-2 flex items-center gap-1 min-w-0">
         <select
-          value={sc.transition.type}
+          value={normalizeV8Transition(sc.transition.type)}
           onChange={e => {
             const t = e.target.value as NarrativeSceneItem['transition']['type'];
             updateScene(idx, {
@@ -773,15 +793,22 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
               }
             });
           }}
-          title={`FFmpeg xfade: ${sc.transition.type} (${sc.transition.duration_sec}s)`}
+          title={`V8: переход после сцены (${sc.transition.duration_sec}s)`}
           className="w-[74px] bg-slate-900 border border-cyan-500/40 rounded px-1 py-1 text-[9.5px] font-mono text-cyan-200 outline-none shrink-0"
         >
-          {V21_XFADE_OPTIONS.map(opt => (
+          {V8_TRANSITIONS.map(opt => (
             <option key={opt.value} value={opt.value} className="bg-slate-900">
-              {opt.value}
+              {opt.label}
             </option>
           ))}
         </select>
+        <input type="number" min={0} step={0.1}
+          aria-label="Длительность перехода после сцены, сек."
+          title="Длительность перехода после сцены, сек."
+          disabled={['cut', 'none'].includes(sc.transition.type)}
+          value={normalizeV8TransitionDuration(sc.transition.duration_sec, sc.transition.type)}
+          onChange={e => updateScene(idx, { transition: { type: normalizeV8Transition(sc.transition.type), duration_sec: normalizeV8TransitionDuration(Number(e.target.value), sc.transition.type) } })}
+          className="w-14 bg-slate-900 border border-cyan-500/40 rounded px-1 py-1 text-[10px] text-cyan-200" />
         <button
           type="button"
           onClick={() => updateScene(idx, { video_ambient_mute: !isMuted })}
@@ -1735,20 +1762,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
           // Переход сцены (приоритет: video_processing.transition_in -> transition -> slot_transition_out)
           const rawTrans =
-            scVideoProc?.transition_in ?? sc.transition ?? sc.slot_transition_out;
+            sc.transition ?? sc.slot_transition_out ?? scVideoProc?.transition_in;
           let transType: NarrativeSceneItem['transition']['type'] = 'fade';
           let transDur =
             typeof sc.transition_duration === 'number'
               ? Math.max(0, sc.transition_duration)
               : 0.6;
           if (typeof rawTrans === 'string') {
-            transType = normalizeV21TransitionType(rawTrans);
+            transType = normalizeV8Transition(rawTrans);
             if (transType === 'cut' || transType === 'none') {
               transDur = 0;
             }
           } else if (rawTrans && typeof rawTrans === 'object') {
             const tObj = rawTrans as Record<string, unknown>;
-            transType = normalizeV21TransitionType(tObj.type || tObj.effect || 'fade');
+            transType = normalizeV8Transition(tObj.type || tObj.effect || 'fade');
             if (typeof tObj.duration_sec === 'number') {
               transDur = Math.max(0, tObj.duration_sec);
             } else if (typeof tObj.duration === 'number') {
@@ -1872,7 +1899,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               : {}),
             transition: {
               type: transType,
-              duration_sec: transType === 'cut' || transType === 'none' ? 0 : transDur
+              duration_sec: normalizeV8TransitionDuration(transDur, transType)
             },
             ...(scVideoProc
               ? { video_processing: scVideoProc as NarrativeSceneItem['video_processing'] }
@@ -2862,11 +2889,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       ''
     ).trim();
     const resolvedImageRef = (sc.image_reference || sc.assets?.image_reference || '').trim();
-    const resolvedTransType = sc.transition?.type || 'fade';
-    const resolvedTransDur =
-      resolvedTransType === 'cut' || resolvedTransType === 'none'
-        ? 0
-        : Math.max(0, Number(sc.transition?.duration_sec) || 0.6);
+    const resolvedTransType = normalizeV8Transition(sc.transition?.type);
+    const resolvedTransDur = normalizeV8TransitionDuration(sc.transition?.duration_sec, resolvedTransType);
     const resolvedMute =
       typeof sc.video_ambient_mute === 'boolean'
         ? sc.video_ambient_mute
@@ -3326,7 +3350,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: sc.duration,
         camera_movement: sc.camera_movement,
         camera_zoom: normalizeCameraZoom(sc.camera_zoom),
-        transition: sc.transition === 'fade' ? 'fade' : 'cut',
+        transition: normalizeV8Transition(sc.transition),
         transition_duration: sc.transition_duration,
         text_overlay: [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
         ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
