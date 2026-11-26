@@ -57,7 +57,8 @@ import {
 import { serializeCompactDispatchJson } from '../utils/manifestDispatch';
 import type { AetherCombineDraftSlice } from '../utils/aetherPersistence';
 
-export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right';
+export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down' | 'static';
+const normalizeCameraZoom = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? Math.min(1.5, Math.max(1, value)) : 1.12;
 
 export type CinematicOverlayId =
   | 'ambient_particles'
@@ -117,6 +118,7 @@ export interface NarrativeSceneItem {
   voice_start?: number;
   voice_end?: number;
   camera_movement?: CameraVectorType;
+  camera_zoom?: number;
   visual_style?: string;
   needs_revision?: boolean;
   revision_note?: string;
@@ -149,6 +151,7 @@ export interface NarrativeSceneItem {
         }
       | string;
     camera_movement?: CameraVectorType;
+  camera_zoom?: number;
     [key: string]: unknown;
   };
   audio_processing?: {
@@ -185,6 +188,7 @@ export interface ExportedNarrativeSceneItem {
   voice_start?: number;
   voice_end?: number;
   camera_movement?: CameraVectorType;
+  camera_zoom?: number;
   visual_style?: string;
   transition: string;
   transition_duration: number;
@@ -203,6 +207,7 @@ export interface ExportedNarrativeSceneItem {
       duration_sec: number;
     };
     camera_movement?: CameraVectorType;
+  camera_zoom?: number;
     [key: string]: unknown;
   };
   audio_processing: {
@@ -653,9 +658,21 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
           <option value="zoom_out">zoom_out</option>
           <option value="pan_left">pan_left</option>
           <option value="pan_right">pan_right</option>
+          <option value="pan_up">pan_up</option>
+          <option value="pan_down">pan_down</option>
+          <option value="static">static</option>
         </select>
       </div>
 
+      <div className="col-span-3 flex items-center gap-2 text-[10px] text-slate-300">
+        <label>Масштаб камеры</label>
+        <input aria-label="Масштаб камеры" type="range" min={100} max={150} step={1}
+          disabled={sc.camera_movement === 'static'}
+          value={Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}
+          onChange={e => updateScene(idx, { camera_zoom: Number(e.target.value) / 100 })}
+          className="flex-1 min-w-0" />
+        <span>{Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}%</span>
+      </div>
       {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
       <div className="col-span-3 flex items-center gap-1.5 min-w-0">
         <input
@@ -1747,9 +1764,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             rawCam === 'zoom_in' ||
             rawCam === 'zoom_out' ||
             rawCam === 'pan_left' ||
-            rawCam === 'pan_right'
+            rawCam === 'pan_right' || rawCam === 'pan_up' || rawCam === 'pan_down' || rawCam === 'static'
               ? rawCam
-              : undefined;
+              : rawCam === 'none' ? 'static' : undefined;
 
           const subtitlesMap = normalizeSceneSubtitlesMap(sc.subtitles);
           const rawSubTextField =
@@ -1849,6 +1866,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             ...(typeof sc.voice_start === 'number' ? { voice_start: sc.voice_start } : {}),
             ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : {}),
             ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
+            camera_zoom: normalizeCameraZoom(sc.camera_zoom ?? scVideoProc?.camera_zoom),
             ...(typeof sc.visual_style === 'string' && sc.visual_style.trim()
               ? { visual_style: sc.visual_style.trim() }
               : {}),
@@ -2890,6 +2908,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           }
         : {}),
       camera_movement: resolvedCamera,
+      camera_zoom: normalizeCameraZoom(sc.camera_zoom),
       ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
       transition: resolvedTransType,
       transition_duration: resolvedTransDur,
@@ -2908,7 +2927,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           type: resolvedTransType,
           duration_sec: resolvedTransDur
         },
-        camera_movement: resolvedCamera
+        camera_movement: resolvedCamera,
+        camera_zoom: normalizeCameraZoom(sc.camera_zoom)
       },
       audio_processing: {
         ...(sc.audio_processing || {}),
@@ -3278,7 +3298,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
       const compactVideoProc: Record<string, unknown> = {
         transition_in: sc.video_processing.transition_in,
-        camera_movement: sc.video_processing.camera_movement
+        camera_movement: sc.video_processing.camera_movement,
+        camera_zoom: sc.camera_zoom
       };
       if (sc.video_processing.transition_out) {
         compactVideoProc.transition_out = sc.video_processing.transition_out;
@@ -3304,6 +3325,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         chapter: sc.title,
         duration_sec: sc.duration,
         camera_movement: sc.camera_movement,
+        camera_zoom: normalizeCameraZoom(sc.camera_zoom),
         transition: sc.transition === 'fade' ? 'fade' : 'cut',
         transition_duration: sc.transition_duration,
         text_overlay: [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
@@ -3418,7 +3440,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       zoom_in: { label: 'ZOOM IN • Наезд', arrow: '⊕', color: '#FACC15' },
       zoom_out: { label: 'ZOOM OUT • Отъезд', arrow: '⊖', color: '#38BDF8' },
       pan_left: { label: 'PAN LEFT • Панорама ◄', arrow: '◄', color: '#34D399' },
-      pan_right: { label: 'PAN RIGHT • Панорама ►', arrow: '►', color: '#A78BFA' }
+      pan_right: { label: 'PAN RIGHT • Панорама ►', arrow: '►', color: '#A78BFA' },
+      pan_up: { label: 'PAN UP • Вверх', arrow: '↑', color: '#2DD4BF' },
+      pan_down: { label: 'PAN DOWN • Вниз', arrow: '↓', color: '#FB923C' },
+      static: { label: 'STATIC • Статичный кадр', arrow: '•', color: '#94A3B8' }
     };
 
     const sceneTimingMeta: Array<{
