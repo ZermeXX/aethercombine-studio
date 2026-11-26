@@ -394,6 +394,57 @@ function normalizeV8Export(settings: NarrativeExportSettings): NarrativeExportSe
     preview_duration_sec: Number.isFinite(settings.preview_duration_sec) ? Math.max(0, settings.preview_duration_sec ?? 0) : 0 };
 }
 
+type ManifestIssue = { severity: 'error' | 'warning'; message: string };
+export function validateManifestV8(input: unknown): ManifestIssue[] {
+  const issues: ManifestIssue[] = [];
+  const add = (severity: ManifestIssue['severity'], message: string) => issues.push({severity,message});
+  const obj = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
+  const valid = (v: unknown, min: number, max = Infinity): v is number => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+  const m = obj(input);
+  if (typeof m.project_name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_. -]{0,159}$/.test(m.project_name)) add('error','Некорректное имя проекта (латиница, цифры, пробел, _, -, точка).');
+  const timeline = Array.isArray(m.timeline) ? m.timeline : Array.isArray(m.scenes) ? m.scenes : [];
+  if (!timeline.length) add('error','Нет сцен.');
+  if (m.total_scenes !== undefined && m.total_scenes !== timeline.length) add('error','Количество сцен не совпадает.');
+  const ids = new Set<string>();
+  let total = 0;
+  timeline.forEach((raw,i) => {
+    const sc = obj(raw), a = obj(sc.assets), label = 'Сцена '+(i+1)+': ';
+    const id = typeof sc.scene_id === 'string' ? sc.scene_id.trim() : '';
+    if (!id || ids.has(id)) add('error',label+'пустой или повторяющийся scene_id.');
+    ids.add(id);
+    const d = sc.duration_sec ?? sc.duration;
+    if (!valid(d,0.001)) add('error',label+'некорректная длительность.'); else total += d;
+    if (![sc.file_name,sc.video_file,a.video_file,a.image_reference].some(v=>typeof v==='string'&&v.trim())) add('error',label+'нет визуального файла.');
+    if (![sc.voiceover_file,sc.audio_file,a.voiceover_file].some(v=>typeof v==='string'&&v.trim())) add('warning',label+'нет файла диктора.');
+    if (sc.camera_movement !== undefined && !['zoom_in','zoom_out','pan_left','pan_right','pan_up','pan_down','static'].includes(String(sc.camera_movement))) add('error',label+'неизвестный режим камеры.');
+    if (sc.camera_zoom !== undefined && !valid(sc.camera_zoom,1,1.5)) add('error',label+'масштаб камеры вне 1–1.5.');
+    if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
+    if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
+    else if (valid(d,0.001) && valid(sc.transition_duration,0) && sc.transition_duration>d) add('warning',label+'переход длиннее сцены.');
+    for (const key of ['voiceover_volume','ambient_volume']) if (sc[key] !== undefined && !valid(sc[key],0,4)) add('error',label+key+' вне 0–4.');
+    if (sc.voice_start !== undefined && !valid(sc.voice_start,0)) add('error',label+'некорректный voice_start.');
+    if (valid(sc.voice_end,0) && valid(sc.voice_start,0) && sc.voice_end<sc.voice_start) add('error',label+'voice_end раньше voice_start.');
+  });
+  if (m.total_duration_sec !== undefined && (!valid(m.total_duration_sec,0.001) || Math.abs(m.total_duration_sec-total)>0.25)) add('warning','Общая длительность отличается от суммы сцен.');
+  const e = obj(m.export_settings);
+  if (!['720p','1080p','4k'].includes(String(e.resolution))) add('error','Неподдерживаемое разрешение.');
+  if (e.video_codec !== 'libx264' || e.aspect_ratio !== '16:9') add('error','Render V8 требует H.264 и 16:9.');
+  if (![24,30,60].includes(Number(e.fps)) || !valid(e.crf,14,28)) add('error','Некорректные FPS или CRF.');
+  if (!['ultrafast','veryfast','medium'].includes(String(e.preset))) add('error','Некорректный preset.');
+  if (!valid(e.bitrate_mbps,4,120) || ![192,256,320].includes(Number(e.audio_bitrate_kbps))) add('error','Некорректный битрейт.');
+  if (!valid(e.preview_duration_sec,0)) add('error','Некорректная длительность превью.');
+  const lt = obj(e.lower_third_config), brand = obj(e.brand_identity);
+  if (lt.enabled === true) {
+    const show = lt.show_sec;
+    if (!Array.isArray(show) || !valid(show[0],0) || !valid(show[1],0) || show[1]<=show[0] || !valid(lt.anim_sec,0,(show[1]-show[0])/2)) add('error','Некорректное время Broadcast.');
+  }
+  if (brand.enabled === true && (typeof brand.name !== 'string' || !brand.name.trim())) add('error','Нет названия бренда.');
+  if ((lt.enabled === true || brand.enabled === true) && (typeof lt.emblem_path !== 'string' || !lt.emblem_path.trim())) add('warning','Не указан файл эмблемы.');
+  const locks = obj(m.anti_desync_locks);
+  if (locks.voiceover_sentence_pad_sec !== undefined && !valid(locks.voiceover_sentence_pad_sec,0,5)) add('error','Некорректная пауза диктора.');
+  return issues;
+}
+
 export interface NarrativeMontageManifest {
   schema_version: '3.0';
   manifest_version?: '2.1' | '2.2-FINAL' | '3.0';
@@ -3432,7 +3483,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: sc.duration,
         camera_movement: sc.camera_movement,
         camera_zoom: normalizeCameraZoom(sc.camera_zoom),
-        transition: normalizeV8Transition(sc.transition),
+        transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
         transition_duration: sc.transition_duration,
         voiceover_volume: sc.voiceover_volume,
         ambient_volume: sc.ambient_volume,
@@ -3988,6 +4039,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
     const fullManifestToDispatch = prepareValidatedManifestForOutput();
     const compactManifest = buildCompactDispatchManifest(fullManifestToDispatch);
+    const issues = validateManifestV8(compactManifest);
+    const errors = issues.filter(issue => issue.severity === 'error');
+    const warnings = issues.filter(issue => issue.severity === 'warning');
+    if (errors.length) {
+      onNotify('Manifest V8: '+errors.length+' ошибок. '+errors.slice(0,4).map(issue=>issue.message).join(' '), 'error');
+      return;
+    }
+    if (warnings.length) onNotify('Manifest V8: '+warnings.length+' предупреждений. '+warnings.slice(0,3).map(issue=>issue.message).join(' '), 'info');
     const serialized = serializeCompactDispatchJson(compactManifest);
 
     if (serialized.exceedsLimit) {
