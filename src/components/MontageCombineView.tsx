@@ -55,6 +55,8 @@ import {
 import { serializeCompactDispatchJson } from '../utils/manifestDispatch';
 import type { AetherCombineDraftSlice } from '../utils/aetherPersistence';
 
+const normalizeV8Volume = (value: unknown, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(4, value)) : fallback;
 const V8_TRANSITIONS = [
   { value: 'fade', label: 'Fade / затемнение' },
   { value: 'dip_to_black', label: 'Через чёрный' },
@@ -181,6 +183,9 @@ export interface NarrativeSceneItem {
     sfx_gain_db?: number;
     [key: string]: unknown;
   };
+  voiceover_volume?: number;
+  ambient_volume?: number;
+  ambient_audio?: string;
   text_overlay: string;
   ai_video_prompt?: string;
   prompt_ru?: string;
@@ -214,6 +219,9 @@ export interface ExportedNarrativeSceneItem {
   transition_duration: number;
   mute_audio: boolean;
   ambient_gain_db: number;
+  voiceover_volume: number;
+  ambient_volume: number;
+  ambient_audio?: string;
   assets: {
     video_file: string;
     voiceover_file: string;
@@ -692,6 +700,19 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
           onChange={e => updateScene(idx, { camera_zoom: Number(e.target.value) / 100 })}
           className="flex-1 min-w-0" />
         <span>{Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}%</span>
+      </div>
+      <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
+        <label>Диктор <input aria-label="Громкость диктора" type="number" min={0} max={4} step={0.05}
+          value={normalizeV8Volume(sc.voiceover_volume, 1)}
+          onChange={e => updateScene(idx, { voiceover_volume: normalizeV8Volume(Number(e.target.value), 1) })}
+          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
+        <label>Эмбиент <input aria-label="Громкость эмбиента" type="number" min={0} max={4} step={0.05}
+          value={normalizeV8Volume(sc.ambient_volume, 0.35)}
+          onChange={e => updateScene(idx, { ambient_volume: normalizeV8Volume(Number(e.target.value), 0.35) })}
+          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
+        <input aria-label="Файл эмбиента сцены" placeholder="ambient.wav (GDrive)"
+          value={sc.ambient_audio || ''} onChange={e => updateScene(idx, { ambient_audio: e.target.value })}
+          className="flex-1 min-w-[100px] bg-slate-900 border border-slate-700 rounded px-1" />
       </div>
       {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
       <div className="col-span-3 flex items-center gap-1.5 min-w-0">
@@ -1521,7 +1542,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Авто-расчёт длительности аудио по посегментным озвучкам (с учётом паузы 0.35с между фразами)
   const perSceneVoiceStats = useMemo(() => {
-    const padSec = v21Locks.voiceoverSentencePadSec || VOICEOVER_SENTENCE_PAD_SEC;
+    const padSec = v21Locks.voiceoverSentencePadSec ?? VOICEOVER_SENTENCE_PAD_SEC;
     const leadInSec = v21Locks.voiceoverLeadInSec || VOICEOVER_LEAD_IN_SEC;
     let voiceScenesCount = 0;
     let totalSec = 0;
@@ -1894,6 +1915,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : {}),
             ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
             camera_zoom: normalizeCameraZoom(sc.camera_zoom ?? scVideoProc?.camera_zoom),
+            voiceover_volume: normalizeV8Volume(sc.voiceover_volume, typeof scAudioProc?.voiceover_gain_db === 'number' ? normalizeV8Volume(Math.pow(10, scAudioProc.voiceover_gain_db / 20), 1) : 1),
+            ambient_volume: normalizeV8Volume(sc.ambient_volume ?? (typeof sc.ambient_audio === 'object' && sc.ambient_audio ? (sc.ambient_audio as Record<string, unknown>).volume : undefined), 0.35),
+            ambient_audio: typeof sc.ambient_audio === 'string' ? sc.ambient_audio : typeof sc.ambient_audio === 'object' && sc.ambient_audio ? String((sc.ambient_audio as Record<string, unknown>).file_name || '') : '',
             ...(typeof sc.visual_style === 'string' && sc.visual_style.trim()
               ? { visual_style: sc.visual_style.trim() }
               : {}),
@@ -2938,6 +2962,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       transition_duration: resolvedTransDur,
       mute_audio: resolvedMute,
       ambient_gain_db: resolvedAmbientGainDb,
+      voiceover_volume: normalizeV8Volume(sc.voiceover_volume, 1),
+      ambient_volume: normalizeV8Volume(sc.ambient_volume, 0.35),
+      ...(sc.ambient_audio?.trim() ? { ambient_audio: sc.ambient_audio.trim() } : {}),
       assets: {
         ...(sc.assets || {}),
         video_file: resolvedVideoFile,
@@ -3352,6 +3379,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         camera_zoom: normalizeCameraZoom(sc.camera_zoom),
         transition: normalizeV8Transition(sc.transition),
         transition_duration: sc.transition_duration,
+        voiceover_volume: sc.voiceover_volume,
+        ambient_volume: sc.ambient_volume,
+        ...(sc.ambient_audio ? { ambient_audio: sc.ambient_audio } : {}),
         text_overlay: [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
         ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
         ...(sc.voice_end !== undefined ? { voice_end: sc.voice_end } : {}),
@@ -4201,6 +4231,13 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               </div>
             </div>
 
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              Пауза после диктора (сек.)
+              <input type="number" min={0} max={5} step={0.05}
+                value={v21Locks.voiceoverSentencePadSec}
+                onChange={e => setV21Locks(prev => ({ ...prev, voiceoverSentencePadSec: Math.min(5, Math.max(0, Number(e.target.value) || 0)) }))}
+                className="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1" />
+            </label>
             {/* б) Мастер-аудиодорожка (озвучка / саундтрек) с полями таймкода старта и громкости */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2.5">
               <label className="text-[11px] font-bold text-amber-300 block">
