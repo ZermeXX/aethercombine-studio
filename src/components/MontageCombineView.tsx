@@ -298,6 +298,7 @@ export interface NarrativeExportSettings {
   crf: number;
   fps: 24 | 30 | 60;
   audio_bitrate_kbps: 320 | 256 | 192;
+  preview_duration_sec?: number;
   subtitles?: SubtitlesFlexibleConfig;
 }
 
@@ -1346,6 +1347,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     crf: 18,
     fps: 24,
     audio_bitrate_kbps: 320,
+    preview_duration_sec: 0,
     ...((initialCombineDraft?.export_settings as Partial<NarrativeExportSettings>) || {})
   }));
 
@@ -2183,7 +2185,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           cfr: typeof exp?.cfr === 'boolean' ? exp.cfr : prev.cfr ?? true,
           fps,
           crf,
-          bitrate_mbps
+          bitrate_mbps,
+          preview_duration_sec: typeof exp?.preview_duration_sec === 'number' && Number.isFinite(exp.preview_duration_sec) && exp.preview_duration_sec >= 0 ? exp.preview_duration_sec : 0,
+          audio_bitrate_kbps: exp?.audio_bitrate_kbps === 192 || exp?.audio_bitrate_kbps === 256 || exp?.audio_bitrate_kbps === 320 ? exp.audio_bitrate_kbps : prev.audio_bitrate_kbps
         };
       });
     }
@@ -3299,6 +3303,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         scene_id: sc.scene_id,
         chapter: sc.title,
         duration_sec: sc.duration,
+        camera_movement: sc.camera_movement,
+        transition: sc.transition === 'fade' ? 'fade' : 'cut',
+        transition_duration: sc.transition_duration,
+        text_overlay: [sc.historical_location, sc.historical_date].filter(Boolean).join('\n'),
         ...(sc.voice_start !== undefined ? { voice_start: sc.voice_start } : {}),
         ...(sc.voice_end !== undefined ? { voice_end: sc.voice_end } : {}),
         ...(sc.historical_date ? { historical_date: sc.historical_date } : {}),
@@ -3321,7 +3329,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       draft_mode: Boolean(exportSettings.draft_mode),
       crf: exportSettings.crf,
       fps: exportSettings.fps,
-      audio_bitrate_kbps: exportSettings.audio_bitrate_kbps
+      audio_bitrate_kbps: exportSettings.audio_bitrate_kbps,
+      bitrate_mbps: exportSettings.bitrate_mbps,
+      preview_duration_sec: exportSettings.preview_duration_sec ?? 0,
+      lower_third_config: {
+        enabled: true,
+        style: lowerThirdStyle,
+        emblem_path: 'aether_art_150x150_A.png',
+        show_sec: [0.5, 5.5],
+        anim_sec: 0.55
+      }
     };
 
     const compactSubtitles: Record<string, unknown> = {
@@ -4288,6 +4305,12 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
 
           <div className="space-y-3 text-xs">
+            <div>
+              <label className="text-[10px] text-slate-400 uppercase block mb-1">Длительность превью (0 = весь фильм)</label>
+              <input type="number" min={0} step={1} value={exportSettings.preview_duration_sec ?? 0}
+                onChange={e => setExportSettings(prev => ({ ...prev, preview_duration_sec: Math.max(0, Number(e.target.value) || 0) }))}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100" />
+            </div>
             {/* Селектор видеокодека (H.264 preset veryfast CRF 20 vs Draft 720p ultrafast vs H.265 preset medium CRF 22) */}
             <div>
               <label className="text-[10px] text-amber-300 font-bold uppercase block mb-1">
