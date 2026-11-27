@@ -34,24 +34,31 @@ function transaction<T>(db:IDBDatabase, stores:string[], mode:IDBTransactionMode
  });
 }
 export interface ProjectAsset { assetId:string; name:string; blob:Blob }
+async function assetDigest(blob:Blob):Promise<string>{
+ return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');
+}
 export class ProjectStorage {
- putAsset(workspaceId:WorkspaceId,projectId:string,asset:ProjectAsset):Promise<void>{
+ async putAsset(workspaceId:WorkspaceId,projectId:string,asset:ProjectAsset):Promise<void>{
   if(!asset.assetId.trim()||!asset.name.trim()||!(asset.blob instanceof Blob))throw new Error('Invalid asset');
-  const record={projectId,assetId:asset.assetId,name:asset.name,blob:asset.blob};
+  const record={projectId,assetId:asset.assetId,name:asset.name,blob:asset.blob,sha256:await assetDigest(asset.blob)};
   return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
    r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').add(record);done(undefined);}catch(e){fail(e);}};
   });
  }
- getAsset(workspaceId:WorkspaceId,projectId:string,assetId:string):Promise<ProjectAsset|null>{
-  return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+ async getAsset(workspaceId:WorkspaceId,projectId:string,assetId:string):Promise<ProjectAsset|null>{
+  const result=await transaction<ProjectAsset & {sha256?:string} | null>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
    r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId){done(null);return;}
     const a=tx.objectStore('project_assets').get([projectId,assetId]);
-    a.onsuccess=()=>{try{const v=a.result;if(!v){done(null);return;}if(!(v.blob instanceof Blob))throw new Error('Invalid stored asset');done({assetId:v.assetId,name:v.name,blob:v.blob});}catch(e){fail(e);}};
+    a.onsuccess=()=>{try{const v=a.result;if(!v){done(null);return;}if(!(v.blob instanceof Blob))throw new Error('Invalid stored asset');done({assetId:v.assetId,name:v.name,blob:v.blob,sha256:v.sha256});}catch(e){fail(e);}};
    }catch(e){fail(e);}};
   });
+  if(!result)return null;
+  if(result.sha256!==undefined && await assetDigest(result.blob)!==result.sha256)throw new Error('Asset checksum mismatch');
+  return {assetId:result.assetId,name:result.name,blob:result.blob};
  }
+ // Hash outside the IndexedDB transaction to avoid transaction inactivity.
  constructor(private readonly db:IDBDatabase){}
  close(){this.db.close();}
  createProject(input:ProjectRecord):Promise<void>{
