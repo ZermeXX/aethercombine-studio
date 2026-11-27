@@ -1,15 +1,19 @@
+import {validateSlotInserts} from '../utils/validateSlotInserts';
 import {useEffect,useState} from 'react';
 import type {ProjectStorage} from '../utils/projectStorage';
 import type {ProjectScope} from '../utils/workspaceProjectContext';
 import type {ProjectPayload} from '../utils/projectPayload';
-import type {TimelineSlot,AudioMasteringConfig} from '../App';
+import type {TimelineSlot,AudioMasteringConfig,SlotInsertItem} from '../App';
 import {collectAssetNames,attachMigrationAsset} from '../utils/migrationAssets';
 
 type Production=NonNullable<ProjectPayload['production']>;
 const defaultMaster:AudioMasteringConfig={loudnorm_enabled:true,integrated_lufs:-14,true_peak_dbtp:-1.5,lra:11,e3_soft_attack_compressor:true,e3_max_peak_over_bed_db:3};
 export function ScopedTimelinePanel({production,onChange}:{production:Production;onChange:(next:Production)=>void}){
  const slots=production.timeline_slots??[],audio=production.audio_mastering??defaultMaster;
- function patch(i:number,change:Partial<TimelineSlot>){onChange({...production,timeline_slots:slots.map((s,n)=>n===i?{...s,...change}:s)});}
+ const [insertError,setInsertError]=useState('');
+ function patch(i:number,change:Partial<TimelineSlot>){try{const next={...slots[i],...change};validateSlotInserts(next);onChange({...production,timeline_slots:slots.map((s,n)=>n===i?next:s)});setInsertError('');}catch{setInsertError('Invalid insert timing or slot duration. Previous values retained.');}}
+ function editInsert(i:number,j:number,change:Partial<SlotInsertItem>){patch(i,{inserts:slots[i].inserts.map((v,n)=>n===j?{...v,...change}:v)});}
+ function addInsert(i:number){const s=slots[i];patch(i,{inserts:[...s.inserts,{insert_id:crypto.randomUUID(),asset_id:'',file_name:'',trigger_at_sec:0,duration_sec:Math.min(5,s.slot_duration_sec),transition_in:{type:'fade',duration_sec:0},transition_out:{type:'none',duration_sec:0}}]});}
  function add(){const id=crypto.randomUUID();onChange({...production,timeline_slots:[...slots,{slot_index:slots.length+1,slot_id:id,title:'New slot',asset_id:'',file_name:'',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:60,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}]});}
  return <section aria-label="Scoped timeline and mastering" className="space-y-3">
  <h3>Timeline &amp; Audio Mastering · Scoped preview</h3>
@@ -22,7 +26,18 @@ export function ScopedTimelinePanel({production,onChange}:{production:Production
  <label>Loop seam<input aria-label={'Slot loop seam '+(i+1)} type="number" min="0" step="0.01" value={s.internal_loop_crossfade_sec} onChange={e=>{const n=Number(e.target.value);if(e.target.validity.valid&&n<s.source_clip_duration_sec)patch(i,{internal_loop_crossfade_sec:n});}}/></label>
  <label>Transition<select aria-label={'Slot transition '+(i+1)} value={s.slot_transition_out.type} onChange={e=>patch(i,{slot_transition_out:{type:e.target.value as TimelineSlot['slot_transition_out']['type'],duration_sec:e.target.value==='none'?0:s.slot_transition_out.duration_sec}})}>{['none','xfade','fade','dissolve'].map(v=><option key={v}>{v}</option>)}</select></label>
  <label>Transition seconds<input aria-label={'Slot transition duration '+(i+1)} type="number" min="0" step="0.01" disabled={s.slot_transition_out.type==='none'} value={s.slot_transition_out.duration_sec} onChange={e=>{const n=Number(e.target.value);if(e.target.validity.valid&&n<s.slot_duration_sec)patch(i,{slot_transition_out:{...s.slot_transition_out,duration_sec:n}});}}/></label>
- <p>Inserts: {s.inserts.length}</p></fieldset>)}
+ <p>Inserts: {s.inserts.length}</p>
+ <button type="button" aria-label={'Add insert to slot '+(i+1)} onClick={()=>addInsert(i)}>Add insert</button>
+ {s.inserts.map((v,j)=>{const suffix=(i+1)+'.'+(j+1);return <fieldset key={v.insert_id} className="border p-2"><legend>Insert {suffix}</legend>
+ <label>Filename<input aria-label={'Insert filename '+suffix} value={v.file_name} onChange={e=>editInsert(i,j,{file_name:e.target.value})}/></label>
+ {(['trigger_at_sec','duration_sec'] as const).map(k=><label key={k}>{k}<input aria-label={'Insert '+k+' '+suffix} type="number" min="0" step="any" value={v[k]} onChange={e=>{if(e.target.value!=='')editInsert(i,j,{[k]:Number(e.target.value)});}}/></label>)}
+ {(['transition_in','transition_out'] as const).map(k=><div key={k}><label>{k}<select aria-label={'Insert '+k+' '+suffix} value={v[k].type} onChange={e=>{const type=e.target.value;editInsert(i,j,k==='transition_in'?{transition_in:{type:type as SlotInsertItem['transition_in']['type'],duration_sec:v[k].duration_sec}}:{transition_out:{type:type as SlotInsertItem['transition_out']['type'],duration_sec:type==='none'?0:v[k].duration_sec}});}}>{(k==='transition_in'?['fade','dissolve']:['none','fade','dissolve']).map(t=><option key={t}>{t}</option>)}</select></label>
+ <label>Seconds<input aria-label={'Insert '+k+' seconds '+suffix} type="number" min="0" step="any" disabled={v[k].type==='none'} value={v[k].duration_sec} onChange={e=>{if(e.target.value!=='')editInsert(i,j,{[k]:{...v[k],duration_sec:Number(e.target.value)}});}}/></label></div>)}
+ <label><input type="checkbox" checked={v.hold_until_end??false} onChange={e=>editInsert(i,j,{hold_until_end:e.target.checked})}/> Hold until end</label>
+ <label><input type="checkbox" checked={v.audio_soft_compressor??false} onChange={e=>editInsert(i,j,{audio_soft_compressor:e.target.checked})}/> Soft compressor</label>
+ <button type="button" aria-label={'Remove insert '+suffix} onClick={()=>patch(i,{inserts:s.inserts.filter((_,n)=>n!==j)})}>Remove insert</button>
+ </fieldset>;})}</fieldset>)}
+ {insertError&&<p role="alert">{insertError}</p>}
  <label><input type="checkbox" checked={audio.loudnorm_enabled} onChange={e=>onChange({...production,audio_mastering:{...audio,loudnorm_enabled:e.target.checked}})}/> Loudnorm enabled</label>
  {(['integrated_lufs','true_peak_dbtp','lra','e3_max_peak_over_bed_db'] as const).map(k=><label key={k}>{k}<input aria-label={k} type="number" step="0.1" value={audio[k]} onChange={e=>onChange({...production,audio_mastering:{...audio,[k]:Number(e.target.value)}})}/></label>)}
  <label><input type="checkbox" checked={audio.e3_soft_attack_compressor} onChange={e=>onChange({...production,audio_mastering:{...audio,e3_soft_attack_compressor:e.target.checked}})}/> Soft attack compressor</label>
