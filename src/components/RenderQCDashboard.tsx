@@ -38,7 +38,14 @@ export default function RenderQCDashboard() {
   return <section className="bg-[#0b0f17] border border-cyan-500/30 rounded-2xl p-4 space-y-3 text-xs text-slate-200">
     <h3 className="font-bold text-cyan-300 text-sm">Enhanced QC Dashboard V8.1</h3>
     <p className="text-slate-400">Загрузите qc_report.json из результата GitHub Actions или Google Drive. Данные обрабатываются локально.</p>
-    <input aria-label="Загрузить QC JSON" type="file" accept=".json,application/json" onChange={e=>{void load(e.target.files?.[0]);e.target.value='';}}/>
+    <label className="inline-flex max-w-full cursor-pointer flex-wrap items-center gap-3 rounded-xl border border-cyan-500/30 bg-slate-900 px-3 py-2 hover:border-cyan-400/70 focus-within:ring-2 focus-within:ring-cyan-400">
+      <input aria-label="Загрузить QC JSON" type="file" accept=".json,application/json" className="sr-only" onChange={e=>{void load(e.target.files?.[0]);e.target.value='';}}/>
+      <span className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/15 border border-cyan-400/40 px-4 py-2 font-semibold text-cyan-200">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/></svg>
+        {report?'Заменить QC-отчёт':'Загрузить QC-отчёт'}
+      </span>
+      <span className="break-all text-slate-400">{filename || 'JSON · до 10 МБ'}</span>
+    </label>
     {error&&<p role="alert" className="text-red-400">{error}</p>}
     {report&&<>
       <div className="flex justify-between"><span>{filename} · {str(report.render_mode)}</span><button type="button" onClick={()=>{setReport(null);setFilename('');}} className="text-cyan-300">Очистить</button></div>
