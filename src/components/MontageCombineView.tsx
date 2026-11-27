@@ -196,6 +196,8 @@ export interface NarrativeSceneItem {
     sfx_gain_db?: number;
     [key: string]: unknown;
   };
+  source_audio_enabled?: boolean;
+  source_audio_volume?: number;
   voiceover_volume?: number;
   ambient_volume?: number;
   ambient_audio?: string;
@@ -236,6 +238,8 @@ export interface ExportedNarrativeSceneItem {
   transition_duration: number;
   mute_audio: boolean;
   ambient_gain_db: number;
+  source_audio_enabled?: boolean;
+  source_audio_volume?: number;
   voiceover_volume: number;
   ambient_volume: number;
   ambient_audio?: string;
@@ -446,7 +450,8 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
     if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
     else if (valid(d,0.001) && valid(sc.transition_duration,0) && sc.transition_duration>d) add('warning',label+'переход длиннее сцены.');
-    for (const key of ['voiceover_volume','ambient_volume']) if (sc[key] !== undefined && !valid(sc[key],0,4)) add('error',label+key+' вне 0–4.');
+    if (sc.source_audio_enabled !== undefined && typeof sc.source_audio_enabled !== 'boolean') add('error',label+'source_audio_enabled должен быть boolean.');
+    for (const key of ['voiceover_volume','ambient_volume','source_audio_volume']) if (sc[key] !== undefined && !valid(sc[key],0,4)) add('error',label+key+' вне 0–4.');
     if (sc.voice_start !== undefined && !valid(sc.voice_start,0)) add('error',label+'некорректный voice_start.');
     if (valid(sc.voice_end,0) && valid(sc.voice_start,0) && sc.voice_end<sc.voice_start) add('error',label+'voice_end раньше voice_start.');
   });
@@ -848,6 +853,9 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         </select></label>
         <label>Макс. продление, с <input type="number" min={0} max={2} step={0.1} value={normalizeExtension(sc.max_extension_sec)} disabled={!!sc.video_duration_mode && sc.video_duration_mode !== 'hybrid'} onChange={e=>updateScene(idx,{max_extension_sec:normalizeExtension(Number(e.target.value))})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
         <label><input type="checkbox" checked={sc.allow_video_reuse === true} onChange={e=>updateScene(idx,{allow_video_reuse:e.target.checked})}/> Разрешить повтор файла</label>
+        <label><input type="checkbox" checked={sc.source_audio_enabled !== false} onChange={e=>updateScene(idx,{source_audio_enabled:e.target.checked})}/> Оригинальный звук видео</label>
+        <label>Окружение MP4 <input aria-label="Громкость оригинального окружения" type="number" min={0} max={4} step={0.05} disabled={sc.source_audio_enabled === false}
+          value={normalizeV8Volume(sc.source_audio_volume,1)} onChange={e=>updateScene(idx,{source_audio_volume:normalizeV8Volume(Number(e.target.value),1)})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
         <label>Диктор <input aria-label="Громкость диктора" type="number" min={0} max={4} step={0.05}
           value={normalizeV8Volume(sc.voiceover_volume, 1)}
           onChange={e => updateScene(idx, { voiceover_volume: normalizeV8Volume(Number(e.target.value), 1) })}
@@ -2065,6 +2073,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             video_duration_mode: normalizeDurationMode(sc.video_duration_mode),
             max_extension_sec: normalizeExtension(sc.max_extension_sec),
             allow_video_reuse: sc.allow_video_reuse === true,
+            source_audio_enabled: sc.source_audio_enabled !== false,
+            source_audio_volume: normalizeV8Volume(sc.source_audio_volume,1),
             voiceover_volume: normalizeV8Volume(sc.voiceover_volume, typeof scAudioProc?.voiceover_gain_db === 'number' ? normalizeV8Volume(Math.pow(10, scAudioProc.voiceover_gain_db / 20), 1) : 1),
             ambient_volume: normalizeV8Volume(sc.ambient_volume ?? (typeof sc.ambient_audio === 'object' && sc.ambient_audio ? (sc.ambient_audio as Record<string, unknown>).volume : undefined), 0.35),
             ambient_audio: typeof sc.ambient_audio === 'string' ? sc.ambient_audio : typeof sc.ambient_audio === 'object' && sc.ambient_audio ? String((sc.ambient_audio as Record<string, unknown>).file_name || '') : '',
@@ -3121,6 +3131,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       transition_duration: resolvedTransDur,
       mute_audio: resolvedMute,
       ambient_gain_db: resolvedAmbientGainDb,
+      source_audio_enabled: sc.source_audio_enabled !== false,
+      source_audio_volume: normalizeV8Volume(sc.source_audio_volume,1),
       voiceover_volume: normalizeV8Volume(sc.voiceover_volume, 1),
       ambient_volume: normalizeV8Volume(sc.ambient_volume, 0.35),
       ...(sc.ambient_audio?.trim() ? { ambient_audio: sc.ambient_audio.trim() } : {}),
@@ -3533,6 +3545,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         allow_video_reuse: sc.allow_video_reuse === true,
         transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
         transition_duration: sc.transition_duration,
+        source_audio_enabled: sc.source_audio_enabled !== false,
+        source_audio_volume: normalizeV8Volume(sc.source_audio_volume,1),
         voiceover_volume: sc.voiceover_volume,
         ambient_volume: sc.ambient_volume,
         ...(sc.ambient_audio ? { ambient_audio: sc.ambient_audio } : {}),
