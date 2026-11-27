@@ -98,6 +98,7 @@ import {
   clearWorkspaceDraft,
   loadActiveRenderJob,
   loadGoogleAuthRecord,
+  migrateLegacySecrets,
   loadTelegramSession,
   loadWorkspaceDraft,
   saveActiveRenderJob,
@@ -490,6 +491,7 @@ export default function App(){
 }
 function LegacyStudio() {
   const [bootSnapshot] = useState(() => {
+    migrateLegacySecrets();
     const googleAuth = loadGoogleAuthRecord();
     const restoredGoogleSession = getRestoredGoogleSession();
     const draft = loadWorkspaceDraft();

@@ -2,9 +2,6 @@ from playwright.sync_api import sync_playwright, expect
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page()
-    page.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
-    page.evaluate("""() => {localStorage.setItem('aether_workspace_draft','legacy-fixture');localStorage.setItem('ac_youtube_seo_state_v1','seo-fixture');}""")
-    # Audit storage calls made by application code, not fixture setup/assertions.
     audit = """() => {
       window.__storageAudit = [];
       window.__auditEnabled = true;
@@ -16,7 +13,11 @@ with sync_playwright() as p:
         };
       }
     }"""
-    page.evaluate(audit)
+    page.add_init_script("("+audit+")()")
+    page.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
+    expect(page.get_by_role("button",name="Open isolated project editor")).to_be_visible()
+    assert page.evaluate("window.__storageAudit.length") == 0
+    page.evaluate("""() => {window.__auditEnabled=false;try{localStorage.setItem('aether_workspace_draft','legacy-fixture');localStorage.setItem('ac_youtube_seo_state_v1','seo-fixture');localStorage.setItem('ac_gh_token','synthetic-migration-fixture');}finally{window.__auditEnabled=true;}}""")
     page.get_by_role("button",name="Open isolated project editor").click()
     ws=page.get_by_label("Isolated workspace")
     name=page.get_by_label("New project name")
@@ -147,7 +148,8 @@ with sync_playwright() as p:
     entries = page.evaluate('window.__storageAudit')
     assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     page.reload()
-    page.evaluate(audit)
+    expect(page.get_by_role("button",name="Open isolated project editor")).to_be_visible()
+    assert page.evaluate('window.__storageAudit.length') == 0
     page.get_by_role("button",name="Open isolated project editor").click()
     expect(page.get_by_label("VerbaFlow script")).to_have_value("Native history narration")
     page.get_by_role("button",name="Open native Voice Studio").click()
@@ -164,6 +166,8 @@ with sync_playwright() as p:
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
     entries = page.evaluate('window.__storageAudit')
     assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_gh_token')==='synthetic-migration-fixture'}finally{window.__auditEnabled=true}}")
+    print('ISOLATED_COLD_START_STORAGE_PASS')
     print('ISOLATED_PRODUCTION_STORAGE_ACCESS_PASS')
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")
