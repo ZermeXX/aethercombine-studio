@@ -78,6 +78,8 @@ function normalizeV8TransitionDuration(value: unknown, mode: string): number {
 }
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down' | 'static';
+type CameraPolicy = 'native' | 'cinematic';
+const normalizeCameraPolicy = (v: unknown): CameraPolicy | undefined => v === 'native' || v === 'cinematic' ? v : undefined;
 type VideoDurationMode = 'hybrid' | 'native' | 'stretch' | 'freeze' | 'loop';
 const normalizeDurationMode = (v: unknown): VideoDurationMode | undefined => ['hybrid','native','stretch','freeze','loop'].includes(String(v)) ? v as VideoDurationMode : undefined;
 const normalizeExtension = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? Math.max(0,Math.min(2,v)) : 2;
@@ -142,6 +144,7 @@ export interface NarrativeSceneItem {
   voice_end?: number;
   camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  camera_policy?: CameraPolicy;
   video_duration_mode?: VideoDurationMode;
   max_extension_sec?: number;
   allow_video_reuse?: boolean;
@@ -180,6 +183,7 @@ export interface NarrativeSceneItem {
       | string;
     camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  camera_policy?: CameraPolicy;
   video_duration_mode?: VideoDurationMode;
   max_extension_sec?: number;
   allow_video_reuse?: boolean;
@@ -223,6 +227,7 @@ export interface ExportedNarrativeSceneItem {
   voice_end?: number;
   camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  camera_policy?: CameraPolicy;
   video_duration_mode?: VideoDurationMode;
   max_extension_sec?: number;
   allow_video_reuse?: boolean;
@@ -248,6 +253,7 @@ export interface ExportedNarrativeSceneItem {
     };
     camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  camera_policy?: CameraPolicy;
   video_duration_mode?: VideoDurationMode;
   max_extension_sec?: number;
   allow_video_reuse?: boolean;
@@ -435,6 +441,7 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.video_duration_mode !== undefined && !normalizeDurationMode(sc.video_duration_mode)) add('error',label+'неизвестный режим длительности.');
     if (sc.max_extension_sec !== undefined && !valid(sc.max_extension_sec,0,2)) add('error',label+'продление вне 0–2 секунд.');
     if (sc.allow_video_reuse !== undefined && typeof sc.allow_video_reuse !== 'boolean') add('error',label+'allow_video_reuse должен быть boolean.');
+    if (sc.camera_policy !== undefined && !normalizeCameraPolicy(sc.camera_policy)) add('error',label+'неизвестная политика камеры.');
     if (sc.camera_zoom !== undefined && !valid(sc.camera_zoom,1,1.5)) add('error',label+'масштаб камеры вне 1–1.5.');
     if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
     if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
@@ -807,7 +814,8 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
               camera_movement: e.target.value as CameraVectorType
             })
           }
-          title="Вектор движения камеры (camera_movement)"
+          disabled={sc.camera_policy === 'native'}
+          title="Вектор движения камеры (camera_movement); применяется только в Cinematic"
           className="bg-slate-900 border border-indigo-500/40 rounded px-1 py-1 text-[10px] font-mono text-indigo-300 outline-none shrink-0"
         >
           <option value="zoom_in">zoom_in</option>
@@ -821,9 +829,14 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
       </div>
 
       <div className="col-span-3 flex items-center gap-2 text-[10px] text-slate-300">
+        <label>Камера <select aria-label="Политика камеры" value={sc.camera_policy ?? 'auto'} onChange={e=>updateScene(idx,{camera_policy:normalizeCameraPolicy(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto (video: Native, image: Cinematic)</option>
+          <option value="native">Native — оригинал</option>
+          <option value="cinematic">Cinematic — движение Studio</option>
+        </select></label>
         <label>Масштаб камеры</label>
         <input aria-label="Масштаб камеры" type="range" min={100} max={150} step={1}
-          disabled={sc.camera_movement === 'static'}
+          disabled={sc.camera_policy === 'native' || sc.camera_movement === 'static'}
           value={Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}
           onChange={e => updateScene(idx, { camera_zoom: Number(e.target.value) / 100 })}
           className="flex-1 min-w-0" />
@@ -2048,6 +2061,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : {}),
             ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
             camera_zoom: normalizeCameraZoom(sc.camera_zoom ?? scVideoProc?.camera_zoom),
+            camera_policy: normalizeCameraPolicy(sc.camera_policy ?? scVideoProc?.camera_policy),
             video_duration_mode: normalizeDurationMode(sc.video_duration_mode),
             max_extension_sec: normalizeExtension(sc.max_extension_sec),
             allow_video_reuse: sc.allow_video_reuse === true,
@@ -3098,6 +3112,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         : {}),
       camera_movement: resolvedCamera,
       camera_zoom: normalizeCameraZoom(sc.camera_zoom),
+      ...(sc.camera_policy ? {camera_policy:sc.camera_policy} : {}),
       ...(sc.video_duration_mode ? {video_duration_mode:sc.video_duration_mode} : {}),
       max_extension_sec: normalizeExtension(sc.max_extension_sec),
       allow_video_reuse: sc.allow_video_reuse === true,
@@ -3512,7 +3527,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: sc.duration,
         camera_movement: sc.camera_movement,
         camera_zoom: normalizeCameraZoom(sc.camera_zoom),
-        ...(sc.video_duration_mode ? {video_duration_mode:sc.video_duration_mode} : {}),
+        ...(sc.camera_policy ? {camera_policy:sc.camera_policy} : {}),
+      ...(sc.video_duration_mode ? {video_duration_mode:sc.video_duration_mode} : {}),
         max_extension_sec: normalizeExtension(sc.max_extension_sec),
         allow_video_reuse: sc.allow_video_reuse === true,
         transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
