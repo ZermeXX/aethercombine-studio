@@ -1284,7 +1284,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               id="eleven_key_1"
               type="password"
               value={apiKey1}
-              onChange={e => setApiKey1(e.target.value)}
+              disabled={isolatedEditing} onChange={e => setApiKey1(e.target.value)}
               placeholder="sk_... (введите ElevenLabs API Key #1)"
               className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 outline-none"
             />
@@ -1342,7 +1342,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               id="eleven_key_2"
               type="password"
               value={apiKey2}
-              onChange={e => setApiKey2(e.target.value)}
+              disabled={isolatedEditing} onChange={e => setApiKey2(e.target.value)}
               placeholder="sk_... (введите ElevenLabs API Key #2)"
               className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 outline-none"
             />

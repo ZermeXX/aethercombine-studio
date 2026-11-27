@@ -77,5 +77,22 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Open native Montage Combine").click()
     expect(page.get_by_role("group",name="Native Montage Combine")).to_be_visible()
     assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
+    import base64
+    page.get_by_role("button",name="Close native module").click()
+    png=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=")
+    page.get_by_label("Project image A",exact=True).set_input_files({"name":"cover.png","mimeType":"image/png","buffer":png})
+    expect(page.get_by_text("Project image saved: A",exact=True)).to_be_visible()
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    ws.select_option("the_whisker_trio")
+    expect(page.get_by_alt_text("Stored project image A")).to_have_count(0)
+    ws.select_option("histoviva")
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    page.get_by_role("button",name="Open native Thumbnail Studio").click()
+    expect(page.get_by_role("group",name="Native Thumbnail Studio")).to_be_visible()
+    page.get_by_role("button",name="Open native Voice Studio").click()
+    expect(page.get_by_role("group",name="Native Voice Studio")).to_be_visible()
+    page.get_by_role("button",name="Open native Image Art Editor").click()
+    expect(page.get_by_role("group",name="Native Image Art Editor")).to_be_visible()
+    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

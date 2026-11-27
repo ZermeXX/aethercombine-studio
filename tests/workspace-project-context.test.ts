@@ -91,3 +91,18 @@ test('thumbnail and voice preferences are isolated and credential fields are dis
  expect((await c.read({workspaceId:'the_whisker_trio',projectId:w.project.projectId})).payload?.legacyExtras).toBeUndefined();
  }finally{s.close();}
 });
+
+test('fixed project image slots replace only within the owning project',async()=>{
+ const s=new ProjectStorage(await openProjectDatabase(new IDBFactory())),c=new WorkspaceProjectContext(s);
+ try{
+ const h=await c.create('histoviva','H'),w=await c.create('the_whisker_trio','W');
+ const png=(v:string)=>new Blob([v],{type:'image/png'});
+ await s.replaceProjectImage('histoviva',h.project.projectId,'A',png('first'));
+ await s.replaceProjectImage('histoviva',h.project.projectId,'A',png('second'));
+ await s.replaceProjectImage('the_whisker_trio',w.project.projectId,'A',png('other'));
+ expect(await (await s.getAsset('histoviva',h.project.projectId,'project-image:A'))?.blob.text()).toBe('second');
+ expect(await (await s.getAsset('the_whisker_trio',w.project.projectId,'project-image:A'))?.blob.text()).toBe('other');
+ await expect(s.replaceProjectImage('the_whisker_trio',h.project.projectId,'A',png('wrong'))).rejects.toThrow();
+ await expect(s.replaceProjectImage('histoviva',h.project.projectId,'B',new Blob(['x'],{type:'text/plain'}))).rejects.toThrow();
+ }finally{s.close();}
+});

@@ -32,6 +32,7 @@ declare global {
 
 interface ThumbnailStudioViewProps {
   isolatedEditing?: boolean;
+  projectImageUrls?: Partial<Record<ThumbnailSlotId,string>>;
   initialSlots?: Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
   onSlotsChange?: (slots: Record<ThumbnailSlotId, ThumbnailSlotConfig>) => void;
   thumbTitle: string;
@@ -985,6 +986,7 @@ const computeEndScreenWindow = (durationSec: number): string => {
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   isolatedEditing = false,
+  projectImageUrls,
   initialSlots,
   onSlotsChange,
   thumbTitle,
@@ -1039,6 +1041,18 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     C: null
   });
 
+  useEffect(()=>{
+    if(!isolatedEditing)return;
+    let live=true;
+    for(const slot of ['A','B','C'] as const){
+      const url=projectImageUrls?.[slot];
+      if(!url)continue;
+      const img=new Image();
+      img.onload=()=>{if(live)setSlotImages(prev=>({...prev,[slot]:img}));};
+      img.src=url;
+    }
+    return()=>{live=false;};
+  },[isolatedEditing,projectImageUrls]);
   const projectTitleSeed = (youtubeMockTitle || thumbTitle || '').trim();
   const lastSyncedExternalTitleRef = useRef<string>(thumbTitle);
 
@@ -2890,7 +2904,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <input
                       type="text"
                       value={cfAccountId}
-                      onChange={e => setCfAccountId(e.target.value)}
+                      disabled={isolatedEditing} onChange={e => setCfAccountId(e.target.value)}
                       placeholder="Например: 8a1b2c3d4e5f67890..."
                       className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />
@@ -2902,7 +2916,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <input
                       type="password"
                       value={cfApiToken}
-                      onChange={e => setCfApiToken(e.target.value)}
+                      disabled={isolatedEditing} onChange={e => setCfApiToken(e.target.value)}
                       placeholder="Bearer API Token"
                       className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />

@@ -46,6 +46,15 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').add(record);done(undefined);}catch(e){fail(e);}};
   });
  }
+ /** Fixed image slots only; ownership checked in the write transaction. */
+ async replaceProjectImage(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'|'art',blob:Blob):Promise<void>{
+  if(!['A','B','C','art'].includes(slot)||!(blob instanceof Blob)||!blob.size||blob.size>32*1024*1024||!['image/png','image/jpeg','image/webp'].includes(blob.type))throw new Error('Invalid project image');
+  const record={projectId,assetId:'project-image:'+slot,name:'project-image-'+slot,blob,sha256:await assetDigest(blob)};
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').put(record);done(undefined);}catch(e){fail(e);}};
+  });
+ }
  listAssets(workspaceId:WorkspaceId,projectId:string):Promise<{assetId:string;name:string;size:number}[]>{
   return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const p=tx.objectStore('projects').get(projectId);

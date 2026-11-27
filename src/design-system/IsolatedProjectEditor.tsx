@@ -1,3 +1,4 @@
+import {ProjectImagePanel,type ProjectImageUrls} from './ProjectImagePanel';
 import {ThumbnailStudioView} from '../components/ThumbnailStudioView';
 import {VoiceStudioView} from '../components/VoiceStudioView';
 import {ImageArtEditorView} from '../components/ImageArtEditorView';
@@ -15,7 +16,7 @@ import {applyModulePatch} from '../utils/scopedModulePersistence';
 import type {ProjectPayload} from '../utils/projectPayload';
 import type {SetStateAction} from 'react';
 import {projectPayload} from '../utils/projectPayload';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
 import {WorkspaceProjectContext,type ProjectSnapshot} from '../utils/workspaceProjectContext';
 import {CHANNEL_PROFILES,type WorkspaceId} from './workspaces';
@@ -40,6 +41,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [extras,setExtras]=useState('');
  const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'>('none');
  const [notice,setNotice]=useState('');
+ const [imageUrls,setImageUrls]=useState<ProjectImageUrls>({});
  const [artInput,setArtInput]=useState<{dataUrl:string;label:string;nonce:number}|null>(null);
  const combineInvalid=useRef(false);
  const [dirty,setDirty]=useState(false);
@@ -49,6 +51,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  function hydrate(snapshot:ProjectSnapshot|null){
   combineInvalid.current=false;setNativeTab('none');setNotice('');setArtInput(null);
   setProduction(snapshot?.payload?.production===undefined?'':JSON.stringify(snapshot.payload.production,null,2));setExtras(snapshot?.payload?.legacyExtras===undefined?'':JSON.stringify(snapshot.payload.legacyExtras,null,2));
+  if(snapshot?.project.projectId!==active?.project.projectId)setImageUrls({});
   setActive(snapshot);setScript(snapshot?.payload?.script??'');setChapters(snapshot?.payload?.chapters??'');setSeo(snapshot?.payload?.seoScript??'');setTitle(snapshot?.payload?.thumbnailTitle??'');setBadge(snapshot?.payload?.thumbnailBadge??'');setDirty(false);
  }
  useEffect(()=>{
@@ -151,6 +154,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  };
  const onSlots=useRef<NonNullable<ComponentProps<typeof ThumbnailStudioView>['onSlotsChange']>>(value=>captureExtras.current('thumbnails',value)).current;
  const onVoice=useRef<NonNullable<ComponentProps<typeof VoiceStudioView>['onPreferencesChange']>>(value=>captureExtras.current('voice',value)).current;
+ const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
@@ -192,15 +196,16 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} onBusy={setAssetBusy} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
  </fieldset>}
 
+ {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} onUrls={setImageUrls} onBusy={setAssetBusy} busy={busy||assetBusy}/>}
  {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
- <ThumbnailStudioView isolatedEditing initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={(dataUrl,label)=>{setArtInput({dataUrl,label,nonce:Date.now()});setNativeTab('art');}} onNotify={setNotice}/>
+ <ThumbnailStudioView isolatedEditing projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={(dataUrl,label)=>{setArtInput({dataUrl,label,nonce:Date.now()});setNativeTab('art');}} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='voice'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':voice'} aria-label="Native Voice Studio">
  <VoiceStudioView isolatedEditing initialPreferences={nativeDraft.legacyExtras?.voice as ComponentProps<typeof VoiceStudioView>['initialPreferences']} onPreferencesChange={onVoice} scriptText={script} onScriptTextChange={v=>{setScript(v);setDirty(true);}} onMasterVoiceoverReady={()=>{}} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='art'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':art'} aria-label="Native Image Art Editor">
  <p>Art canvas is temporary; export manually before switching projects.</p>
- <ImageArtEditorView incomingAsset={artInput} onNotify={setNotice}/>
+ <ImageArtEditorView incomingAsset={artSource} onNotify={setNotice}/>
  </fieldset>}
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
