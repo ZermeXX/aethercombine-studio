@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { StudioShell } from './design-system/StudioShell';
+import {readWorkspaceSelection,saveWorkspaceSelection,type WorkspaceId} from './design-system/workspaces';
 import {
   Layers,
   Clapperboard,
@@ -509,6 +510,11 @@ export default function App() {
   }, []);
 
   const [activeTab, setActiveTab] = useState<TabId>('combine');
+  const [workspace,setWorkspace] = useState<WorkspaceId>(readWorkspaceSelection);
+  const handleWorkspaceChange = (next:WorkspaceId) => {
+    setWorkspace(next);
+    saveWorkspaceSelection(next);
+  };
   const [tabPulseKey, setTabPulseKey] = useState<number>(0);
 
   const handleSelectTab = (nextTab: TabId) => {
@@ -4255,7 +4261,7 @@ export default function App() {
 
       </header>
 
-      <StudioShell active={activeTab} onSelect={handleSelectTab}>
+      <StudioShell active={activeTab} onSelect={handleSelectTab} workspace={workspace} onWorkspaceChange={handleWorkspaceChange}>
       <main
         onPaste={handleGlobalManifestPaste}
         className="relative z-10 flex-1 min-w-0 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
