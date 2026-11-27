@@ -91,7 +91,15 @@ export async function restoreMigrationBackup(db:IDBDatabase,workspaceId:Workspac
 }
 // Rollback only unmodified, inactive imports with no associated assets or history.
 // Retain the backup and marker so the operation cannot silently reimport.
-export function rollbackLegacyImport(db:IDBDatabase,workspaceId:WorkspaceId,projectId:string):Promise<void>{
+export async function rollbackLegacyImport(db:IDBDatabase,workspaceId:WorkspaceId,projectId:string):Promise<void>{
+ const snapshot=await new Promise<any>((resolve,reject)=>{
+  const tx=db.transaction('migration_backups','readonly'),req=tx.objectStore('migration_backups').get(MARKER);
+  tx.oncomplete=()=>resolve(req.result);tx.onabort=()=>reject(tx.error);
+ });
+ if(!snapshot||snapshot.workspaceId!==workspaceId||snapshot.projectId!==projectId)throw new Error('Backup unavailable');
+ const canonical=JSON.stringify({name:string(snapshot.name),payload:projectPayload(snapshot.payload)});
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical))),b=>b.toString(16).padStart(2,'0')).join('');
+ if(digest!==snapshot.digest)throw new Error('Backup checksum mismatch');
  return new Promise((resolve,reject)=>{
   const tx=db.transaction(['metadata','projects','workspace_state','project_assets','project_revisions','migration_backups'],'readwrite');
   let error:unknown;tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error??tx.error);
@@ -102,7 +110,7 @@ export function rollbackLegacyImport(db:IDBDatabase,workspaceId:WorkspaceId,proj
   for(const request of requests)request.onsuccess=()=>{if(--pending!==0)return;try{
    const [marker,record,active,assets,revisions,backup]=requests.map(r=>r.result);
    const p=projectMetadata(record);
-   if(!marker||marker.status!=='imported_partial'||marker.workspaceId!==workspaceId||marker.projectId!==projectId||p.workspaceId!==workspaceId||p.revision!==1||active?.projectId===projectId||assets||revisions||!backup||backup.projectId!==projectId||backup.workspaceId!==workspaceId||backup.digest!==marker.digest||backup.name!==p.name||JSON.stringify(projectPayload(record.payload))!==JSON.stringify(projectPayload(backup.payload)))throw new Error('Rollback unsafe; preserve project');
+   if(!marker||marker.status!=='imported_partial'||marker.workspaceId!==workspaceId||marker.projectId!==projectId||p.workspaceId!==workspaceId||p.revision!==1||active?.projectId===projectId||assets||revisions||!backup||backup.projectId!==projectId||backup.workspaceId!==workspaceId||backup.digest!==marker.digest||backup.digest!==digest||JSON.stringify({name:backup.name,payload:projectPayload(backup.payload)})!==canonical||backup.name!==p.name||JSON.stringify(projectPayload(record.payload))!==JSON.stringify(projectPayload(backup.payload)))throw new Error('Rollback unsafe; preserve project');
    projects.delete(projectId);meta.put({...marker,status:'rolled_back'});
   }catch(e){fail(e);}};
  });
