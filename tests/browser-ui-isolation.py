@@ -144,18 +144,8 @@ with sync_playwright() as p:
     page.locator("#voice_gender_select").select_option("female")
     page.get_by_role("button",name="Save project").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_have_count(0)
-    # Firebase auth is still app-global; distinguish its exact startup operations
-    # from production storage access. No wildcard exemption for Firebase writes.
     entries = page.evaluate('window.__storageAudit')
-    def auth_startup(e):
-        return e["area"] == "session" and (
-            (e["key"] == "__sak" and e["method"] in ("setItem", "removeItem")) or
-            (e["key"].startswith("firebase:redirectUser:") and e["key"].endswith(":[DEFAULT]") and e["method"] == "getItem") or
-            (e["key"].startswith("firebase:pendingRedirect:") and e["key"].endswith(":[DEFAULT]") and e["method"] in ("getItem", "removeItem"))
-        )
-    unexpected = [e for e in entries if not auth_startup(e)]
-    assert not unexpected, [{"area":e["area"],"method":e["method"]} for e in unexpected]
-    print("GLOBAL_AUTH_STARTUP_ACCESS_COUNT", len(entries))
+    assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     page.reload()
     page.evaluate(audit)
     page.get_by_role("button",name="Open isolated project editor").click()
@@ -172,18 +162,8 @@ with sync_playwright() as p:
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_voice_settings')}finally{window.__auditEnabled=true}}")=="voice-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
-    # Firebase auth is still app-global; distinguish its exact startup operations
-    # from production storage access. No wildcard exemption for Firebase writes.
     entries = page.evaluate('window.__storageAudit')
-    def auth_startup(e):
-        return e["area"] == "session" and (
-            (e["key"] == "__sak" and e["method"] in ("setItem", "removeItem")) or
-            (e["key"].startswith("firebase:redirectUser:") and e["key"].endswith(":[DEFAULT]") and e["method"] == "getItem") or
-            (e["key"].startswith("firebase:pendingRedirect:") and e["key"].endswith(":[DEFAULT]") and e["method"] in ("getItem", "removeItem"))
-        )
-    unexpected = [e for e in entries if not auth_startup(e)]
-    assert not unexpected, [{"area":e["area"],"method":e["method"]} for e in unexpected]
-    print("GLOBAL_AUTH_STARTUP_ACCESS_COUNT", len(entries))
+    assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     print('ISOLATED_PRODUCTION_STORAGE_ACCESS_PASS')
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

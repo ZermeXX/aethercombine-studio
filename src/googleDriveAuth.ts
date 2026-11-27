@@ -30,8 +30,11 @@ export const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const SESSION_TOKEN_KEY = 'aether_gdrive_session_token';
 const LEGACY_PURGE_KEY = 'aether_gdrive_token_purged_v1';
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
+let authInstance: ReturnType<typeof getAuth> | undefined;
+function ensureAuth(){
+ if(!authInstance){ const app=getApps().length===0?initializeApp(firebaseConfig):getApp(); authInstance=getAuth(app); }
+ return authInstance;
+}
 
 let isSigningIn = false;
 let silentRefreshInFlight: Promise<{ user: User; accessToken: string } | null> | null = null;
@@ -84,7 +87,9 @@ const purgeLegacyLocalStorageToken = (): SessionTokenRecord | null => {
   return migrated;
 };
 
-const legacyMigrated = purgeLegacyLocalStorageToken();
+let legacyMigrated: SessionTokenRecord | null = null;
+let migrationAttempted = false;
+function ensureLegacyMigration(){if(!migrationAttempted){migrationAttempted=true;legacyMigrated=purgeLegacyLocalStorageToken();}}
 
 /* ------------------------------------------------------------------ */
 /* OAuth helpers                                                       */
@@ -152,13 +157,14 @@ export const getRestoredGoogleSession = (): {
   accessToken: string;
   expiresAt: number;
 } | null => {
+  ensureLegacyMigration();
   const session = readSessionToken() || legacyMigrated;
   if (!session || session.expires_at - Date.now() <= GOOGLE_TOKEN_REFRESH_MARGIN_MS) return null;
   cachedAccessToken = session.access_token;
   cachedExpiresAt = session.expires_at;
   const stored = loadGoogleAuthRecord();
   const activeUser =
-    auth.currentUser || (stored.profile ? profileToRestoredUser(stored.profile) : fallbackUser());
+    ensureAuth().currentUser || (stored.profile ? profileToRestoredUser(stored.profile) : fallbackUser());
   return { user: activeUser, accessToken: session.access_token, expiresAt: session.expires_at };
 };
 
@@ -166,10 +172,11 @@ export const getRestoredGoogleSession = (): {
 export const googleDriveSilentRefresh = async (
   loginHint?: string
 ): Promise<{ user: User; accessToken: string } | null> => {
+  ensureLegacyMigration();
   if (silentRefreshInFlight) return silentRefreshInFlight;
   const stored = loadGoogleAuthRecord();
-  const resolvedHint = (loginHint || auth.currentUser?.email || stored.profile?.email || '').trim();
-  if (!resolvedHint && !auth.currentUser) return null;
+  const resolvedHint = (loginHint || ensureAuth().currentUser?.email || stored.profile?.email || '').trim();
+  if (!resolvedHint && !ensureAuth().currentUser) return null;
 
   const runSilent = async (): Promise<{ user: User; accessToken: string } | null> => {
     try {
@@ -178,7 +185,7 @@ export const googleDriveSilentRefresh = async (
         prompt: 'none',
         loginHint: resolvedHint || undefined
       });
-      const result = await signInWithPopup(auth, silentProvider);
+      const result = await signInWithPopup(ensureAuth(), silentProvider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (!credential?.accessToken) return null;
       const expiresAt = extractExpiresAtMs(result);
@@ -192,7 +199,7 @@ export const googleDriveSilentRefresh = async (
           prompt: '',
           loginHint: resolvedHint || undefined
         });
-        const result = await signInWithPopup(auth, emptyPromptProvider);
+        const result = await signInWithPopup(ensureAuth(), emptyPromptProvider);
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (!credential?.accessToken) return null;
         const expiresAt = extractExpiresAtMs(result);
@@ -229,7 +236,7 @@ export const initDriveAuth = (
     }
   }
 
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  return onAuthStateChanged(ensureAuth(), async (user: User | null) => {
     const session = readSessionToken();
     const hasFreshSessionToken =
       !!session && session.expires_at - Date.now() > GOOGLE_TOKEN_REFRESH_MARGIN_MS;
@@ -276,11 +283,12 @@ export const initDriveAuth = (
 
 export const googleDriveSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
+    ensureLegacyMigration();
     isSigningIn = true;
     const stored = loadGoogleAuthRecord();
-    const loginHint = (auth.currentUser?.email || stored.profile?.email || '').trim();
+    const loginHint = (ensureAuth().currentUser?.email || stored.profile?.email || '').trim();
     const interactiveProvider = createGoogleProvider({ ...(loginHint ? { loginHint } : {}) });
-    const result = await signInWithPopup(auth, interactiveProvider);
+    const result = await signInWithPopup(ensureAuth(), interactiveProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Не удалось получить OAuth-токен доступа к Google Drive');
@@ -294,6 +302,7 @@ export const googleDriveSignIn = async (): Promise<{ user: User; accessToken: st
 };
 
 export const getDriveAccessToken = (): string | null => {
+  ensureLegacyMigration();
   if (cachedAccessToken && cachedExpiresAt > Date.now() + 10_000) return cachedAccessToken;
   const session = readSessionToken();
   if (session && session.expires_at > Date.now() + 10_000) {
@@ -305,6 +314,7 @@ export const getDriveAccessToken = (): string | null => {
 };
 
 export const isDriveTokenFresh = (): boolean => {
+  ensureLegacyMigration();
   if (cachedAccessToken && cachedExpiresAt - Date.now() > GOOGLE_TOKEN_REFRESH_MARGIN_MS) return true;
   const session = readSessionToken();
   return !!session && session.expires_at - Date.now() > GOOGLE_TOKEN_REFRESH_MARGIN_MS;
@@ -312,7 +322,7 @@ export const isDriveTokenFresh = (): boolean => {
 
 export const googleDriveLogout = async () => {
   try {
-    await auth.signOut();
+    await ensureAuth().signOut();
   } catch {
     /* ignore signOut errors when session was restored purely from storage */
   }
