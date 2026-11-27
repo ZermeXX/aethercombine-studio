@@ -1,3 +1,5 @@
+import {WorkspaceProjectContext,WorkspaceSwitchCoordinator,emptyProjectPayload} from '../src/utils/workspaceProjectContext';
+import {saveModulePatch} from '../src/utils/scopedModulePersistence';
 import {attachMigrationAsset,auditMigrationAssets,persistExternalAssetReferences,readExternalAssetReferences} from '../src/utils/migrationAssets';
 import {migrateLegacyDraft,restoreMigrationBackup,rollbackLegacyImport,LEGACY_DRAFT_KEY} from '../src/utils/legacyMigration';
 import {openProjectDatabase, ProjectStorage} from '../src/utils/projectStorage';
@@ -51,6 +53,17 @@ async function main(){
  }finally{reopened.close();}
  console.log('BROWSER_MIGRATION_PASS');
  }finally{migrationStorage.close();}
+ const scoped=new ProjectStorage(await openProjectDatabase());
+ try{
+ const c=new WorkspaceProjectContext(scoped),sw=new WorkspaceSwitchCoordinator(c);
+ const h=await c.create('histoviva','Scoped H'),w=await c.create('the_whisker_trio','Scoped W');
+ const hs={workspaceId:'histoviva' as const,projectId:h.project.projectId},ws={workspaceId:'the_whisker_trio' as const,projectId:w.project.projectId};
+ await sw.switchTo(hs,async()=>{});
+ await sw.switchTo(ws,async old=>{await saveModulePatch(c,old,h.project.revision,{module:'verbaflow',script:'History',chapters:'Intro'});});
+ if((await c.read(hs)).payload?.script!=='History'||JSON.stringify((await c.read(ws)).payload)!==JSON.stringify(emptyProjectPayload()))throw new Error('Scoped persistence isolation failed');
+ let refused=false;try{await sw.switchTo(hs,async()=>{throw new Error('Fixture flush error');});}catch{refused=true;}
+ if(!refused||sw.scope?.projectId!==w.project.projectId)throw new Error('Failed flush changed context');
+ }finally{scoped.close();}
  document.body.textContent='BROWSER_STORAGE_PASS';
 }
 main().catch(e=>{document.body.textContent='BROWSER_STORAGE_FAIL: '+String(e);});
