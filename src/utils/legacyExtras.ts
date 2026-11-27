@@ -6,6 +6,8 @@ export interface LegacyExtras {
  render?:Record<string,Scalar|string[]|number[]|Record<string,Scalar|number[]>>;
  seo?:{tone:string;selectedTitleId:string;titles:Record<string,string>[];description:string;tagsString:string};
  voice?:Record<string,Scalar|string[]>;
+ thumbnails?:Partial<Record<'A'|'B'|'C',Obj>>;
+ branding?:{brand_identity?:Obj;lower_third_config?:Obj};
 }
 function obj(v:unknown):Obj{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('Invalid legacy settings');return v as Obj;}
 function pick(v:unknown,strings:string[],numbers:string[],booleans:string[]):Record<string,Scalar>{
@@ -19,8 +21,40 @@ function pick(v:unknown,strings:string[],numbers:string[],booleans:string[]):Rec
 function text(v:unknown):string{if(typeof v!=='string')throw new Error('Invalid module text');return v;}
 function choice(v:unknown,values:string[]):string{const s=text(v);if(!values.includes(s))throw new Error('Invalid module selection');return s;}
 function strings(v:unknown):string[]{if(!Array.isArray(v))throw new Error('Invalid string list');return v.map(text);}
+
+function thumbnailSlots(v:unknown):NonNullable<LegacyExtras['thumbnails']>{
+ const a=obj(v),out:NonNullable<LegacyExtras['thumbnails']>={};
+ const badges=['4k_ultra_hd','documentary','true_story','real_events','based_on_facts','history','archive','full_story','3_hours','rain_sounds','thunderstorm','fireplace','ocean_waves','forest_night','deep_sleep','study_and_focus','relax','no_ads','dark_screen','asmr'];
+ for(const id of ['A','B','C'] as const){
+  if(a[id]===undefined)continue;
+  const s=obj(a[id]),q:Obj=pick(s,['topText','topColor','bottomText','bottomColor','splashShape','splashColor','customBadgeText','customBadgePosition','title','bottomLine','splashPreset','splashCustomColor'],['splashPaddingPct','splashShadowPct','badgeScalePct'],['badgesEnabled','customBadgeEnabled']);
+  if(q.splashShape!==undefined)choice(q.splashShape,['monolith_bristle','jagged_splash','bottom_slash','double_strokes','distressed_grunge','tapered_speed','none']);
+  if(q.splashPreset!==undefined)choice(q.splashPreset,['red','charcoal','gold','custom','none']);
+  if(q.customBadgePosition!==undefined)choice(q.customBadgePosition,['left','right']);
+  if(s.badgeTexts!==undefined)q.badgeTexts=strings(s.badgeTexts);
+  if(s.badgePositions!==undefined)q.badgePositions=strings(s.badgePositions).map(x=>choice(x,['left','right']));
+  if(s.presetBadges!==undefined){const p=obj(s.presetBadges),items:Obj={};for(const k of badges){if(p[k]===undefined)continue;const item=pick(p[k],['position'],[],['enabled']);if(item.position!==undefined)choice(item.position,['left','right']);items[k]=item;}q.presetBadges=items;}
+  if(s.hookLayout!==undefined)q.hookLayout=pick(s.hookLayout,[],['xPct','yPct','topScalePct','bottomScalePct','blockTiltDeg','lineSpacingPct'],['autoFitBottomToTop']);
+  if(s.bgAdjust!==undefined)q.bgAdjust=pick(s.bgAdjust,[],['contrastPct','brightnessPct','vibrancePct'],[]);
+  out[id]=q;
+ }return out;
+}
+function branding(v:unknown):NonNullable<LegacyExtras['branding']>{
+ const a=obj(v),out:NonNullable<LegacyExtras['branding']>={};
+ if(a.brand_identity!==undefined)out.brand_identity=pick(a.brand_identity,['name','episode_label'],[],['enabled']);
+ if(a.lower_third_config!==undefined){
+ const b=obj(a.lower_third_config),q:Obj=pick(b,['style','emblem_path'],['anim_sec'],['enabled']);
+ if(q.style!==undefined)choice(q.style,['histoviva_broadcast_en']);
+ if(b.show_sec!==undefined){const n=b.show_sec;if(!Array.isArray(n)||n.length!==2||n.some(x=>typeof x!=='number'||!Number.isFinite(x)||x<0)||n[0]>=n[1])throw new Error('Invalid broadcast timing');q.show_sec=[...n];}
+ if(b.bar_bg_rgba!==undefined){const n=b.bar_bg_rgba;if(!Array.isArray(n)||n.length!==4||n.some(x=>!Number.isInteger(x)||x<0||x>255))throw new Error('Invalid broadcast color');q.bar_bg_rgba=[...n];}
+ out.lower_third_config=q;
+ }return out;
+}
+
 export function legacyExtras(v:unknown):LegacyExtras{
  const a=obj(v),out:LegacyExtras={};
+ if(a.thumbnails!==undefined)out.thumbnails=thumbnailSlots(a.thumbnails);
+ if(a.branding!==undefined)out.branding=branding(a.branding);
  if(a.project!==undefined)out.project=pick(a.project,['active_format_preset','end_screen_safe_zone','manifest_duration_badge'],[],['ambient_loop_enabled']);
  if(a.render!==undefined){
  const r=obj(a.render);const t:NonNullable<LegacyExtras['render']>=pick(r,['expected_video_filename','expected_audio_filename','loop_subtitle_language','loop_srt_custom_content','render_specs_summary'],['crossfade_duration','audio_crossfade_duration'],['loop_draft_mode','seamless_stitch_enabled','audio_crossfade_enabled','loop_burn_in_subtitles','loop_upload_srt_to_drive','shorts_factory_enabled','strict_scene_duration_lock','sidecar_burn_in_video','export_separate_srt_files','export_output_chapters_enabled','export_release_card_md_enabled']);

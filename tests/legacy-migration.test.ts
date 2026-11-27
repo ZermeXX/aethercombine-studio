@@ -91,3 +91,34 @@ test('global module import requires opt-in and excludes voice credentials',async
  expect(records[LEGACY_DRAFT_KEY]).toBe(raw);
  }finally{s.close();}
 });
+
+test('thumbnail v2 and v1 snapshots preserve allowed fields and branding',async()=>{
+ const raw=JSON.stringify({...draft,combine:{export_settings:{brand_identity:{enabled:true,name:'HISTOVIVA',episode_label:'EP02 | Amazon'},lower_third_config:{enabled:true,style:'histoviva_broadcast_en',emblem_path:'histoviva_emblem_gold_v2.png',show_sec:[0.5,5.5],anim_sec:0.55,bar_bg_rgba:[10,14,18,214]}}}});
+ for(const version of ['v1','v2']){
+ const slots=version==='v1'?{A:{title:'Amazon',badgeTexts:['DOCUMENTARY'],badgePositions:['left']}}:{A:{topText:'Amazon',hookLayout:{xPct:50,autoFitBottomToTop:false},presetBadges:{documentary:{enabled:true,position:'left',token:'fixture-only'}},apiKey:'fixture-only'},B:{topText:'B'},C:{topText:'C'}};
+ const records:Record<string,string>={[LEGACY_DRAFT_KEY]:raw,['aether_thumb_abc_slots_'+version]:JSON.stringify(slots)};
+ const l={getItem:(k:string)=>records[k]??null} as Storage;
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ const result=await migrateLegacyDraft(db,l,'histoviva',true,true);
+ if(result.status==='missing')throw new Error('Missing');
+ const p=await s.getPayload('histoviva',result.projectId);
+ expect(p?.legacyExtras?.thumbnails?.A?.[version==='v1'?'title':'topText']).toBe('Amazon');
+ expect(p?.legacyExtras?.branding?.lower_third_config?.emblem_path).toBe('histoviva_emblem_gold_v2.png');
+ expect(JSON.stringify(p)).not.toContain('fixture-only');
+ const copy=await restoreMigrationBackup(db,'histoviva');
+ expect(await s.getPayload('histoviva',copy.projectId)).toEqual(p);
+ }finally{s.close();}
+ }
+});
+test('corrupted backup rejects recovery and rollback without deleting project',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ const result=await migrateLegacyDraft(db,local(JSON.stringify(draft)),'histoviva',true);
+ if(result.status==='missing')throw new Error('Missing');
+ await new Promise<void>((resolve,reject)=>{const tx=db.transaction('migration_backups','readwrite'),store=tx.objectStore('migration_backups'),r=store.get('legacy-draft-v1-import');r.onsuccess=()=>store.put({...r.result,payload:{...r.result.payload,script:'corrupt'}});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});
+ await expect(restoreMigrationBackup(db,'histoviva')).rejects.toThrow('Backup checksum mismatch');
+ await expect(rollbackLegacyImport(db,'histoviva',result.projectId)).rejects.toThrow('Backup checksum mismatch');
+ expect(await s.getProject('histoviva',result.projectId)).not.toBeNull();
+ }finally{s.close();}
+});
