@@ -73,3 +73,21 @@ test('narrative scene migration preserves supported fields and drops unknown pro
  expect(()=>previewLegacyDraft(JSON.stringify({...draft,combine:{narrative_scenes:[scene,scene]}}),'histoviva')).toThrow();
  }finally{s.close();}
 });
+
+test('global module import requires opt-in and excludes voice credentials',async()=>{
+ const raw=JSON.stringify({...draft,render_settings:{...draft.render_settings,loop_draft_mode:false,continuous_bed:{enabled:true,asset_id:'bed',bed_audio_weight:0.7,token:'fixture-only'}}});
+ const records:Record<string,string>={[LEGACY_DRAFT_KEY]:raw,ac_youtube_seo_state_v1:JSON.stringify({tone:'Historical Doc',selectedTitleId:'A',titles:[{id:'A',category:'Intrigue',categoryRu:'Интрига',title:'Amazon'}],description:'Description',tagsString:'history'}),aether_voice_settings:JSON.stringify({activeEngine:'edgetts',selectedLang:'English US',selectedGender:'all',selectedVoiceId:'voice',elevenKey1:'fixture-only'})};
+ const l={getItem:(k:string)=>records[k]??null} as Storage;
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ expect(previewLegacyDraft(raw,'histoviva').payload.legacyExtras?.seo).toBeUndefined();
+ const result=await migrateLegacyDraft(db,l,'histoviva',true,true);
+ if(result.status==='missing')throw new Error('Missing');
+ const p=await s.getPayload('histoviva',result.projectId);
+ expect(p?.legacyExtras?.seo?.titles[0].title).toBe('Amazon');
+ expect(p?.legacyExtras?.voice?.selectedVoiceId).toBe('voice');
+ expect(p?.legacyExtras?.render?.loop_draft_mode).toBe(false);
+ expect(JSON.stringify(p)).not.toContain('fixture-only');
+ expect(records[LEGACY_DRAFT_KEY]).toBe(raw);
+ }finally{s.close();}
+});

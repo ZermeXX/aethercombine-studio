@@ -19,27 +19,31 @@ function string(value:unknown):string{
  if(/-----BEGIN [^-]*PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9_]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bya29\.[A-Za-z0-9_-]+/i.test(value))throw new Error('Possible credential in legacy text');
  return value;
 }
-export function previewLegacyDraft(raw:string,workspaceId:WorkspaceId):MigrationPreview{
+export function previewLegacyDraft(raw:string,workspaceId:WorkspaceId,modules?:{seo?:unknown;voice?:unknown}):MigrationPreview{
  if(!isWorkspaceId(workspaceId))throw new Error('Invalid workspace');
  let parsed:unknown;try{parsed=JSON.parse(raw);}catch{throw new Error('Invalid legacy JSON');}
  const d=object(parsed);if(d.version!==1)throw new Error('Unsupported legacy draft version');
  const p=object(d.project),v=object(d.verbaflow),r=object(d.render_settings);
  const project=createProject(workspaceId,string(p.name));
  const combine=d.combine===undefined?{}:object(d.combine);
- const payload=projectPayload({schemaVersion:1,script:string(v.source_text),seoScript:string(p.seo_script_text),thumbnailTitle:string(p.thumb_title),thumbnailBadge:string(p.thumb_badge),chapters:string(p.verbaflow_chapters_txt),production:{fps:r.video_fps,codec:r.video_codec,resolution:r.loop_resolution,loopHours:r.loop_hours,scenes:[],narrative_scenes:combine.narrative_scenes,timeline_slots:r.timeline_slots,audio_mastering:r.audio_mastering,render:{crf:r.video_crf,audioBitrate:r.audio_bitrate_kbps,actCrossfadeSec:r.act_crossfade_sec,internalCrossfadeSec:r.internal_loop_crossfade_sec,finalBlackEnabled:r.final_black_screen_enabled,finalBlackSec:r.final_black_screen_sec,bitratePreset:r.bitrate_preset,transitionMode:r.seamless_transition_mode,useEmbeddedAudio:r.use_embedded_audio}}});
+ const payload=projectPayload({legacyExtras:{project:p,render:r,...(modules??{})},schemaVersion:1,script:string(v.source_text),seoScript:string(p.seo_script_text),thumbnailTitle:string(p.thumb_title),thumbnailBadge:string(p.thumb_badge),chapters:string(p.verbaflow_chapters_txt),production:{fps:r.video_fps,codec:r.video_codec,resolution:r.loop_resolution,loopHours:r.loop_hours,scenes:[],narrative_scenes:combine.narrative_scenes,timeline_slots:r.timeline_slots,audio_mastering:r.audio_mastering,render:{crf:r.video_crf,audioBitrate:r.audio_bitrate_kbps,actCrossfadeSec:r.act_crossfade_sec,internalCrossfadeSec:r.internal_loop_crossfade_sec,finalBlackEnabled:r.final_black_screen_enabled,finalBlackSec:r.final_black_screen_sec,bitratePreset:r.bitrate_preset,transitionMode:r.seamless_transition_mode,useEmbeddedAudio:r.use_embedded_audio}}});
  // Screen every projected string, including timeline references.
  const scan=(x:unknown):void=>{if(typeof x==='string')string(x);else if(x&&typeof x==='object')Object.values(x).forEach(scan);};
  scan(payload);
- return {project,payload,omitted:['additional combine settings and unknown narrative scene fields','additional render settings','unknown nested timeline fields','standalone SEO and thumbnail state','voice preferences and binary assets']};
+ return {project,payload,omitted:['additional combine settings and unknown narrative scene fields','unmapped render and project fields','unknown nested timeline fields','thumbnail slots and binary assets',...(modules?.seo===undefined?['standalone SEO state']:[]),...(modules?.voice===undefined?['voice preferences']:[])]};
 }
 export type MigrationResult={status:'missing'}|{status:'imported_partial'|'already_imported';projectId:string;workspaceId:WorkspaceId};
-export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceId:WorkspaceId,confirmPartial:boolean):Promise<MigrationResult>{
+export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceId:WorkspaceId,confirmPartial:boolean,includeGlobalModules=false):Promise<MigrationResult>{
  if(!confirmPartial)throw new Error('Explicit partial import confirmation required');
  const raw=local.getItem(LEGACY_DRAFT_KEY);if(raw===null)return {status:'missing'};
- const preview=previewLegacyDraft(raw,workspaceId);
+ const keys=includeGlobalModules?['ac_youtube_seo_state_v1','aether_voice_settings','config_voice_studio']:[];
+ const snapshots=keys.map(k=>local.getItem(k));
+ let modules:{seo?:unknown;voice?:unknown}|undefined;
+ if(includeGlobalModules){modules={};if(snapshots[0]!==null)modules.seo=JSON.parse(snapshots[0]);if(snapshots[1]!==null)modules.voice=JSON.parse(snapshots[1]);else if(snapshots[2]!==null){const v=object(JSON.parse(snapshots[2]));modules.voice={activeAccount:v.activeAccount,activeEngine:v.provider,selectedLang:v.selectedLanguage,selectedGender:v.selectedGender,selectedVoiceId:v.selectedVoiceId,favorites:v.favorites};}}
+ const preview=previewLegacyDraft(raw,workspaceId,modules);
  const {project,payload,omitted}=preview;
  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify({name:project.name,payload})))),b=>b.toString(16).padStart(2,'0')).join('');
- if(local.getItem(LEGACY_DRAFT_KEY)!==raw)throw new Error('Legacy draft changed during preview');
+ if(local.getItem(LEGACY_DRAFT_KEY)!==raw||keys.some((k,i)=>local.getItem(k)!==snapshots[i]))throw new Error('Legacy draft changed during preview');
  return new Promise((resolve,reject)=>{
   const tx=db.transaction(['projects','migration_backups','metadata'],'readwrite');
   let result:MigrationResult;let error:unknown;

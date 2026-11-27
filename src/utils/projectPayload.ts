@@ -1,3 +1,4 @@
+import {legacyExtras,type LegacyExtras} from './legacyExtras';
 import {narrativeScenes} from './narrativeSceneProjection';
 import type {NarrativeSceneItem} from '../components/MontageCombineView';
 import type { TimelineSlot } from '../App';
@@ -35,6 +36,7 @@ export interface ProjectPayload {
  thumbnailTitle:string;
  thumbnailBadge:string;
  chapters:string;
+ legacyExtras?:LegacyExtras;
  production?: { fps:24|30|60; codec:'libx264'|'libx265'; resolution:'720p'|'1080p'|'2k'|'4k'; loopHours:number; narrative_scenes?:NarrativeSceneItem[]; audio_mastering?:AudioMasteringConfig; timeline_slots?:TimelineSlot[]; render?: {crf:number; audioBitrate:192|256|320; actCrossfadeSec:number; internalCrossfadeSec:number; finalBlackEnabled:boolean; finalBlackSec:number; bitratePreset:'standard'|'cinema'|'eco'; transitionMode:'crossfade'|'pingpong'; useEmbeddedAudio:boolean}; scenes:{id:string;durationSec:number;text:string}[] };
 }
 export function projectPayload(input:unknown):ProjectPayload {
@@ -53,5 +55,5 @@ export function projectPayload(input:unknown):ProjectPayload {
    return {id:s.id,text:s.text,durationSec:s.durationSec};
   })};
  }
- return {...(production===undefined?{}:{production}),schemaVersion:1,script:p.script,seoScript:p.seoScript,thumbnailTitle:p.thumbnailTitle,thumbnailBadge:p.thumbnailBadge,chapters:p.chapters};
+ return {...(p.legacyExtras===undefined?{}:{legacyExtras:legacyExtras(p.legacyExtras)}),...(production===undefined?{}:{production}),schemaVersion:1,script:p.script,seoScript:p.seoScript,thumbnailTitle:p.thumbnailTitle,thumbnailBadge:p.thumbnailBadge,chapters:p.chapters};
 }
