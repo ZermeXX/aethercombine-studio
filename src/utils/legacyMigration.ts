@@ -130,12 +130,12 @@ export async function rollbackLegacyImport(db:IDBDatabase,workspaceId:WorkspaceI
   let error:unknown;tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error??tx.error);
   const fail=(e:unknown)=>{error=e;tx.abort();};
   const meta=tx.objectStore('metadata'),projects=tx.objectStore('projects');
-  const requests=[meta.get(MARKER),projects.get(projectId),tx.objectStore('workspace_state').get(workspaceId),tx.objectStore('project_assets').index('projectId').count(projectId),tx.objectStore('project_revisions').index('projectId').count(projectId),tx.objectStore('migration_backups').get(MARKER)];
+  const requests=[meta.get(MARKER),projects.get(projectId),tx.objectStore('workspace_state').get(workspaceId),tx.objectStore('project_assets').index('projectId').count(projectId),tx.objectStore('project_revisions').index('projectId').count(projectId),tx.objectStore('migration_backups').get(MARKER),meta.get('asset-refs:'+projectId)];
   let pending=requests.length;
   for(const request of requests)request.onsuccess=()=>{if(--pending!==0)return;try{
-   const [marker,record,active,assets,revisions,backup]=requests.map(r=>r.result);
+   const [marker,record,active,assets,revisions,backup,assetRefs]=requests.map(r=>r.result);
    const p=projectMetadata(record);
-   if(!marker||marker.status!=='imported_partial'||marker.workspaceId!==workspaceId||marker.projectId!==projectId||p.workspaceId!==workspaceId||p.revision!==1||active?.projectId===projectId||assets||revisions||!backup||backup.projectId!==projectId||backup.workspaceId!==workspaceId||backup.digest!==marker.digest||backup.digest!==digest||JSON.stringify({name:backup.name,payload:projectPayload(backup.payload)})!==canonical||backup.name!==p.name||JSON.stringify(projectPayload(record.payload))!==JSON.stringify(projectPayload(backup.payload)))throw new Error('Rollback unsafe; preserve project');
+   if(!marker||marker.status!=='imported_partial'||marker.workspaceId!==workspaceId||marker.projectId!==projectId||p.workspaceId!==workspaceId||p.revision!==1||active?.projectId===projectId||assets||revisions||assetRefs||!backup||backup.projectId!==projectId||backup.workspaceId!==workspaceId||backup.digest!==marker.digest||backup.digest!==digest||JSON.stringify({name:backup.name,payload:projectPayload(backup.payload)})!==canonical||backup.name!==p.name||JSON.stringify(projectPayload(record.payload))!==JSON.stringify(projectPayload(backup.payload)))throw new Error('Rollback unsafe; preserve project');
    projects.delete(projectId);meta.put({...marker,status:'rolled_back'});
   }catch(e){fail(e);}};
  });

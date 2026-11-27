@@ -1,3 +1,4 @@
+import {attachMigrationAsset,auditMigrationAssets,persistExternalAssetReferences,readExternalAssetReferences} from '../src/utils/migrationAssets';
 import {migrateLegacyDraft,restoreMigrationBackup,rollbackLegacyImport,LEGACY_DRAFT_KEY} from '../src/utils/legacyMigration';
 import {openProjectDatabase, ProjectStorage} from '../src/utils/projectStorage';
 import {createProject} from '../src/design-system/projectRegistry';
@@ -36,6 +37,15 @@ async function main(){
  if(JSON.stringify(await migrationStorage.getPayload('histoviva',copy.projectId))!==JSON.stringify(content))throw new Error('Recovery mismatch');
  await rollbackLegacyImport(db,'histoviva',result.projectId);
  if(await migrationStorage.getProject('histoviva',result.projectId)!==null||localStorage.getItem(LEGACY_DRAFT_KEY)!==raw)throw new Error('Rollback failed');
+ await attachMigrationAsset(migrationStorage,'histoviva',copy.projectId,'scene.mp4',new Blob(['fixture media']));
+ await persistExternalAssetReferences(db,'histoviva',copy.projectId,[{name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'}]);
+ const reopen=await openProjectDatabase();const reopened=new ProjectStorage(reopen);
+ try{
+ const refs=await readExternalAssetReferences(reopen,'histoviva',copy.projectId);
+ if(refs.length!==1||refs[0].fileId!=='fixtureFile123')throw new Error('Registry persistence failed');
+ if((await readExternalAssetReferences(reopen,'the_whisker_trio',copy.projectId)).length)throw new Error('Registry isolation failed');
+ if((await auditMigrationAssets(reopened,'histoviva',copy.projectId,refs))[0]?.status!=='local_verified')throw new Error('Binary attachment verification failed');
+ }finally{reopened.close();}
  console.log('BROWSER_MIGRATION_PASS');
  }finally{migrationStorage.close();}
  document.body.textContent='BROWSER_STORAGE_PASS';

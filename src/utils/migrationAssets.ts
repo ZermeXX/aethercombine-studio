@@ -42,3 +42,30 @@ export async function auditMigrationAssets(storage:ProjectStorage,workspaceId:Wo
  }
  return result;
 }
+
+/** Store only identifiers, never OAuth credentials. Registry lives in metadata. */
+export function persistExternalAssetReferences(db:IDBDatabase,workspaceId:WorkspaceId,projectId:string,external:readonly ExternalAssetReference[]):Promise<void>{
+ return new Promise((resolve,reject)=>{
+ const tx=db.transaction(['projects','metadata'],'readwrite');let error:unknown;
+ tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error??tx.error);
+ const req=tx.objectStore('projects').get(projectId);
+ req.onsuccess=()=>{try{
+ const p=req.result;if(!p||p.workspaceId!==workspaceId)throw new Error('Workspace mismatch');
+ const names=collectAssetNames(projectPayload(p.payload)),seen=new Set<string>();
+ const refs=external.map(r=>{const name=safeName(r.name);if(!names.includes(name)||seen.has(name))throw new Error('Invalid or ambiguous external reference');seen.add(name);return {name,fileId:driveId(r.fileId),folderId:driveId(r.folderId)};});
+ tx.objectStore('metadata').put({key:'asset-refs:'+projectId,workspaceId,projectId,refs});
+ }catch(e){error=e;tx.abort();}};
+ });
+}
+export function readExternalAssetReferences(db:IDBDatabase,workspaceId:WorkspaceId,projectId:string):Promise<ExternalAssetReference[]>{
+ return new Promise((resolve,reject)=>{
+ const tx=db.transaction(['projects','metadata'],'readonly');let result:ExternalAssetReference[]=[];let error:unknown;
+ tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(error??tx.error);
+ const p=tx.objectStore('projects').get(projectId);
+ p.onsuccess=()=>{if(!p.result||p.result.workspaceId!==workspaceId)return;
+ const r=tx.objectStore('metadata').get('asset-refs:'+projectId);
+ r.onsuccess=()=>{try{if(!r.result)return;if(r.result.workspaceId!==workspaceId||r.result.projectId!==projectId)throw new Error('Registry ownership mismatch');
+ const names=collectAssetNames(projectPayload(p.result.payload));const seen=new Set<string>();result=r.result.refs.map((x:ExternalAssetReference)=>{const name=safeName(x.name);if(!names.includes(name)||seen.has(name))throw new Error('Stale or ambiguous reference');seen.add(name);return {name,fileId:driveId(x.fileId),folderId:driveId(x.folderId)};});
+ }catch(e){error=e;tx.abort();}};};
+ });
+}

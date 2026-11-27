@@ -166,3 +166,21 @@ test('referenced assets can be attached and checked without crossing workspace b
  await expect(rollbackLegacyImport(db,'histoviva',r.projectId)).rejects.toThrow();
  }finally{s.close();}
 });
+
+import {persistExternalAssetReferences,readExternalAssetReferences} from '../src/utils/migrationAssets';
+test('external registry persists across reopen and blocks unsafe rollback',async()=>{
+ const factory=new IDBFactory(),db=await openProjectDatabase(factory),s=new ProjectStorage(db);
+ try{
+ const r=await migrateLegacyDraft(db,local(JSON.stringify({...draft,combine:{narrative_scenes:[scene]}})),'histoviva',true);
+ if(r.status==='missing')throw new Error('Missing');
+ const refs=[{name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'}];
+ await persistExternalAssetReferences(db,'histoviva',r.projectId,refs);
+ await expect(persistExternalAssetReferences(db,'the_whisker_trio',r.projectId,refs)).rejects.toThrow();
+ const reopened=await openProjectDatabase(factory);
+ try{
+ expect(await readExternalAssetReferences(reopened,'histoviva',r.projectId)).toEqual(refs);
+ expect(await readExternalAssetReferences(reopened,'the_whisker_trio',r.projectId)).toEqual([]);
+ await expect(rollbackLegacyImport(reopened,'histoviva',r.projectId)).rejects.toThrow();
+ }finally{reopened.close();}
+ }finally{s.close();}
+});
