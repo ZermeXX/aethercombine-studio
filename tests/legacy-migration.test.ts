@@ -122,3 +122,18 @@ test('corrupted backup rejects recovery and rollback without deleting project',a
  expect(await s.getProject('histoviva',result.projectId)).not.toBeNull();
  }finally{s.close();}
 });
+
+test('combine settings and V21 locks survive migration and recovery',async()=>{
+ const combine={project_name:'EP02',rhythm_profile:'historical_storytelling',dna_reference_input:'reference',last_applied_dna_summary:'summary',selected_overlays:['lower_thirds','warm_glow'],lower_third_style:'sky_news',ambient_audio:{file_name:'bed.wav',volume:0.45,loop_full_duration:true},master_audio:{file_name:'voice.wav',start_timecode:'00:00:00',volume:1,fade_in_sec:1,fade_out_sec:2,duration_sec:304.5},master_audio_duration_sec:304.5,burn_in_srt_enabled:false,upload_srt_to_drive_enabled:true,subtitle_language:'en-US',srt_filename:'en.srt',srt_text_content:'Example',shorts_auto_slice_enabled:true,shorts_slice_count:3,shorts_hook_texts:['A','B','C'],v21_locks:{hardFrameLock:true,apadAtrimLock:true,continuousVoiceMaster:true,zeroSpeechOverlap:true,dynamicXfadeTransitions:true,decoupledVideoXfadeOnly:true,autoMuteFlaggedClips:false,youtubeLoudnorm:true,integratedLufs:-14,truePeakDbtp:-1.5,voiceoverLeadInSec:0.2,voiceoverSentencePadSec:0.35},export_settings:{resolution:'4k',aspect_ratio:'16:9',video_codec:'libx264',profile:'high',pix_fmt:'yuv420p',cfr:true,preset:'medium',draft_mode:false,bitrate_mbps:46,bitrate_cap:'on',crf:18,fps:24,audio_bitrate_kbps:320,preview_duration_sec:0,subtitles:{enabled:true,burn_in:false,upload_srt:true,language:'en',target_language:'en-US',srt_filename:'en.srt',srt_content:'Example'}}};
+ const raw=JSON.stringify({...draft,combine:{...combine,apiKey:'fixture-only',v21_locks:{...combine.v21_locks,token:'fixture-only'}}});
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ const result=await migrateLegacyDraft(db,local(raw),'histoviva',true);
+ if(result.status==='missing')throw new Error('Missing');
+ const p=await s.getPayload('histoviva',result.projectId);
+ expect(p?.legacyExtras?.combine).toEqual(combine);
+ expect(JSON.stringify(p)).not.toContain('fixture-only');
+ const copy=await restoreMigrationBackup(db,'histoviva');
+ expect(await s.getPayload('histoviva',copy.projectId)).toEqual(p);
+ }finally{s.close();}
+});

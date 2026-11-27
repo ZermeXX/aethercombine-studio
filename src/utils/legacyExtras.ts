@@ -7,6 +7,7 @@ export interface LegacyExtras {
  seo?:{tone:string;selectedTitleId:string;titles:Record<string,string>[];description:string;tagsString:string};
  voice?:Record<string,Scalar|string[]>;
  thumbnails?:Partial<Record<'A'|'B'|'C',Obj>>;
+ combine?:Obj;
  branding?:{brand_identity?:Obj;lower_third_config?:Obj};
 }
 function obj(v:unknown):Obj{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('Invalid legacy settings');return v as Obj;}
@@ -51,8 +52,31 @@ function branding(v:unknown):NonNullable<LegacyExtras['branding']>{
  }return out;
 }
 
+
+function combineSettings(v:unknown):Obj{
+ const a=obj(v),out:Obj=pick(a,['project_name','rhythm_profile','dna_reference_input','last_applied_dna_summary','lower_third_style','subtitle_language','srt_filename','srt_text_content'],['master_audio_duration_sec','shorts_slice_count'],['burn_in_srt_enabled','upload_srt_to_drive_enabled','shorts_auto_slice_enabled']);
+ if(out.rhythm_profile!==undefined)choice(out.rhythm_profile,['historical_storytelling','ambient_meditative','custom_dna']);
+ if(out.lower_third_style!==undefined)choice(out.lower_third_style,['rossiya24','ictv','sky_news']);
+ if(out.shorts_slice_count!==undefined&&out.shorts_slice_count!==2&&out.shorts_slice_count!==3)throw new Error('Invalid shorts count');
+ if(a.selected_overlays!==undefined)out.selected_overlays=strings(a.selected_overlays).map(x=>choice(x,['ambient_particles','cinematic_film_grain','lower_thirds','warm_glow']));
+ if(a.shorts_hook_texts!==undefined){const x=strings(a.shorts_hook_texts);if(x.length!==3)throw new Error('Invalid shorts hooks');out.shorts_hook_texts=x;}
+ if(a.ambient_audio!==undefined)out.ambient_audio=pick(a.ambient_audio,['file_name'],['volume'],['loop_full_duration']);
+ if(a.master_audio!==undefined)out.master_audio=pick(a.master_audio,['file_name','start_timecode'],['volume','fade_in_sec','fade_out_sec','duration_sec'],[]);
+ if(a.v21_locks!==undefined)out.v21_locks=pick(a.v21_locks,[],['integratedLufs','truePeakDbtp','voiceoverLeadInSec','voiceoverSentencePadSec'],['hardFrameLock','apadAtrimLock','continuousVoiceMaster','zeroSpeechOverlap','dynamicXfadeTransitions','decoupledVideoXfadeOnly','autoMuteFlaggedClips','youtubeLoudnorm']);
+ if(a.export_settings!==undefined){
+ const e=obj(a.export_settings),q:Obj=pick(e,['resolution','aspect_ratio','video_codec','profile','pix_fmt','preset','bitrate_cap'],['bitrate_mbps','crf','fps','audio_bitrate_kbps','preview_duration_sec'],['cfr','draft_mode']);
+ for(const [k,allowed] of Object.entries({resolution:['4k','1080p','720p'],aspect_ratio:['16:9','9:16'],video_codec:['libx264','libx265'],profile:['high','main'],pix_fmt:['yuv420p'],preset:['veryfast','ultrafast','medium'],bitrate_cap:['on','off']}))if(q[k]!==undefined)choice(q[k],allowed);
+ if(q.fps!==undefined&&![24,30,60].includes(Number(q.fps)))throw new Error('Invalid export fps');
+ if(q.audio_bitrate_kbps!==undefined&&![192,256,320].includes(Number(q.audio_bitrate_kbps)))throw new Error('Invalid export audio bitrate');
+ if(e.subtitles!==undefined)q.subtitles=pick(e.subtitles,['language','target_language','srt_filename','srt_content'],[],['enabled','burn_in','upload_srt']);
+ out.export_settings=q;
+ }
+ return out;
+}
+
 export function legacyExtras(v:unknown):LegacyExtras{
  const a=obj(v),out:LegacyExtras={};
+ if(a.combine!==undefined)out.combine=combineSettings(a.combine);
  if(a.thumbnails!==undefined)out.thumbnails=thumbnailSlots(a.thumbnails);
  if(a.branding!==undefined)out.branding=branding(a.branding);
  if(a.project!==undefined)out.project=pick(a.project,['active_format_preset','end_screen_safe_zone','manifest_duration_badge'],[],['ambient_loop_enabled']);
