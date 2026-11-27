@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +20,15 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
+      - name: Browser IndexedDB acceptance
+        run: |
+          python -m pip install playwright==1.51.0
+          python -m playwright install --with-deps chromium
+          mkdir -p /tmp/aether-browser-smoke
+          bun build tests/browser-storage-smoke.ts --target browser --outfile /tmp/aether-browser-smoke/smoke.js
+          printf '<html><body><script type="module" src="/smoke.js"></script></body></html>' > /tmp/aether-browser-smoke/index.html
+          python -m http.server 8765 --bind 127.0.0.1 --directory /tmp/aether-browser-smoke &
+          server_pid=$!
+          trap 'kill "$server_pid" || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep 1; done
+          python tests/browser-storage-smoke.py

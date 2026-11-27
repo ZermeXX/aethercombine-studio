@@ -175,7 +175,7 @@ const removeKey = (storage: Storage, key: string): void => {
   }
 };
 
-const readSessionSecrets = (): SessionSecrets => {
+const readSessionSecrets = (sessionStorage: Storage = globalThis.sessionStorage): SessionSecrets => {
   const g = readJson<{ access_token?: string; expires_at?: number }>(
     sessionStorage,
     GOOGLE_TOKEN_SESSION_KEY
@@ -188,9 +188,9 @@ const readSessionSecrets = (): SessionSecrets => {
   };
 };
 
-const writeSessionSecrets = (patch: Partial<SessionSecrets>): void => {
+const writeSessionSecrets = (patch: Partial<SessionSecrets>, sessionStorage: Storage = globalThis.sessionStorage): void => {
   if (patch.access_token !== undefined || patch.expires_at !== undefined) {
-    const cur = readSessionSecrets();
+    const cur = readSessionSecrets(sessionStorage);
     const next = {
       access_token: patch.access_token ?? cur.access_token,
       expires_at: patch.expires_at ?? cur.expires_at
@@ -208,30 +208,34 @@ const writeSessionSecrets = (patch: Partial<SessionSecrets>): void => {
 };
 
 /** Однократная миграция: секреты уезжают в sessionStorage и стираются из localStorage. */
-const migrateLegacySecrets = (): void => {
+export const migrateLegacySecrets = (localStorage: Storage = globalThis.localStorage, sessionStorage: Storage = globalThis.sessionStorage): void => {
   try {
-    if (sessionStorage.getItem(SECRETS_PURGED_FLAG)) return;
+    if (sessionStorage.getItem(SECRETS_PURGED_FLAG) && localStorage.getItem('ac_gdrive_sa_key') === null) return;
 
     const legacy = readJson<Partial<AetherGoogleAuthRecord>>(
       localStorage,
       AETHER_GOOGLE_AUTH_STORAGE_KEY
     );
     const legacyGh = localStorage.getItem('ac_gh_token') || '';
-    const cur = readSessionSecrets();
+    const cur = readSessionSecrets(sessionStorage);
 
-    writeSessionSecrets({
+    const expected = {
       access_token: cur.access_token || legacy?.access_token || '',
       expires_at: cur.expires_at || Number(legacy?.expires_at) || 0,
       github_token: cur.github_token || legacy?.github_token || legacyGh || ''
-    });
+    };
+    writeSessionSecrets(expected, sessionStorage);
+    const verified = readSessionSecrets(sessionStorage);
+    if (verified.access_token !== expected.access_token || verified.expires_at !== expected.expires_at || verified.github_token !== expected.github_token) return;
 
     const tgBot = localStorage.getItem('ac_tg_bot_token') || '';
     const tgChat = localStorage.getItem('ac_tg_chat_id') || '';
     if (tgBot || tgChat) {
       const existing = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
-      if (!existing?.bot_token) {
-        writeJson(sessionStorage, TELEGRAM_SESSION_KEY, { bot_token: tgBot, chat_id: tgChat });
-      }
+      const next = { bot_token: existing?.bot_token || tgBot, chat_id: existing?.chat_id || tgChat };
+      writeJson(sessionStorage, TELEGRAM_SESSION_KEY, next);
+      const verified = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
+      if (verified?.bot_token !== next.bot_token || verified?.chat_id !== next.chat_id) return;
     }
 
     if (legacy) {
@@ -247,7 +251,15 @@ const migrateLegacySecrets = (): void => {
     removeKey(localStorage, 'ac_gh_token');
     removeKey(localStorage, 'ac_tg_bot_token');
     removeKey(localStorage, 'ac_tg_chat_id');
-    removeKey(localStorage, 'ac_gdrive_sa_key');
+    // Unsupported service-account keys must never enter project storage.
+    // Keep the original until the owner explicitly revokes/removes it.
+    if (localStorage.getItem('ac_gdrive_sa_key') !== null) {
+      sessionStorage.removeItem(SECRETS_PURGED_FLAG);
+      return;
+    }
+    if (['ac_gh_token','ac_tg_bot_token','ac_tg_chat_id'].some(k => localStorage.getItem(k) !== null)) return;
+    const remaining = readJson<Partial<AetherGoogleAuthRecord>>(localStorage, AETHER_GOOGLE_AUTH_STORAGE_KEY);
+    if (remaining?.access_token || remaining?.github_token) return;
     sessionStorage.setItem(SECRETS_PURGED_FLAG, '1');
   } catch {
     /* ignore */

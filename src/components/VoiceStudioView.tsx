@@ -1,3 +1,4 @@
+import { migrateVoiceCredentials, readVoiceCredential, writeVoiceCredential } from '../utils/credentialSafety';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -486,6 +487,7 @@ function createSynthesizedVoiceoverBlob(durationSec: number): Blob {
  */
 export function loadVoiceStudioSettings(): Partial<AetherVoiceSettings> {
   try {
+    migrateVoiceCredentials(localStorage, sessionStorage);
     const rawAether = localStorage.getItem('aether_voice_settings');
     if (rawAether) {
       const s = JSON.parse(rawAether) as Partial<AetherVoiceSettings>;
@@ -510,8 +512,8 @@ export function loadVoiceStudioSettings(): Partial<AetherVoiceSettings> {
       const c = JSON.parse(rawConfig) as Record<string, unknown>;
       return {
         activeAccount: String(c.activeAccount || '1'),
-        elevenKey1: String(c.apiKey1 || ''),
-        elevenKey2: String(c.apiKey2 || ''),
+        elevenKey1: readVoiceCredential(1),
+        elevenKey2: readVoiceCredential(2),
         activeEngine: (c.provider as VoiceProvider) || 'edgetts',
         selectedLang: (c.selectedLanguage as VoiceLanguage) || 'English US',
         selectedGender: (c.selectedGender as VoiceGenderFilter) || 'all',
@@ -559,10 +561,10 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // 1. Мульти-аккаунт ElevenLabs (2 API-ключа + активный аккаунт)
   const [apiKey1, setApiKey1] = useState<string>(
-    () => initialSavedConfig.elevenKey1 ?? localStorage.getItem('elevenlabs_api_key_1') ?? ''
+    () => readVoiceCredential(1)
   );
   const [apiKey2, setApiKey2] = useState<string>(
-    () => initialSavedConfig.elevenKey2 ?? localStorage.getItem('elevenlabs_api_key_2') ?? ''
+    () => readVoiceCredential(2)
   );
   const [activeKeySlot, setActiveKeySlot] = useState<1 | 2>(() => {
     if (initialSavedConfig.activeAccount === '2') return 2;
@@ -621,11 +623,11 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('elevenlabs_api_key_1', apiKey1);
+    if (!writeVoiceCredential(1, apiKey1)) onNotify('ElevenLabs session storage unavailable', 'error');
   }, [apiKey1]);
 
   useEffect(() => {
-    localStorage.setItem('elevenlabs_api_key_2', apiKey2);
+    if (!writeVoiceCredential(2, apiKey2)) onNotify('ElevenLabs session storage unavailable', 'error');
   }, [apiKey2]);
 
   useEffect(() => {
@@ -645,10 +647,8 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
     const checkedAccountRadio = document.querySelector(
       'input[name="eleven_account"]:checked'
     ) as HTMLInputElement | null;
-    const settings: AetherVoiceSettings = {
+    const settings: Omit<AetherVoiceSettings, 'elevenKey1' | 'elevenKey2'> = {
       activeAccount: checkedAccountRadio?.value || String(activeKeySlot),
-      elevenKey1: apiKey1,
-      elevenKey2: apiKey2,
       activeEngine: provider,
       selectedLang: selectedLanguage,
       selectedGender: genderFilter,
@@ -661,8 +661,6 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       'config_voice_studio',
       JSON.stringify({
         activeAccount: activeKeySlot,
-        apiKey1,
-        apiKey2,
         provider,
         selectedLanguage,
         selectedGender: genderFilter,
@@ -670,8 +668,8 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
         favorites: favoriteVoiceIds
       })
     );
-    localStorage.setItem('elevenlabs_api_key_1', apiKey1);
-    localStorage.setItem('elevenlabs_api_key_2', apiKey2);
+    if (!writeVoiceCredential(1, apiKey1)) onNotify('ElevenLabs session storage unavailable', 'error');
+    if (!writeVoiceCredential(2, apiKey2)) onNotify('ElevenLabs session storage unavailable', 'error');
     localStorage.setItem('elevenlabs_active_slot', String(activeKeySlot));
     localStorage.setItem('favorite_voices', JSON.stringify(favoriteVoiceIds));
 
