@@ -1,9 +1,11 @@
 <div align="center">
 
-# 🎬 AetherCombine Studio
+# AETHERCOMBINE STUDIO
+### V8.1 · Cloud Production Control Center
 
 **Облачная студия 4K-продакшна для YouTube — от сценария до готового мастера на Google Drive**
 
+[![Version](https://img.shields.io/badge/Studio-V8.1-06B6D4?style=for-the-badge)](#)
 [![Deploy](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/deploy.yml)
 [![Live](https://img.shields.io/badge/Live-GitHub%20Pages-2ea44f?logo=githubpages&logoColor=white)](https://zermexx.github.io/aethercombine-studio/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-96%25-3178C6?logo=typescript&logoColor=white)](#)
@@ -17,6 +19,48 @@
 
 ---
 
+## V8.1 · Production Control Center
+
+| Модуль | Возможности |
+|---|---|
+| **Timeline** | Настройки каждой сцены: камера, переходы, синхронизация, звук и CTA |
+| **Lossless Round-Trip** | Сохранение исходных полей полных манифестов V8.0/V8.1 при импорте и экспорте; контролируемые изменения |
+| **Hybrid Sync** | Native, Hybrid, Freeze, Stretch, Loop; ограничение продления до 2 с |
+| **Audio Mixer** | Исходное окружение MP4, диктор, внешний эмбиент, Adaptive Audio и Smart Ducking |
+| **Broadcast Graphics** | Lower Third, Brand Identity, Subscribe & Bell с настройкой SFX |
+| **Render Control** | Fast Preview 720p или Cinema 4K Master |
+| **Enhanced QC Dashboard** | Локальный импорт qc_report.json, кадры, A/V delta, LUFS, True Peak, диагностика дорожек и CTA |
+
+### Производственный маршрут
+
+```mermaid
+flowchart LR
+ A[Import JSON] --> B[Timeline V8.1]
+ B --> C[Validate / Export]
+ C --> D[Fast Preview]
+ D --> E[QC Dashboard]
+ E --> F[Visual and Audio Review]
+ F --> G[Cinema 4K Master]
+```
+
+1. Импортируйте манифест и проверьте таймлайн.
+2. Настройте сцены и экспортируйте JSON; для строгой проверки V8.1 используйте manifest_version 8.1.
+3. Запустите Fast Preview и дождитесь завершения GitHub Actions.
+4. Загрузите qc_report.json в Enhanced QC Dashboard.
+5. Просмотрите и прослушайте фильм; только после приёмки запускайте Master.
+
+> QC-индикаторы не заменяют режиссёрскую приёмку. Lossless-экспорт сохраняет исходную версию манифеста; миграция версии — отдельная операция.
+
+### HISTOVIVA EP02 · контрольный Preview #35
+
+| Сцены | Хронометраж | Кадры | A/V delta | LUFS | True Peak |
+|---:|---:|---:|---:|---:|---:|
+| 34 | 05:04.500 | 7308/7308 | 0 ms | −14.15 | −1.41 dBTP |
+
+Технический QC пройден; финальная коррекция громкости CTA и приёмка 4K Master ещё впереди.
+
+---
+
 ## ✨ Что это
 
 **AetherCombine Studio** — браузерный комбайн для производства двух форматов видео под канал [@Histoviva](https://youtube.com/@Histoviva):
@@ -24,9 +68,9 @@
 - 🏛️ **Документальные фильмы** (~8–16 мин, 100–200+ сцен) — покадровый таймлайн, дикторская озвучка, lower-thirds, субтитры.
 - 🌙 **Многочасовые ambience-лупы** (3–10 ч, 4K) — бесшовные петли, кроссфейды актов, асимметричные врезки, loudnorm.
 
-Вся тяжёлая работа (FFmpeg, апскейл, склейка, нормализация звука) выполняется **не в браузере**, а в GitHub Actions. Студия only собирает манифест, отправляет его в раннер и показывает живой прогресс.
+Вся тяжёлая работа (FFmpeg, апскейл, склейка, нормализация звука) выполняется **не в браузере**, а в GitHub Actions. Студия собирает манифест, отправляет его в раннер и показывает живой прогресс.
 
-> 💡 **Ключевая идея:** браузер = пульт управления, GitHub Actions = рендер-ферма, Google Drive = файловое хранилище. Ни один 24-гигабайтный мастер не проходит через ваш компьютер.
+> 💡 **Ключевая идея:** браузер = пульт управления, GitHub Actions = рендер-ферма, Google Drive = файловое хранилище. Для облачного рендера не требуется скачивать мастер на компьютер.
 
 ---
 
@@ -58,7 +102,7 @@ flowchart LR
 
 | Вкладка | Назначение |
 |---|---|
-| 🎬 **Повествовательный монтаж** | N-сцен таймлайн, ритм-карта (Historical / Ambient), 2-слойный аудио-микшер, drift-guard, оверлеи |
+| 🎬 **Повествовательный монтаж** | N-сцен таймлайн, ритм-карта (Historical / Ambient), адаптивный аудио-микшер, drift-guard, оверлеи |
 | 🔁 **Многочасовой луп** | Конструктор актов (1–50+ слотов), бесшовные петли, врезки `inserts[]`, скраббер, пресеты 3/5/8/10 ч |
 | 📝 **VerbaFlow** | Анти-ИИ ритмика, хуки, дикторская нормализация, разбивка на главы, мультиязычный SRT |
 | 📈 **YouTube SEO** | A/B/C заголовки, описание, кликабельные главы, 30 тегов, `RELEASE_CARD.md` |
@@ -80,7 +124,8 @@ bun run dev          # → http://localhost:5173
 Сборка и проверка типов:
 
 ```bash
-bunx tsc --noEmit
+bun run typecheck
+bun test tests/manifest-v8.test.ts tests/manifest-v81.test.ts tests/manifest-roundtrip.test.ts
 bun run build
 bun run preview
 ```
@@ -172,7 +217,7 @@ aethercombine-studio/
 
 | Workflow | Триггер | Что делает |
 |---|---|---|
-| **Deploy** | push в `main` | `bun install` → `build` → публикация на GitHub Pages |
+| **Deploy** | push в `main` | `bun install` → typecheck → manifest tests → build → публикация на GitHub Pages |
 | **AI Fix Web** | ручной `workflow_dispatch` | Gemini CLI читает `tasks/*.md`, правит код, гоняет typecheck + build, открывает PR |
 
 Запуск агента: **Actions → AI Fix Web (Gemini) → Run workflow →** `task_file = tasks/fix-counters.md`
@@ -192,7 +237,7 @@ aethercombine-studio/
 ## 🗺️ Roadmap
 
 - [x] **P0** — бесшовный loop-baker, честные кроссфейды актов, stream-upload, санитайз секретов, preflight-гейт, 20 бейджей, End Screen от реальной длительности
-- [ ] **P1** — единый store манифеста, waveform мастер-аудио, ассет-браузер Drive, виртуализация таймлайна на 200+ сцен
+- [ ] **P1** — единый store манифеста, waveform мастер-аудио, ассет-браузер Drive, дальнейшая оптимизация больших таймлайнов
 - [ ] **P2** — иконки вместо эмодзи, i18n, blind A/B-тест обложек, ONNX-сегментация для удаления фона
 
 ---
