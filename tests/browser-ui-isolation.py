@@ -94,8 +94,28 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Open scoped Loop settings").click()
     expect(page.get_by_label("integrated_lufs")).to_have_value("-14.5")
     expect(page.get_by_text("scene.mp4: Attached (local)",exact=True)).to_be_visible()
+    # Seed a nonempty scene through the validated project editor, then edit via native UI.
+    page.get_by_role("button",name="Close native module").click()
+    import json
+    fixture=json.loads(production.input_value())
+    fixture["narrative_scenes"]=[{"scene_id":"native-scene-1","scene_index":1,"file_name":"scene.mp4","text_overlay":"History","duration":8,"start_time":0,"transition":{"type":"fade","duration_sec":0.5},"brand_identity_visible":True,"cta_config":{"enabled":True,"style":"subscribe_bell","show_sec":[1,7],"click_sec":2,"bell_sec":4,"sfx_enabled":True,"sfx_volume":1}}]
+    production.fill(json.dumps(fixture))
     page.get_by_role("button",name="Open native Montage Combine").click()
-    expect(page.get_by_role("group",name="Native Montage Combine")).to_be_visible()
+    montage=page.get_by_role("group",name="Native Montage Combine")
+    expect(montage).to_be_visible()
+    montage.get_by_text("Настройки сцены V8.1 · Video / Audio / Branding / CTA",exact=True).click()
+    expect(montage.get_by_label("CTA SFX volume")).to_have_value("1")
+    montage.get_by_label("CTA SFX volume").fill("0.75")
+    montage.get_by_label("Видимость бренда").select_option("hide")
+    page.get_by_role("button",name="Save project").click()
+    expect(montage).to_have_count(0)
+    ws.select_option("the_whisker_trio")
+    ws.select_option("histoviva")
+    page.get_by_role("button",name="Open native Montage Combine").click()
+    expect(montage).to_be_visible()
+    montage.get_by_text("Настройки сцены V8.1 · Video / Audio / Branding / CTA",exact=True).click()
+    expect(montage.get_by_label("CTA SFX volume")).to_have_value("0.75")
+    expect(montage.get_by_label("Видимость бренда")).to_have_value("hide")
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_workspace_draft')}finally{window.__auditEnabled=true}}")=="legacy-fixture"
     import base64
     page.get_by_role("button",name="Close native module").click()
