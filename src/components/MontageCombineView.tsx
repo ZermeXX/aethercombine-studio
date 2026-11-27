@@ -395,7 +395,7 @@ function normalizeBroadcastConfig(value: unknown): BroadcastConfig {
   const end = Math.max(start + 0.05, num(show[1], 5.5, 3600));
   const rgba = Array.isArray(c.bar_bg_rgba) ? c.bar_bg_rgba : [];
   return { enabled: c.enabled !== false, style: 'histoviva_broadcast_en',
-    emblem_path: typeof c.emblem_path === 'string' && c.emblem_path.trim() ? c.emblem_path.trim() : 'aether_art_150x150_A.png',
+    emblem_path: typeof c.emblem_path === 'string' && c.emblem_path.trim() ? c.emblem_path.trim() : 'histoviva_emblem_gold_v2.png',
     show_sec: [start, end], anim_sec: Math.min((end-start)/2, num(c.anim_sec, 0.55, 10)),
     bar_bg_rgba: [Math.round(num(rgba[0],10,255)), Math.round(num(rgba[1],14,255)), Math.round(num(rgba[2],18,255)), Math.round(num(rgba[3],214,255))] };
 }
