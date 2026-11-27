@@ -32,6 +32,7 @@ declare global {
 
 interface ThumbnailStudioViewProps {
   isolatedEditing?: boolean;
+  onProjectImageData?: (slot:ThumbnailSlotId,dataUrl:string)=>void;
   onProjectImageFile?: (slot:ThumbnailSlotId,file:File)=>void;
   projectImageUrls?: Partial<Record<ThumbnailSlotId,string>>;
   initialSlots?: Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
@@ -989,6 +990,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   isolatedEditing = false,
   projectImageUrls,
   onProjectImageFile,
+  onProjectImageData,
   initialSlots,
   onSlotsChange,
   thumbTitle,
@@ -1055,6 +1057,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
     return()=>{live=false;};
   },[isolatedEditing,projectImageUrls]);
+  const imageModuleLive=useRef(false);
+  useEffect(()=>{imageModuleLive.current=true;return()=>{imageModuleLive.current=false;};},[]);
+  function persistLocalImage(slot:ThumbnailSlotId,url:string):boolean{
+    if(!isolatedEditing)return false;
+    if(imageModuleLive.current&&onProjectImageData)onProjectImageData(slot,url);
+    return true;
+  }
   const projectTitleSeed = (youtubeMockTitle || thumbTitle || '').trim();
   const lastSyncedExternalTitleRef = useRef<string>(thumbTitle);
 
@@ -1322,7 +1331,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
     setSlotConfigs(prev => ({ ...prev, [targetSlot]: clonedCfg }));
     const sourceImg = slotImages[activeSlot] || slotImages.A;
-    if (sourceImg) setSlotImages(prev => ({ ...prev, [targetSlot]: sourceImg }));
+    if(sourceImg){
+      if(isolatedEditing){
+        const canvas=document.createElement('canvas');canvas.width=sourceImg.naturalWidth;canvas.height=sourceImg.naturalHeight;
+        const ctx=canvas.getContext('2d');if(ctx&&canvas.width&&canvas.height){ctx.drawImage(sourceImg,0,0);persistLocalImage(targetSlot,canvas.toDataURL('image/png'));}
+      }else setSlotImages(prev=>({...prev,[targetSlot]:sourceImg}));
+    }
     setShowCopyMenu(false);
     setActiveSlot(targetSlot);
     onNotify(
@@ -1838,18 +1852,19 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   }, [renderAllCanvases]);
 
   useEffect(() => {
-    if (!imgA && batchVariants[0]) {
+    if (!isolatedEditing && !imgA && batchVariants[0]) {
       if (!isolatedEditing) window.selectedMasterThumbnail = batchVariants[0];
       const initImg = new Image();
       initImg.onload = () => setSlotImages(prev => ({ ...prev, A: initImg }));
       initImg.src = batchVariants[0];
     }
-  }, [imgA, batchVariants]);
+  }, [imgA, batchVariants, isolatedEditing]);
 
   const handleSelectBatchVariant = (idx: number, targetSlot: ThumbnailSlotId = activeSlot) => {
     const url = batchVariants[idx];
     if (!url) return;
     setSelectedMasterVariantIdx(idx);
+    if(persistLocalImage(targetSlot,url))return;
     if (!isolatedEditing) window.selectedMasterThumbnail = url;
     const selectedImage = new Image();
     selectedImage.onload = () => {
@@ -1930,6 +1945,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setLastModelUsed('HTML5 Canvas 4K (локальный генератор)');
     setGenerationError(null);
     if (!isolatedEditing) window.selectedMasterThumbnail = fallbackUrls[0];
+    if(persistLocalImage(targetSlot,fallbackUrls[0]))return;
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: fallbackImg }));
@@ -2018,7 +2034,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setLastModelUsed(`Видео-нарезка (${file.name})`);
         if (!isolatedEditing) window.selectedMasterThumbnail = slicedUrls[0];
         const firstImg = new Image();
-        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
+        firstImg.onload = () => {if(!persistLocalImage(activeSlot,slicedUrls[0]))setSlotImages(prev=>({...prev,[activeSlot]:firstImg}));};
         firstImg.src = slicedUrls[0];
         onNotify(
           `🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`,
@@ -2098,7 +2114,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setLastModelUsed(`Арт-нарезка (${file.name})`);
         if (!isolatedEditing) window.selectedMasterThumbnail = slicedUrls[0];
         const firstImg = new Image();
-        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
+        firstImg.onload = () => {if(!persistLocalImage(activeSlot,slicedUrls[0]))setSlotImages(prev=>({...prev,[activeSlot]:firstImg}));};
         firstImg.src = slicedUrls[0];
         onNotify(
           `🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`,
@@ -2259,6 +2275,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       );
       return;
     }
+    if(persistLocalImage(targetSlot,dataUrl))return;
     const capturedImg = new Image();
     capturedImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: capturedImg }));
@@ -2307,6 +2324,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
     const slotToUpdate: ThumbnailSlotId = slotImages[activeSlot] ? activeSlot : 'A';
     resampleSingleImage(targetImg, (nextImg, url) => {
+      if(persistLocalImage(slotToUpdate,url)){setBaseResolutionPreset(presetKey);return;}
       setSlotImages(prev => ({ ...prev, [slotToUpdate]: nextImg }));
       if (slotToUpdate === 'A') if (!isolatedEditing) window.selectedMasterThumbnail = url;
       setBaseResolutionPreset(presetKey);
@@ -3070,6 +3088,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 {activeSlot !== 'A' && slotImages[activeSlot] && (
                   <button
                     type="button"
+                    disabled={isolatedEditing}
+                    title={isolatedEditing?'Persistent slot removal is not yet available':undefined}
                     onClick={() => {
                       setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
                       onNotify(

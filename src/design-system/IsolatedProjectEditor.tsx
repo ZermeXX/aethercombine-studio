@@ -1,3 +1,4 @@
+import {ScopedRenderSettings} from './ScopedRenderSettings';
 import {ProjectImagePanel,type ProjectImageUrls} from './ProjectImagePanel';
 import {ThumbnailStudioView} from '../components/ThumbnailStudioView';
 import {VoiceStudioView} from '../components/VoiceStudioView';
@@ -207,6 +208,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  {nativeDraft&&nativeTab==='loop'&&<fieldset disabled={busy} aria-label="Scoped Loop settings">
  <p>Scoped loop settings preview; original Loop Builder not mounted.</p>
  {(['fps','codec','resolution','loopHours'] as const).map(k=><label key={k}>{k}<select aria-label={'Loop '+k} value={String(nativeDraft.production?.[k]??({fps:24,codec:'libx264',resolution:'4k',loopHours:3}[k]))} onChange={e=>changeLoop(k,e.target.value)}>{({fps:['24','30','60'],codec:['libx264','libx265'],resolution:['720p','1080p','2k','4k'],loopHours:['3','6','10']}[k]).map(v=><option key={v}>{v}</option>)}</select></label>)}
+ <ScopedRenderSettings production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid render settings');}}}/>
  <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings');}}}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='loop'&&active&&storage.current&&<fieldset disabled={busy||assetBusy} key={active.project.projectId+':assets'}>
@@ -215,7 +217,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
 
  {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} refresh={imageRefresh} onUrls={setImageUrls} onBusy={setAssetBusy} busy={busy||assetBusy}/>}
  {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
- <ThumbnailStudioView isolatedEditing onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
+ <ThumbnailStudioView isolatedEditing onProjectImageData={(slot,url)=>void persistNativeImage([slot],url)} onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='voice'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':voice'} aria-label="Native Voice Studio">
  <VoiceStudioView isolatedEditing initialPreferences={nativeDraft.legacyExtras?.voice as ComponentProps<typeof VoiceStudioView>['initialPreferences']} onPreferencesChange={onVoice} scriptText={script} onScriptTextChange={v=>{setScript(v);setDirty(true);}} onMasterVoiceoverReady={()=>{}} onNotify={setNotice}/>
