@@ -25,11 +25,12 @@ export function previewLegacyDraft(raw:string,workspaceId:WorkspaceId):Migration
  const d=object(parsed);if(d.version!==1)throw new Error('Unsupported legacy draft version');
  const p=object(d.project),v=object(d.verbaflow),r=object(d.render_settings);
  const project=createProject(workspaceId,string(p.name));
- const payload=projectPayload({schemaVersion:1,script:string(v.source_text),seoScript:string(p.seo_script_text),thumbnailTitle:string(p.thumb_title),thumbnailBadge:string(p.thumb_badge),chapters:string(p.verbaflow_chapters_txt),production:{fps:r.video_fps,codec:r.video_codec,resolution:r.loop_resolution,loopHours:r.loop_hours,scenes:[],timeline_slots:r.timeline_slots,audio_mastering:r.audio_mastering,render:{crf:r.video_crf,audioBitrate:r.audio_bitrate_kbps,actCrossfadeSec:r.act_crossfade_sec,internalCrossfadeSec:r.internal_loop_crossfade_sec,finalBlackEnabled:r.final_black_screen_enabled,finalBlackSec:r.final_black_screen_sec,bitratePreset:r.bitrate_preset,transitionMode:r.seamless_transition_mode,useEmbeddedAudio:r.use_embedded_audio}}});
+ const combine=d.combine===undefined?{}:object(d.combine);
+ const payload=projectPayload({schemaVersion:1,script:string(v.source_text),seoScript:string(p.seo_script_text),thumbnailTitle:string(p.thumb_title),thumbnailBadge:string(p.thumb_badge),chapters:string(p.verbaflow_chapters_txt),production:{fps:r.video_fps,codec:r.video_codec,resolution:r.loop_resolution,loopHours:r.loop_hours,scenes:[],narrative_scenes:combine.narrative_scenes,timeline_slots:r.timeline_slots,audio_mastering:r.audio_mastering,render:{crf:r.video_crf,audioBitrate:r.audio_bitrate_kbps,actCrossfadeSec:r.act_crossfade_sec,internalCrossfadeSec:r.internal_loop_crossfade_sec,finalBlackEnabled:r.final_black_screen_enabled,finalBlackSec:r.final_black_screen_sec,bitratePreset:r.bitrate_preset,transitionMode:r.seamless_transition_mode,useEmbeddedAudio:r.use_embedded_audio}}});
  // Screen every projected string, including timeline references.
  const scan=(x:unknown):void=>{if(typeof x==='string')string(x);else if(x&&typeof x==='object')Object.values(x).forEach(scan);};
  scan(payload);
- return {project,payload,omitted:['combine and narrative scenes','additional render settings','unknown nested timeline fields','standalone SEO and thumbnail state','voice preferences and binary assets']};
+ return {project,payload,omitted:['additional combine settings and unknown narrative scene fields','additional render settings','unknown nested timeline fields','standalone SEO and thumbnail state','voice preferences and binary assets']};
 }
 export type MigrationResult={status:'missing'}|{status:'imported_partial'|'already_imported';projectId:string;workspaceId:WorkspaceId};
 export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceId:WorkspaceId,confirmPartial:boolean):Promise<MigrationResult>{
