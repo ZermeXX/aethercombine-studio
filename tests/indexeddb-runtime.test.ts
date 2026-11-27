@@ -53,3 +53,13 @@ test('SHA-256 detects corrupted stored asset',async()=>{
  await expect(s.getAsset('histoviva',p.projectId,'a')).rejects.toThrow('Asset checksum mismatch');
  }finally{s.close();}
 });
+
+test('timeline and audio mastering survive database reopen',async()=>{
+ const factory=new IDBFactory();
+ const p=createProject('histoviva','Timeline');
+ const payload={schemaVersion:1 as const,script:'Narration',seoScript:'SEO',thumbnailTitle:'Title',thumbnailBadge:'Badge',chapters:'Intro',production:{fps:24 as const,codec:'libx264' as const,resolution:'4k' as const,loopHours:3,scenes:[],timeline_slots:[{slot_index:0,slot_id:'s1',title:'Act',asset_id:'a1',file_name:'clip.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:20,inserts:[],slot_transition_out:{type:'xfade' as const,duration_sec:1}}],audio_mastering:{loudnorm_enabled:true,integrated_lufs:-14,true_peak_dbtp:-1.5,lra:11,e3_soft_attack_compressor:true,e3_max_peak_over_bed_db:6}}};
+ let s=new ProjectStorage(await openProjectDatabase(factory));
+ try{await s.createProject(p);await s.saveProject(p,1,payload);}finally{s.close();}
+ s=new ProjectStorage(await openProjectDatabase(factory));
+ try{expect(await s.getPayload('histoviva',p.projectId)).toEqual(payload);expect(await s.getPayload('the_whisker_trio',p.projectId)).toBeNull();}finally{s.close();}
+});
