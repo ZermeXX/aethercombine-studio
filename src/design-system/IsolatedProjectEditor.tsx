@@ -52,6 +52,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [busy,setBusy]=useState(false);
  const [assetBusy,setAssetBusy]=useState(false);
  const imageWrite=useRef(false);
+ function acquireAssetWrite(){if(locked.current||imageWrite.current||!context.current)return false;imageWrite.current=true;setAssetBusy(true);return true;}
+ function releaseAssetWrite(){imageWrite.current=false;setAssetBusy(false);}
+
  const [imageRefresh,setImageRefresh]=useState(0);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
@@ -163,7 +166,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  async function persistNativeImage(slots:('A'|'B'|'C'|'art')[],source:Blob|string,nextTab?:'art'|'thumb'){
   if(!active||!storage.current||locked.current||imageWrite.current||assetBusy)return;
   const db=storage.current,scope={workspaceId:active.project.workspaceId,projectId:active.project.projectId};
-  imageWrite.current=true;setAssetBusy(true);setError('');
+  if(!acquireAssetWrite())return;setError('');
   try{
    if(typeof source==='string'&&!/^data:image\/(png|jpeg|webp);base64,/i.test(source))throw new Error('Only local raster data accepted');
    const blob=typeof source==='string'?await (await fetch(source)).blob():source;
@@ -173,14 +176,14 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    setImageRefresh(v=>v+1);setNotice('Native image saved: '+slots.join(', '));
    if(nextTab){setArtInput(null);setNativeTab(nextTab);}
   }catch{setError('Native image could not be saved. Existing stored images retained.');}
-  finally{imageWrite.current=false;setAssetBusy(false);}
+  finally{releaseAssetWrite();}
  }
  const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
  <h1 className="text-xl font-semibold">V9 Isolated Project Editor · Preview</h1>
- <p>Text, validated production settings, native VerbaFlow and YouTube SEO are available. Other legacy production modules, rendering and credentials are not mounted.</p>
+ <p>Project-scoped native module previews and validated production settings. External rendering and credentials are disabled.</p>
  <button type="button" disabled={assetBusy||busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
  <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={assetBusy||!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -217,10 +220,10 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings');}}}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='loop'&&active&&storage.current&&<fieldset disabled={busy||assetBusy} key={active.project.projectId+':assets'}>
- <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} onBusy={setAssetBusy} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
+ <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} acquireWrite={acquireAssetWrite} releaseWrite={releaseAssetWrite} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
  </fieldset>}
 
- {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} refresh={imageRefresh} onUrls={setImageUrls} onBusy={setAssetBusy} busy={busy||assetBusy}/>}
+ {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} refresh={imageRefresh} onUrls={setImageUrls} acquireWrite={acquireAssetWrite} releaseWrite={releaseAssetWrite} busy={busy||assetBusy}/>}
  {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
  <ThumbnailStudioView isolatedEditing onProjectImageData={(slot,url)=>void persistNativeImage([slot],url)} onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
  </fieldset>}

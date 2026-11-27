@@ -169,5 +169,20 @@ with sync_playwright() as p:
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_gh_token')==='synthetic-migration-fixture'}finally{window.__auditEnabled=true}}")
     print('ISOLATED_COLD_START_STORAGE_PASS')
     print('ISOLATED_PRODUCTION_STORAGE_ACCESS_PASS')
+    # Independent legacy browser context, synthetic token only. No OAuth popup or external API calls.
+    legacy = browser.new_page()
+    legacy.add_init_script("""() => {
+      if(!sessionStorage.getItem('legacy-test-seeded')){
+        localStorage.setItem('ac_gh_token','synthetic-legacy-boot-token');
+        sessionStorage.setItem('legacy-test-seeded','1');
+      }
+    }""")
+    legacy.route("https://**/*", lambda route: route.abort())
+    legacy.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
+    legacy.get_by_role("button",name="Open legacy Studio").click()
+    legacy.wait_for_function("""() => localStorage.getItem('ac_gh_token')===null && JSON.parse(sessionStorage.getItem('aether_github_token_session')||'{}').github_token==='synthetic-legacy-boot-token'""")
+    expect(legacy.locator("footer")).to_contain_text("AetherCombine Studio")
+    print("LEGACY_BOOT_MIGRATION_PASS")
+    legacy.close()
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

@@ -24,15 +24,15 @@ export function ScopedTimelinePanel({production,onChange}:{production:Production
  <label><input type="checkbox" checked={audio.e3_soft_attack_compressor} onChange={e=>onChange({...production,audio_mastering:{...audio,e3_soft_attack_compressor:e.target.checked}})}/> Soft attack compressor</label>
  </section>;
 }
-export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,onBusy}:{storage:ProjectStorage;scope:ProjectScope;payload:ProjectPayload;busy:boolean;saveBeforeAttach:()=>Promise<void>;onBusy:(v:boolean)=>void}){
+export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,acquireWrite,releaseWrite}:{storage:ProjectStorage;scope:ProjectScope;payload:ProjectPayload;busy:boolean;saveBeforeAttach:()=>Promise<void>;acquireWrite:()=>boolean;releaseWrite:()=>void}){
  const [rows,setRows]=useState<{assetId:string;name:string;size:number}[]>([]);
  const [message,setMessage]=useState('');
  const [loading,setLoading]=useState(true);
  const names=collectAssetNames(payload);
  useEffect(()=>{let live=true;setLoading(true);storage.listAssets(scope.workspaceId,scope.projectId).then(v=>{if(live)setRows(v);},()=>{if(live)setMessage('Asset list unavailable');}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[storage,scope.workspaceId,scope.projectId]);
  async function attach(file:File){
-  onBusy(true);setMessage('');
-  try{await saveBeforeAttach();await attachMigrationAsset(storage,scope.workspaceId,scope.projectId,file.name,file);setRows(await storage.listAssets(scope.workspaceId,scope.projectId));setMessage('Asset attached and verified');}catch{setMessage('Attachment rejected or storage unavailable');}finally{onBusy(false);}
+  if(!acquireWrite())return;setMessage('');
+  try{await saveBeforeAttach();await attachMigrationAsset(storage,scope.workspaceId,scope.projectId,file.name,file);setRows(await storage.listAssets(scope.workspaceId,scope.projectId));setMessage('Asset attached and verified');}catch{setMessage('Attachment rejected or storage unavailable');}finally{releaseWrite();}
  }
  return <section aria-label="Project assets"><h3>Local project assets</h3><p>Only files referenced by the saved project may be attached. No upload to Google Drive.</p>
  {loading?<p>Loading assets…</p>:names.map(n=><p key={n}>{n}: {rows.some(r=>r.name===n)?'Attached (local)':'Not attached locally'}</p>)}

@@ -3,7 +3,7 @@ import type {ProjectStorage} from '../utils/projectStorage';
 import type {ProjectScope} from '../utils/workspaceProjectContext';
 export type ImageSlot='A'|'B'|'C'|'art';
 export type ProjectImageUrls=Partial<Record<ImageSlot,string>>;
-export function ProjectImagePanel({storage,scope,onUrls,onBusy,busy,refresh=0}:{storage:ProjectStorage;scope:ProjectScope;onUrls:(urls:ProjectImageUrls)=>void;onBusy:(busy:boolean)=>void;busy:boolean;refresh?:number}){
+export function ProjectImagePanel({storage,scope,onUrls,acquireWrite,releaseWrite,busy,refresh=0}:{storage:ProjectStorage;scope:ProjectScope;onUrls:(urls:ProjectImageUrls)=>void;acquireWrite:()=>boolean;releaseWrite:()=>void;busy:boolean;refresh?:number}){
  const [urls,setUrls]=useState<ProjectImageUrls>({});
  const [message,setMessage]=useState('');
  const [loading,setLoading]=useState(true);
@@ -19,16 +19,17 @@ export function ProjectImagePanel({storage,scope,onUrls,onBusy,busy,refresh=0}:{
   return()=>{cancelled=true;live.current=false;Object.values(owned.current).forEach(URL.revokeObjectURL);owned.current={};};
  },[storage,scope.workspaceId,scope.projectId,refresh]);
  async function attach(slot:ImageSlot,file:File){
-  onBusy(true);setMessage('');
+  if(!acquireWrite())return;setMessage('');
   try{
    // Decode before writing: reject mislabeled or corrupt image inputs.
+   if(file.size>32*1024*1024)throw new Error('Image too large');
    const bitmap=await createImageBitmap(file);bitmap.close();
    await storage.replaceProjectImage(scope.workspaceId,scope.projectId,slot,file);
    if(!live.current)return;
    const previous=owned.current[slot],next={...owned.current,[slot]:URL.createObjectURL(file)};
    owned.current=next;setUrls(next);onUrls(next);if(previous)URL.revokeObjectURL(previous);
    setMessage('Project image saved: '+slot);
-  }catch{if(live.current)setMessage('Project image rejected');}finally{onBusy(false);}
+  }catch{if(live.current)setMessage('Project image rejected');}finally{releaseWrite();}
  }
  return <section aria-label="Persistent project images"><h3>Persistent project images</h3>
  <p>PNG, JPEG or WebP. Upload a background or a flattened art result. Files are stored locally under this project.</p>
