@@ -46,6 +46,15 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').add(record);done(undefined);}catch(e){fail(e);}};
   });
  }
+ listAssets(workspaceId:WorkspaceId,projectId:string):Promise<{assetId:string;name:string;size:number}[]>{
+  return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId){done([]);return;}
+    const r=tx.objectStore('project_assets').index('projectId').getAll(projectId);
+    r.onsuccess=()=>{try{done(r.result.map(a=>{if(!(a.blob instanceof Blob)||typeof a.name!=='string'||typeof a.assetId!=='string')throw new Error('Invalid stored asset');return {assetId:a.assetId,name:a.name,size:a.blob.size};}));}catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
  async getAsset(workspaceId:WorkspaceId,projectId:string,assetId:string):Promise<ProjectAsset|null>{
   const result=await transaction<ProjectAsset & {sha256?:string} | null>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);

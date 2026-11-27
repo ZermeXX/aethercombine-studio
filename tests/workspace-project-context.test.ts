@@ -67,3 +67,15 @@ test('native combine projection retains locks branding and timeline',()=>{
  expect(next.legacyExtras?.branding?.brand_identity).toEqual(original.legacyExtras.branding.brand_identity);
  expect(hydrateCombine(next).narrative_scenes).toEqual([]);
 });
+
+test('asset inventory remains project-scoped even for equal filenames',async()=>{
+ const s=new ProjectStorage(await openProjectDatabase(new IDBFactory())),c=new WorkspaceProjectContext(s);
+ try{
+ const h=await c.create('histoviva','H'),w=await c.create('the_whisker_trio','W');
+ await s.putAsset('histoviva',h.project.projectId,{assetId:'fixture',name:'scene.mp4',blob:new Blob(['abc'])});
+ expect(await s.listAssets('histoviva',h.project.projectId)).toEqual([{assetId:'fixture',name:'scene.mp4',size:3}]);
+ expect(await s.listAssets('the_whisker_trio',h.project.projectId)).toEqual([]);
+ expect(await s.listAssets('the_whisker_trio',w.project.projectId)).toEqual([]);
+ expect(await s.getAsset('the_whisker_trio',h.project.projectId,'fixture')).toBeNull();
+ }finally{s.close();}
+});

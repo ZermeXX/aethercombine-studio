@@ -1,3 +1,4 @@
+import {ScopedTimelinePanel,ScopedAssetPanel} from './ScopedTimelinePanel';
 import {MontageCombineView} from '../components/MontageCombineView';
 import {hydrateCombine,captureCombine} from '../utils/nativeCombineBinding';
 import type {AetherCombineDraftSlice} from '../utils/aetherPersistence';
@@ -37,6 +38,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const combineInvalid=useRef(false);
  const [dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false);
+ const [assetBusy,setAssetBusy]=useState(false);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
   combineInvalid.current=false;setNativeTab('none');setNotice('');
@@ -59,7 +61,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);
  },[dirty]);
  async function run(action:(c:WorkspaceProjectContext)=>Promise<void>){
-  if(locked.current||!context.current)return;
+  if(locked.current||assetBusy||!context.current)return;
   locked.current=true;setBusy(true);setError('');
   try{await action(context.current);}catch{setError('Operation failed. Current edits retained. Reload or retry after resolving storage conflicts.');}
   finally{locked.current=false;setBusy(false);}
@@ -137,23 +139,23 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   }catch{setNotice('Invalid loop setting');}
  }
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
- const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
+ const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
  <h1 className="text-xl font-semibold">V9 Isolated Project Editor · Preview</h1>
  <p>Text, validated production settings, native VerbaFlow and YouTube SEO are available. Other legacy production modules, rendering and credentials are not mounted.</p>
- <button type="button" disabled={busy||dirty} onClick={onExit}>Return to legacy Studio</button>
+ <button type="button" disabled={assetBusy||busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
- <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
- <label className="grid gap-1">Project<select aria-label="Isolated project" value={active?.project.projectId??''} disabled={!ready||busy} onChange={e=>{if(e.currentTarget.value)void select(e.currentTarget.value);}}><option value="" disabled>Select project</option>{projects.map(p=><option key={p.projectId} value={p.projectId}>{p.name}</option>)}</select></label>
- <label>New project name<input aria-label="New project name" value={name} disabled={!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
- <button type="button" disabled={!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button>
+ <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={assetBusy||!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+ <label className="grid gap-1">Project<select aria-label="Isolated project" value={active?.project.projectId??''} disabled={assetBusy||!ready||busy} onChange={e=>{if(e.currentTarget.value)void select(e.currentTarget.value);}}><option value="" disabled>Select project</option>{projects.map(p=><option key={p.projectId} value={p.projectId}>{p.name}</option>)}</select></label>
+ <label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
+ <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
  <div className="flex gap-2">
- <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
- <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
- <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>
- <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>
- <button type="button" onClick={()=>setNativeTab('none')} disabled={busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>
+ <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
  </div>
  {notice&&<p>{notice}</p>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
@@ -168,8 +170,12 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  {nativeDraft&&nativeTab==='loop'&&<fieldset disabled={busy} aria-label="Scoped Loop settings">
  <p>Scoped loop settings preview; original Loop Builder not mounted.</p>
  {(['fps','codec','resolution','loopHours'] as const).map(k=><label key={k}>{k}<select aria-label={'Loop '+k} value={String(nativeDraft.production?.[k]??({fps:24,codec:'libx264',resolution:'4k',loopHours:3}[k]))} onChange={e=>changeLoop(k,e.target.value)}>{({fps:['24','30','60'],codec:['libx264','libx265'],resolution:['720p','1080p','2k','4k'],loopHours:['3','6','10']}[k]).map(v=><option key={v}>{v}</option>)}</select></label>)}
- <p>Timeline slots: {nativeDraft.production?.timeline_slots?.length??0}</p>
+ <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings');}}}/>
  </fieldset>}
+ {nativeDraft&&nativeTab==='loop'&&active&&storage.current&&<fieldset disabled={busy||assetBusy} key={active.project.projectId+':assets'}>
+ <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} onBusy={setAssetBusy} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
+ </fieldset>}
+
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
  <button type="button" disabled={!dirty||busy||!active?.payload} onClick={()=>void run(save)}>Save project</button>
