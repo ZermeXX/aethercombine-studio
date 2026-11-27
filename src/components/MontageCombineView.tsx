@@ -436,6 +436,33 @@ function normalizeV8Export(settings: NarrativeExportSettings): NarrativeExportSe
 }
 
 type ManifestIssue = { severity: 'error' | 'warning'; message: string };
+
+// Preserve imported V8.1 JSON; apply only changes relative to the imported UI projection.
+export function mergeManifestRoundTrip(original: unknown, baseline: unknown, current: unknown): unknown {
+  if (JSON.stringify(baseline) === JSON.stringify(current)) return original;
+  const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (Array.isArray(current) && Array.isArray(baseline) && Array.isArray(original) &&
+      current.every(v => record(v) && typeof v.scene_id === 'string') &&
+      baseline.every(v => record(v) && typeof v.scene_id === 'string')) {
+    return current.map(v => {
+      const id = v.scene_id;
+      const b = baseline.find(x => record(x) && x.scene_id === id);
+      const o = original.find(x => record(x) && x.scene_id === id);
+      return b && o ? mergeManifestRoundTrip(o, b, v) : v;
+    });
+  }
+  if (record(current) && record(baseline) && record(original)) {
+    const out = { ...original };
+    for (const key of new Set([...Object.keys(baseline), ...Object.keys(current)])) {
+      if (JSON.stringify(baseline[key]) === JSON.stringify(current[key])) continue;
+      if (!Object.prototype.hasOwnProperty.call(current, key)) delete out[key];
+      else Object.defineProperty(out, key, { value: mergeManifestRoundTrip(original[key], baseline[key], current[key]), enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+  }
+  return current;
+}
+
 export function validateManifestV8(input: unknown): ManifestIssue[] {
   const issues: ManifestIssue[] = [];
   const add = (severity: ManifestIssue['severity'], message: string) => issues.push({severity,message});
@@ -1700,6 +1727,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     v21Locks
   ]);
 
+  const roundTripRef = useRef<{ original: Record<string, unknown>; baseline?: NarrativeMontageManifest } | null>(null);
   const [importedScenarioName, setImportedScenarioName] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [renderMode, setRenderMode] = useState<'preview' | 'master'>('preview');
@@ -2181,6 +2209,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         });
 
       if (parsedScenes.length > 0) {
+        roundTripRef.current = raw.manifest_version === '8.1' && Array.isArray(raw.timeline) && Array.isArray(raw.scenes) ? { original: JSON.parse(JSON.stringify(raw)) } : null;
         setNarrativeScenes(parsedScenes);
         setCustomScenesCountInput(parsedScenes.length);
         if (scrollContainerRef.current) {
@@ -3171,8 +3200,6 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       sc.camera_movement || CAMERA_VECTORS_ORDER[idx % CAMERA_VECTORS_ORDER.length];
     const resolvedSubtitles: Record<string, string> =
       sc.subtitles || (sc.text_overlay && sc.text_overlay.trim() ? { EN: sc.text_overlay.trim() } : {});
-    const timing = continuousSceneTimings[idx];
-
     return {
       scene_index: idx + 1,
       scene_id: sceneIdStr,
@@ -3184,12 +3211,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       ...(resolvedImageRef ? { image_reference: resolvedImageRef } : {}),
       start_time: sc.start_time,
       duration: Number(sc.duration) || 6,
-      ...(timing
-        ? {
-            voice_start: timing.voiceStart,
-            voice_end: timing.voiceEnd
-          }
-        : {}),
+      ...(typeof sc.voice_start === 'number' ? { voice_start: sc.voice_start } : { voice_start: v21Locks.voiceoverLeadInSec }),
+      ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : { voice_end: Math.max(v21Locks.voiceoverLeadInSec, Number(sc.duration) - v21Locks.voiceoverSentencePadSec) }),
       camera_movement: resolvedCamera,
       camera_zoom: normalizeCameraZoom(sc.camera_zoom),
       ...(sc.camera_policy ? {camera_policy:sc.camera_policy} : {}),
@@ -3444,7 +3467,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     }
 
     onNotify(formatScenesReadyLabel(normalizedStateScenes.length), 'success');
-    return buildNormalizedManifestForScenes(normalizedStateScenes);
+    const generated = buildNormalizedManifestForScenes(normalizedStateScenes);
+    const rt = roundTripRef.current;
+    return rt?.baseline ? mergeManifestRoundTrip(rt.original, rt.baseline, generated) as NarrativeMontageManifest : generated;
   };
 
   // Полный JSON-манифест для N-сцен (схема 2.2-FINAL с одновременными scenes[] и timeline[])
@@ -3484,6 +3509,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       encodeManifestBase64
     ]
   );
+
+  useEffect(() => {
+    const rt = roundTripRef.current;
+    if (rt && !rt.baseline) rt.baseline = JSON.parse(JSON.stringify(narrativeManifest));
+  }, [narrativeManifest]);
 
   const flaggedRevisionScenes = useMemo(
     () => narrativeScenes.filter(sc => Boolean(sc.needs_revision)),
@@ -3555,6 +3585,10 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Компактная облегчённая структура для GitHub workflow_dispatch (только timeline[], без дублей и справочных полей)
   const buildCompactDispatchManifest = (fullManifest: NarrativeMontageManifest) => {
+    if (roundTripRef.current?.baseline) {
+      const { scenes: _duplicateScenes, ...dispatch } = fullManifest;
+      return dispatch;
+    }
     const resMap: Record<string, string> = {
       '4k': '3840x2160',
       '1080p': '1920x1080',
