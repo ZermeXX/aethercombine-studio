@@ -39,3 +39,17 @@ test('binary asset round trip and ownership',async()=>{
  expect(Array.from(new Uint8Array(await restored!.blob.arrayBuffer()))).toEqual([1,2,3]);
  }finally{s.close();}
 });
+
+test('SHA-256 detects corrupted stored asset',async()=>{
+ const db=await openProjectDatabase(new IDBFactory());const s=new ProjectStorage(db);
+ try{
+ const p=createProject('histoviva','Integrity');await s.createProject(p);
+ await s.putAsset('histoviva',p.projectId,{assetId:'a',name:'fixture',blob:new Blob(['original'])});
+ await new Promise<void>((resolve,reject)=>{
+ const tx=db.transaction('project_assets','readwrite');const store=tx.objectStore('project_assets');
+ tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);
+ const r=store.get([p.projectId,'a']);r.onsuccess=()=>store.put({...r.result,blob:new Blob(['corrupt'])});
+ });
+ await expect(s.getAsset('histoviva',p.projectId,'a')).rejects.toThrow('Asset checksum mismatch');
+ }finally{s.close();}
+});
