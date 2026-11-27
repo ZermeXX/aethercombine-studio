@@ -203,6 +203,7 @@ export interface NarrativeSceneItem {
     sfx_gain_db?: number;
     [key: string]: unknown;
   };
+  brand_identity_visible?: boolean;
   cta_config?: CTAConfig;
   adaptive_audio?: boolean;
   audio_ducking?: boolean;
@@ -248,6 +249,7 @@ export interface ExportedNarrativeSceneItem {
   transition_duration: number;
   mute_audio: boolean;
   ambient_gain_db: number;
+  brand_identity_visible?: boolean;
   cta_config?: CTAConfig;
   adaptive_audio?: boolean;
   audio_ducking?: boolean;
@@ -463,6 +465,7 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
     if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
     else if (valid(d,0.001) && valid(sc.transition_duration,0) && sc.transition_duration>d) add('warning',label+'переход длиннее сцены.');
+    if (sc.brand_identity_visible !== undefined && typeof sc.brand_identity_visible !== 'boolean') add('error',label+'brand_identity_visible должен быть boolean.');
     if (sc.cta_config !== undefined) {
       const c = obj(sc.cta_config);
       if (typeof c.enabled !== 'boolean') add('error',label+'CTA enabled должен быть boolean.');
@@ -896,6 +899,9 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
           className="flex-1 min-w-[100px] bg-slate-900 border border-slate-700 rounded px-1" />
       </div>
       <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
+        <label title="Видимость верхней фирменной плашки при включённом глобальном Brand Identity">Brand Visibility <select aria-label="Видимость бренда" value={sc.brand_identity_visible === undefined ? 'auto' : sc.brand_identity_visible ? 'show' : 'hide'} onChange={e=>updateScene(idx,{brand_identity_visible:e.target.value==='auto'?undefined:e.target.value==='show'})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto — скрыть на bumper</option><option value="show">Show</option><option value="hide">Hide</option>
+        </select></label>
         <label><input type="checkbox" checked={sc.cta_config?.enabled === true && sc.cta_config.style === 'subscribe_bell'} onChange={e=>updateScene(idx,{cta_config:e.target.checked ? {...defaultCTA(sc.duration),...sc.cta_config,enabled:true,style:'subscribe_bell'} : {...(sc.cta_config ?? defaultCTA(sc.duration)),enabled:false}})}/> Subscribe & Bell</label>
         {sc.cta_config?.enabled && sc.cta_config.style === 'subscribe_bell' && <>
           {(['start','click','bell','end'] as const).map(key=>{
@@ -2116,6 +2122,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             video_duration_mode: normalizeDurationMode(sc.video_duration_mode),
             max_extension_sec: normalizeExtension(sc.max_extension_sec),
             allow_video_reuse: sc.allow_video_reuse === true,
+            brand_identity_visible: typeof sc.brand_identity_visible === 'boolean' ? sc.brand_identity_visible : undefined,
             cta_config: readCTA(sc.cta_config),
             adaptive_audio: sc.adaptive_audio !== false,
             audio_ducking: sc.audio_ducking !== false,
@@ -3177,6 +3184,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       transition_duration: resolvedTransDur,
       mute_audio: resolvedMute,
       ambient_gain_db: resolvedAmbientGainDb,
+      ...(typeof sc.brand_identity_visible === 'boolean' ? {brand_identity_visible:sc.brand_identity_visible} : {}),
       ...(sc.cta_config ? {cta_config:sc.cta_config} : {}),
       adaptive_audio: sc.adaptive_audio !== false,
       audio_ducking: sc.audio_ducking !== false,
@@ -3594,6 +3602,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         allow_video_reuse: sc.allow_video_reuse === true,
         transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
         transition_duration: sc.transition_duration,
+        ...(typeof sc.brand_identity_visible === 'boolean' ? {brand_identity_visible:sc.brand_identity_visible} : {}),
         ...(sc.cta_config ? {cta_config:sc.cta_config} : {}),
         adaptive_audio: sc.adaptive_audio !== false,
         audio_ducking: sc.audio_ducking !== false,
