@@ -1,3 +1,4 @@
+import {collectAssetNames} from './migrationAssets';
 import {createProject,projectMetadata,type ProjectRecord} from '../design-system/projectRegistry';
 import {projectPayload,type ProjectPayload} from './projectPayload';
 import {isWorkspaceId,type WorkspaceId} from '../design-system/workspaces';
@@ -108,10 +109,39 @@ export async function restoreMigrationBackup(db:IDBDatabase,workspaceId:Workspac
  if(digest!==backup.digest)throw new Error('Backup checksum mismatch');
  const scan=(x:unknown):void=>{if(typeof x==='string')string(x);else if(x&&typeof x==='object')Object.values(x).forEach(scan);};scan(payload);
  const project=createProject(workspaceId,name+' (Recovered)');
+ // Snapshot current attachments from the original import, not from unrelated projects.
+ const names=collectAssetNames(payload);
+ const snapshot=await new Promise<any[]>((resolve,reject)=>{
+  const tx=db.transaction(['projects','project_assets','metadata'],'readonly');
+  const reqs=[tx.objectStore('projects').get(backup.projectId),tx.objectStore('project_assets').index('projectId').getAll(backup.projectId),tx.objectStore('metadata').get('asset-refs:'+backup.projectId)];
+  tx.oncomplete=()=>resolve(reqs.map(r=>r.result));tx.onabort=()=>reject(tx.error);
+ });
+ const [source,records,registry]=snapshot;
+ if((source&&projectMetadata(source).workspaceId!==workspaceId)||(!source&&(records.length||registry)))throw new Error('Recovery asset ownership mismatch');
+ const verified:any[]=[];const seen=new Set<string>();
+ for(const a of records){
+  if(a.projectId!==backup.projectId||a.assetId!=='legacy-file:'+a.name||!names.includes(a.name)||seen.has(a.assetId)||!(a.blob instanceof Blob)||!a.blob.size||typeof a.sha256!=='string')throw new Error('Invalid recovery asset');
+  string(a.name);seen.add(a.assetId);
+  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await a.blob.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');
+  if(hash!==a.sha256)throw new Error('Asset checksum mismatch');
+  verified.push({projectId:project.projectId,assetId:a.assetId,name:a.name,blob:a.blob,sha256:hash});
+ }
+ const refs:any[]=[];const refNames=new Set<string>();
+ if(registry){
+ if(registry.workspaceId!==workspaceId||registry.projectId!==backup.projectId||!Array.isArray(registry.refs))throw new Error('Registry ownership mismatch');
+ for(const r of registry.refs){
+ if(typeof r.name!=='string'||!names.includes(r.name)||refNames.has(r.name)||typeof r.fileId!=='string'||typeof r.folderId!=='string'||!(/^[A-Za-z0-9_-]{10,200}$/).test(r.fileId)||!(/^[A-Za-z0-9_-]{10,200}$/).test(r.folderId))throw new Error('Invalid recovery reference');
+ string(r.name);refNames.add(r.name);refs.push({name:r.name,fileId:r.fileId,folderId:r.folderId});
+ }}
+ // Copy the already verified immutable Blob snapshots; do not delete or mutate source data.
  return new Promise((resolve,reject)=>{
-  const tx=db.transaction('projects','readwrite');
-  tx.oncomplete=()=>resolve(project);tx.onabort=()=>reject(tx.error);
-  tx.objectStore('projects').add({...project,payload});
+  const tx=db.transaction(['projects','project_assets','metadata'],'readwrite');let error:unknown;
+  tx.oncomplete=()=>resolve(project);tx.onabort=()=>reject(error??tx.error);
+  try{
+   tx.objectStore('projects').add({...project,payload});
+   for(const a of verified)tx.objectStore('project_assets').add(a);
+   if(registry)tx.objectStore('metadata').add({key:'asset-refs:'+project.projectId,workspaceId,projectId:project.projectId,refs});
+  }catch(e){error=e;tx.abort();}
  });
 }
 // Rollback only unmodified, inactive imports with no associated assets or history.

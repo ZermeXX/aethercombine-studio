@@ -184,3 +184,33 @@ test('external registry persists across reopen and blocks unsafe rollback',async
  }finally{reopened.close();}
  }finally{s.close();}
 });
+
+import {createDriveAssetVerifier} from '../src/utils/migrationAssets';
+test('recovery copies verified binary and external references atomically',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ const r=await migrateLegacyDraft(db,local(JSON.stringify({...draft,combine:{narrative_scenes:[scene]}})),'histoviva',true);
+ if(r.status==='missing')throw new Error('Missing');
+ await attachMigrationAsset(s,'histoviva',r.projectId,'scene.mp4',new Blob(['fixture media']));
+ const refs=[{name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'}];
+ await persistExternalAssetReferences(db,'histoviva',r.projectId,refs);
+ const copy=await restoreMigrationBackup(db,'histoviva');
+ expect(copy.projectId).not.toBe(r.projectId);
+ expect(await readExternalAssetReferences(db,'histoviva',copy.projectId)).toEqual(refs);
+ expect((await auditMigrationAssets(s,'histoviva',copy.projectId,refs))[0].status).toBe('local_verified');
+ expect(await (await s.getAsset('histoviva',copy.projectId,'legacy-file:scene.mp4'))?.blob.text()).toBe('fixture media');
+ await new Promise<void>((resolve,reject)=>{const tx=db.transaction('project_assets','readwrite'),store=tx.objectStore('project_assets'),q=store.get([r.projectId,'legacy-file:scene.mp4']);q.onsuccess=()=>store.put({...q.result,blob:new Blob(['corrupt'])});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});
+ await expect(restoreMigrationBackup(db,'histoviva')).rejects.toThrow('Asset checksum mismatch');
+ expect((await s.listProjects('histoviva')).length).toBe(2);
+ }finally{s.close();}
+});
+test('Drive verification checks exact metadata and distinguishes authorization failure',async()=>{
+ const ref={name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'};
+ const data={id:ref.fileId,name:ref.name,parents:[ref.folderId],trashed:false,mimeType:'video/mp4'};
+ const make=(body:unknown,status=200)=>createDriveAssetVerifier('fixture-token',(async()=>new Response(JSON.stringify(body),{status})) as typeof fetch);
+ expect(await make(data)(ref)).toBe(true);
+ expect(await make({...data,parents:['other']})(ref)).toBe(false);
+ expect(await make({...data,trashed:true})(ref)).toBe(false);
+ expect(await make({},404)(ref)).toBe(false);
+ await expect(make({},403)(ref)).rejects.toThrow('HTTP 403');
+});

@@ -69,3 +69,18 @@ export function readExternalAssetReferences(db:IDBDatabase,workspaceId:Workspace
  }catch(e){error=e;tx.abort();}};};
  });
 }
+
+// Metadata-only Drive check. Authorization stays in the caller's session.
+export function createDriveAssetVerifier(accessToken:string,request:typeof fetch=fetch):(ref:ExternalAssetReference)=>Promise<boolean>{
+ if(!accessToken.trim())throw new Error('Drive authorization required');
+ return async ref=>{
+  const id=driveId(ref.fileId),folder=driveId(ref.folderId),name=safeName(ref.name);
+  const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?fields=id,name,parents,trashed,mimeType&supportsAllDrives=true';
+  const response=await request(url,{headers:{Authorization:'Bearer '+accessToken},redirect:'error',cache:'no-store'});
+  // A 404 can also mean insufficient permissions; it is not proof of deletion.
+  if(response.status===404)return false;
+  if(!response.ok)throw new Error('Drive verification unavailable: HTTP '+response.status);
+  const data=await response.json();
+  return data.id===id&&data.name===name&&data.trashed===false&&Array.isArray(data.parents)&&data.parents.includes(folder)&&typeof data.mimeType==='string'&&data.mimeType!=='application/vnd.google-apps.folder'&&data.mimeType!=='application/vnd.google-apps.shortcut';
+ };
+}
