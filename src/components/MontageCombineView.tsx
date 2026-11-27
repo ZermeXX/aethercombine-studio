@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { GoogleDriveDirectUploader } from './GoogleDriveDirectUploader';
+import RenderQCDashboard from './RenderQCDashboard';
 import { AnimatedNumber, AnimatedDurationText } from './MotionMetrics';
 import {
   TerminalLogEntry,
@@ -5770,6 +5771,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           </div>
         </div>
       </div>
+
+      <RenderQCDashboard />
 
       {/* 5. БЛОК ЗАПУСКА ОБЛАЧНОГО МОНТАЖА И СТУДИЙНЫЙ ПСЕВДОТЕРМИНАЛ В РЕАЛЬНОМ ВРЕМЕНИ */}
       <div className="bg-[#0b0f17] border border-indigo-500/30 rounded-2xl p-4 space-y-4">
