@@ -470,10 +470,14 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.cta_config !== undefined) {
       const c = obj(sc.cta_config);
       if (typeof c.enabled !== 'boolean') add('error',label+'CTA enabled должен быть boolean.');
+      if (c.style !== undefined && c.style !== 'subscribe_bell' || c.enabled === true && c.style !== 'subscribe_bell') add('error',label+'CTA: неподдерживаемый стиль.');
       if (c.enabled === true && c.style === 'subscribe_bell') {
-        const t = c.show_sec;
-        if (!Array.isArray(t) || t.length !== 2 || !valid(t[0],0) || !valid(t[1],0) || !valid(c.click_sec,0) || !valid(c.bell_sec,0) || !(t[0]<c.click_sec && c.click_sec<c.bell_sec && c.bell_sec<t[1])) add('error',label+'CTA: требуется start < click < bell < end.');
-        else if (valid(d,0.001) && t[1]>d) add('warning',label+'CTA выходит за плановую длительность; проверьте исходное видео.');
+        const t = c.show_sec ?? [1,Math.min(8.2,valid(d,0)?d:0)];
+        const start = Array.isArray(t)?t[0]:undefined, end = Array.isArray(t)?t[1]:undefined;
+        const click = c.click_sec ?? (valid(start,0)&&valid(end,0)?start+(end-start)*0.35:undefined);
+        const bell = c.bell_sec ?? (valid(start,0)&&valid(end,0)?start+(end-start)*0.65:undefined);
+        if (!Array.isArray(t) || t.length !== 2 || !valid(start,0) || !valid(end,0) || !valid(click,0) || !valid(bell,0) || !(start<click && click<bell && bell<end)) add('error',label+'CTA: требуется start < click < bell < end.');
+        else if (valid(d,0.001) && end>d) add('warning',label+'CTA выходит за плановую длительность; проверьте исходное видео.');
         if (c.sfx_enabled !== undefined && typeof c.sfx_enabled !== 'boolean') add('error',label+'CTA sfx_enabled должен быть boolean.');
         if (c.sfx_volume !== undefined && !valid(c.sfx_volume,0,1)) add('error',label+'CTA SFX вне 0–1.');
       }
@@ -484,11 +488,11 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.voice_start !== undefined && !valid(sc.voice_start,0)) add('error',label+'некорректный voice_start.');
     if (valid(sc.voice_end,0) && valid(sc.voice_start,0) && sc.voice_end<sc.voice_start) add('error',label+'voice_end раньше voice_start.');
   });
-  if (m.total_duration_sec !== undefined && (!valid(m.total_duration_sec,0.001) || Math.abs(m.total_duration_sec-total)>0.25)) add('warning','Общая длительность отличается от суммы сцен.');
+  if (m.total_duration_sec !== undefined && (!valid(m.total_duration_sec,0.001) || Math.abs(m.total_duration_sec-total)>0.25)) add(m.manifest_version === '8.1' ? 'error' : 'warning','Общая длительность отличается от суммы сцен.');
   const e = obj(m.export_settings);
   if (!['720p','1080p','4k'].includes(String(e.resolution))) add('error','Неподдерживаемое разрешение.');
   if (e.video_codec !== 'libx264' || e.aspect_ratio !== '16:9') add('error','Render V8 требует H.264 и 16:9.');
-  if (![24,30,60].includes(Number(e.fps)) || !valid(e.crf,14,28)) add('error','Некорректные FPS или CRF.');
+  if (!valid(e.fps,24,60) || ![24,30,60].includes(e.fps) || !valid(e.crf,14,28) || !Number.isInteger(e.crf)) add('error','Некорректные FPS или CRF.');
   if (!['ultrafast','veryfast','medium'].includes(String(e.preset))) add('error','Некорректный preset.');
   if (!valid(e.bitrate_mbps,4,120) || ![192,256,320].includes(Number(e.audio_bitrate_kbps))) add('error','Некорректный битрейт.');
   if (!valid(e.preview_duration_sec,0)) add('error','Некорректная длительность превью.');
@@ -506,7 +510,7 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
 
 export interface NarrativeMontageManifest {
   schema_version: '3.0';
-  manifest_version?: '2.1' | '2.2-FINAL' | '3.0';
+  manifest_version?: '2.1' | '2.2-FINAL' | '3.0' | '8.1';
   project_type: 'narrative_scenes_montage';
   project_name: string;
   video_title?: string;
@@ -3258,7 +3262,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
     return {
       schema_version: '3.0',
-      manifest_version: '2.2-FINAL',
+      manifest_version: '8.1',
       project_type: 'narrative_scenes_montage',
       project_name: projectName.trim() || 'Narrative Movie 4K',
       ...(youtubeSeo?.title ? { video_title: youtubeSeo.title } : {}),
@@ -3657,7 +3661,8 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
     };
 
     return {
-      manifest_version: '2.2-FINAL',
+      schema_version: '3.0',
+      manifest_version: '8.1',
       project_type: 'narrative_scenes_montage',
       project_name: fullManifest.project_name,
       gdrive_folder_id: fullManifest.gdrive_folder_id,
