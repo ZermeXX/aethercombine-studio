@@ -110,7 +110,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    const draft=currentDraft();
    const previous=(draft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient');
    const next=typeof action==='function'?action(previous):action;
-   const projected=applyModulePatch(draft,{module:'seo',seoScript:seo,seo:next});
+   const projected=applyModulePatch(draft,{module:'seo',seoScript:seo,seo:{tone:next.tone,selectedTitleId:next.selectedTitleId,titles:next.titles.map(t=>({id:t.id,category:t.category,categoryRu:t.categoryRu,title:t.title})),description:next.description,tagsString:next.tagsString}});
    setExtras(JSON.stringify(projected.legacyExtras,null,2));setDirty(true);
   }catch{setNotice('SEO update rejected. Existing draft retained.');}
  }
