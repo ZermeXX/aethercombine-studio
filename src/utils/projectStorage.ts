@@ -1,7 +1,7 @@
 import { projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
 import { isWorkspaceId, type WorkspaceId } from '../design-system/workspaces';
 export const DATABASE_NAME='aether_studio_v9';
-export const DATABASE_VERSION=1;
+export const DATABASE_VERSION=2;
 export function openProjectDatabase(factory: IDBFactory = indexedDB): Promise<IDBDatabase> {
  return new Promise((resolve,reject)=>{
   const req=factory.open(DATABASE_NAME,DATABASE_VERSION);
@@ -15,6 +15,9 @@ export function openProjectDatabase(factory: IDBFactory = indexedDB): Promise<ID
     s.createIndex('workspaceId','workspaceId');s.createIndex('updatedAt','updatedAt');
    }
    if(!db.objectStoreNames.contains('workspace_state'))db.createObjectStore('workspace_state',{keyPath:'workspaceId'});
+   if(!db.objectStoreNames.contains('project_assets'))db.createObjectStore('project_assets',{keyPath:['projectId','assetId']}).createIndex('projectId','projectId');
+   if(!db.objectStoreNames.contains('project_revisions'))db.createObjectStore('project_revisions',{keyPath:['projectId','revision']}).createIndex('projectId','projectId');
+   if(!db.objectStoreNames.contains('migration_backups'))db.createObjectStore('migration_backups',{keyPath:'backupId'}).createIndex('createdAt','createdAt');
    if(!db.objectStoreNames.contains('metadata'))db.createObjectStore('metadata',{keyPath:'key'});
   };
   req.onsuccess=()=>{const db=req.result;db.onversionchange=()=>db.close();if(blocked)db.close();else resolve(db);};
@@ -52,13 +55,13 @@ export class ProjectStorage {
  }
  saveProject(input:ProjectRecord,expectedRevision:number):Promise<ProjectRecord>{
   const p=projectMetadata(input);
-  return transaction(this.db,['projects'],'readwrite',(tx,done,fail)=>{
+  return transaction(this.db,['projects','project_revisions'],'readwrite',(tx,done,fail)=>{
    const s=tx.objectStore('projects');const r=s.get(p.projectId);
    r.onsuccess=()=>{try{
     const old=projectMetadata(r.result);
     if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt)throw new Error('Ownership or revision conflict');
     const next=projectMetadata({...p,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
-    s.put(next);done(next);
+    tx.objectStore('project_revisions').add(old);s.put(next);done(next);
    }catch(e){fail(e);}};
   });
  }
