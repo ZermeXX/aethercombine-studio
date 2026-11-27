@@ -19,6 +19,17 @@ function string(value:unknown):string{
  if(/-----BEGIN [^-]*PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9_]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bya29\.[A-Za-z0-9_-]+/i.test(value))throw new Error('Possible credential in legacy text');
  return value;
 }
+
+/** Report omitted field counts by fixed section, never arbitrary names or values. */
+function omittedCount(source:unknown,target:unknown):number{
+ if(source===undefined)return 0;
+ if(source===null||typeof source!=='object')return Object.is(source,target)?0:1;
+ if(target===null||typeof target!=='object')return 1;
+ if(Array.isArray(source)!==Array.isArray(target))return 1;
+ const a=source as Record<string,unknown>,b=target as Record<string,unknown>;
+ return Object.keys(a).reduce((n,k)=>n+(Object.prototype.hasOwnProperty.call(b,k)?omittedCount(a[k],b[k]):1),0);
+}
+
 export function previewLegacyDraft(raw:string,workspaceId:WorkspaceId,modules?:{seo?:unknown;voice?:unknown;thumbnails?:unknown}):MigrationPreview{
  if(!isWorkspaceId(workspaceId))throw new Error('Invalid workspace');
  let parsed:unknown;try{parsed=JSON.parse(raw);}catch{throw new Error('Invalid legacy JSON');}
@@ -33,7 +44,17 @@ export function previewLegacyDraft(raw:string,workspaceId:WorkspaceId,modules?:{
  // Screen every projected string, including timeline references.
  const scan=(x:unknown):void=>{if(typeof x==='string')string(x);else if(x&&typeof x==='object')Object.values(x).forEach(scan);};
  scan(payload);
- return {project,payload,omitted:['additional combine settings and unknown narrative scene fields','unmapped render and project fields','unknown nested timeline fields','binary assets',...(modules?.thumbnails===undefined?['thumbnail slots']:[]),...(modules?.seo===undefined?['standalone SEO state']:[]),...(modules?.voice===undefined?['voice preferences']:[])]};
+ const extra=payload.legacyExtras, prod=payload.production, render=prod?.render;
+ const mappedProject={...extra?.project,name:project.name,seo_script_text:payload.seoScript,thumb_title:payload.thumbnailTitle,thumb_badge:payload.thumbnailBadge,verbaflow_chapters_txt:payload.chapters};
+ const mappedRender={...extra?.render,video_fps:prod?.fps,video_codec:prod?.codec,loop_resolution:prod?.resolution,loop_hours:prod?.loopHours,timeline_slots:prod?.timeline_slots,audio_mastering:prod?.audio_mastering,video_crf:render?.crf,audio_bitrate_kbps:render?.audioBitrate,act_crossfade_sec:render?.actCrossfadeSec,internal_loop_crossfade_sec:render?.internalCrossfadeSec,final_black_screen_enabled:render?.finalBlackEnabled,final_black_screen_sec:render?.finalBlackSec,bitrate_preset:render?.bitratePreset,seamless_transition_mode:render?.transitionMode,use_embedded_audio:render?.useEmbeddedAudio};
+ const mappedCombine={...extra?.combine,narrative_scenes:prod?.narrative_scenes,export_settings:{...extra?.combine?.export_settings as Record<string,unknown>,brand_identity:extra?.branding?.brand_identity,lower_third_config:{...extra?.branding?.lower_third_config,...(broadcast?.brand_identity===undefined?{}:{brand_identity:extra?.branding?.brand_identity})}}};
+ const sections:[string,unknown,unknown][]=[['draft root',d,{version:d.version,updated_at:d.updated_at,project:p,verbaflow:v,combine:d.combine,render_settings:r}],['project',p,mappedProject],['verbaflow',v,{source_text:payload.script}],['render settings',r,mappedRender],['combine',combine,mappedCombine],['SEO',modules?.seo,extra?.seo],['voice',modules?.voice,extra?.voice],['thumbnails',modules?.thumbnails,extra?.thumbnails]];
+ const omitted=sections.map(([label,source,target])=>({label,count:omittedCount(source,target)})).filter(x=>x.count>0).map(x=>x.label+': '+x.count+' omitted or changed fields');
+ omitted.push('binary assets and external file availability not migrated');
+ if(modules?.thumbnails===undefined)omitted.push('thumbnail slots not included');
+ if(modules?.seo===undefined)omitted.push('standalone SEO state not included');
+ if(modules?.voice===undefined)omitted.push('voice preferences not included');
+ return {project,payload,omitted};
 }
 export type MigrationResult={status:'missing'}|{status:'imported_partial'|'already_imported';projectId:string;workspaceId:WorkspaceId};
 export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceId:WorkspaceId,confirmPartial:boolean,includeGlobalModules=false):Promise<MigrationResult>{
