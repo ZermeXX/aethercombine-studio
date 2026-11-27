@@ -29,3 +29,33 @@ test('atomic partial import, repeated import and workspace conflict',async()=>{
  expect((await s.listProjects('histoviva')).length).toBe(1);
  }finally{s.close();}
 });
+
+import {restoreMigrationBackup,rollbackLegacyImport} from '../src/utils/legacyMigration';
+test('rollback preserves backup and legacy; recovery creates a distinct project',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ const raw=JSON.stringify(draft),l=local(raw);
+ try{
+ const a=await migrateLegacyDraft(db,l,'histoviva',true);
+ if(a.status==='missing')throw new Error('Missing');
+ await expect(rollbackLegacyImport(db,'the_whisker_trio',a.projectId)).rejects.toThrow();
+ await s.setActiveProject('histoviva',a.projectId);
+ await expect(rollbackLegacyImport(db,'histoviva',a.projectId)).rejects.toThrow();
+ const other=await restoreMigrationBackup(db,'histoviva');
+ await s.setActiveProject('histoviva',other.projectId);
+ await rollbackLegacyImport(db,'histoviva',a.projectId);
+ expect(await s.getProject('histoviva',a.projectId)).toBeNull();
+ expect(l.getItem(LEGACY_DRAFT_KEY)).toBe(raw);
+ await expect(migrateLegacyDraft(db,l,'histoviva',true)).rejects.toThrow();
+ expect(other.projectId).not.toBe(a.projectId);
+ expect(await s.getPayload('histoviva',other.projectId)).toEqual(previewLegacyDraft(raw,'histoviva').payload);
+ await expect(restoreMigrationBackup(db,'the_whisker_trio')).rejects.toThrow();
+ }finally{s.close();}
+});
+test('migration transaction conflict rolls back all new records',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ try{
+ await new Promise<void>((resolve,reject)=>{const tx=db.transaction('migration_backups','readwrite');tx.objectStore('migration_backups').add({backupId:'legacy-draft-v1-import'});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});
+ await expect(migrateLegacyDraft(db,local(JSON.stringify(draft)),'histoviva',true)).rejects.toThrow();
+ expect(await s.listProjects('histoviva')).toEqual([]);
+ }finally{s.close();}
+});
