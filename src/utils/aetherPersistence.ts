@@ -219,19 +219,23 @@ const migrateLegacySecrets = (): void => {
     const legacyGh = localStorage.getItem('ac_gh_token') || '';
     const cur = readSessionSecrets();
 
-    writeSessionSecrets({
+    const expected = {
       access_token: cur.access_token || legacy?.access_token || '',
       expires_at: cur.expires_at || Number(legacy?.expires_at) || 0,
       github_token: cur.github_token || legacy?.github_token || legacyGh || ''
-    });
+    };
+    writeSessionSecrets(expected);
+    const verified = readSessionSecrets();
+    if (verified.access_token !== expected.access_token || verified.expires_at !== expected.expires_at || verified.github_token !== expected.github_token) return;
 
     const tgBot = localStorage.getItem('ac_tg_bot_token') || '';
     const tgChat = localStorage.getItem('ac_tg_chat_id') || '';
     if (tgBot || tgChat) {
       const existing = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
-      if (!existing?.bot_token) {
-        writeJson(sessionStorage, TELEGRAM_SESSION_KEY, { bot_token: tgBot, chat_id: tgChat });
-      }
+      const next = { bot_token: existing?.bot_token || tgBot, chat_id: existing?.chat_id || tgChat };
+      writeJson(sessionStorage, TELEGRAM_SESSION_KEY, next);
+      const verified = readJson<TelegramSession>(sessionStorage, TELEGRAM_SESSION_KEY);
+      if (verified?.bot_token !== next.bot_token || verified?.chat_id !== next.chat_id) return;
     }
 
     if (legacy) {
@@ -247,7 +251,10 @@ const migrateLegacySecrets = (): void => {
     removeKey(localStorage, 'ac_gh_token');
     removeKey(localStorage, 'ac_tg_bot_token');
     removeKey(localStorage, 'ac_tg_chat_id');
-    removeKey(localStorage, 'ac_gdrive_sa_key');
+    // Preserve unsupported legacy service-account credentials until explicit migration or removal.
+    if (['ac_gh_token','ac_tg_bot_token','ac_tg_chat_id'].some(k => localStorage.getItem(k) !== null)) return;
+    const remaining = readJson<Partial<AetherGoogleAuthRecord>>(localStorage, AETHER_GOOGLE_AUTH_STORAGE_KEY);
+    if (remaining?.access_token || remaining?.github_token) return;
     sessionStorage.setItem(SECRETS_PURGED_FLAG, '1');
   } catch {
     /* ignore */
