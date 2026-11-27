@@ -33,7 +33,25 @@ function transaction<T>(db:IDBDatabase, stores:string[], mode:IDBTransactionMode
   try{run(tx,v=>{value=v;},fail);}catch(e){fail(e);}
  });
 }
+export interface ProjectAsset { assetId:string; name:string; blob:Blob }
 export class ProjectStorage {
+ putAsset(workspaceId:WorkspaceId,projectId:string,asset:ProjectAsset):Promise<void>{
+  if(!asset.assetId.trim()||!asset.name.trim()||!(asset.blob instanceof Blob))throw new Error('Invalid asset');
+  const record={projectId,assetId:asset.assetId,name:asset.name,blob:asset.blob};
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').add(record);done(undefined);}catch(e){fail(e);}};
+  });
+ }
+ getAsset(workspaceId:WorkspaceId,projectId:string,assetId:string):Promise<ProjectAsset|null>{
+  return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId){done(null);return;}
+    const a=tx.objectStore('project_assets').get([projectId,assetId]);
+    a.onsuccess=()=>{try{const v=a.result;if(!v){done(null);return;}if(!(v.blob instanceof Blob))throw new Error('Invalid stored asset');done({assetId:v.assetId,name:v.name,blob:v.blob});}catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
  constructor(private readonly db:IDBDatabase){}
  close(){this.db.close();}
  createProject(input:ProjectRecord):Promise<void>{
