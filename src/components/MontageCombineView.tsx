@@ -683,7 +683,7 @@ const formatMmSsTenths = (sec: number): string => {
 // Параметры виртуализации компактной строчной сетки (для 100–200+ сцен без перегрузки DOM)
 const ROW_HEIGHT = 92;
 const VIEWPORT_HEIGHT = 552;
-const OVERSCAN_ROWS = 8;
+const PAGE_ROWS = 30;
 
 const CAMERA_VECTORS_ORDER: CameraVectorType[] = ['zoom_in', 'pan_right', 'zoom_out', 'pan_left'];
 
@@ -800,7 +800,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
   const sfxDbLabel = typeof sc.sfx_gain_db === 'number' ? sc.sfx_gain_db.toFixed(1) : '-6.0';
   const voiceSpanLabel = `${formatMmSsTenths(voiceStartSec)} → ${formatMmSsTenths(voiceEndSec)}`;
 
-  const rowClassName = `px-3 py-2 flex flex-col justify-center gap-1.5 border-b border-[rgba(255,255,255,0.08)] text-xs transition-colors ${
+  const rowClassName = `px-3 py-2 flex flex-col gap-2 border-b border-[rgba(255,255,255,0.08)] text-xs transition-colors ${
     isFlagged
       ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-2 border-l-rose-500'
       : hasFile
@@ -866,62 +866,6 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         </select>
       </div>
 
-      <div className="col-span-3 flex items-center gap-2 text-[10px] text-slate-300">
-        <label>Камера <select aria-label="Политика камеры" value={sc.camera_policy ?? 'auto'} onChange={e=>updateScene(idx,{camera_policy:normalizeCameraPolicy(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
-          <option value="auto">Auto (video: Native, image: Cinematic)</option>
-          <option value="native">Native — оригинал</option>
-          <option value="cinematic">Cinematic — движение Studio</option>
-        </select></label>
-        <label>Масштаб камеры</label>
-        <input aria-label="Масштаб камеры" type="range" min={100} max={150} step={1}
-          disabled={sc.camera_policy === 'native' || sc.camera_movement === 'static'}
-          value={Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}
-          onChange={e => updateScene(idx, { camera_zoom: Number(e.target.value) / 100 })}
-          className="flex-1 min-w-0" />
-        <span>{Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}%</span>
-      </div>
-      <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
-        <label>Синхронизация <select aria-label="Режим длительности" value={sc.video_duration_mode ?? 'auto'} onChange={e=>updateScene(idx,{video_duration_mode:normalizeDurationMode(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
-          <option value="auto">Auto (renderer)</option><option value="hybrid">Hybrid</option><option value="native">Native</option><option value="freeze">Freeze</option><option value="stretch">Stretch</option><option value="loop">Loop</option>
-        </select></label>
-        <label>Макс. продление, с <input type="number" min={0} max={2} step={0.1} value={normalizeExtension(sc.max_extension_sec)} disabled={!!sc.video_duration_mode && sc.video_duration_mode !== 'hybrid'} onChange={e=>updateScene(idx,{max_extension_sec:normalizeExtension(Number(e.target.value))})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
-        <label><input type="checkbox" checked={sc.allow_video_reuse === true} onChange={e=>updateScene(idx,{allow_video_reuse:e.target.checked})}/> Разрешить повтор файла</label>
-        <label title="Автоматическая коррекция громкости отдельных дорожек"><input type="checkbox" checked={sc.adaptive_audio !== false} onChange={e=>updateScene(idx,{adaptive_audio:e.target.checked})}/> Adaptive Audio</label>
-        <label title="Приглушение фоновых дорожек во время речи"><input type="checkbox" checked={sc.audio_ducking !== false} onChange={e=>updateScene(idx,{audio_ducking:e.target.checked})}/> Smart Ducking</label>
-        <label><input type="checkbox" checked={sc.source_audio_enabled !== false} onChange={e=>updateScene(idx,{source_audio_enabled:e.target.checked})}/> Оригинальный звук видео</label>
-        <label>Окружение MP4 <input aria-label="Громкость оригинального окружения" type="number" min={0} max={4} step={0.05} disabled={sc.source_audio_enabled === false}
-          value={normalizeV8Volume(sc.source_audio_volume,1)} onChange={e=>updateScene(idx,{source_audio_volume:normalizeV8Volume(Number(e.target.value),1)})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
-        <label>Диктор <input aria-label="Громкость диктора" type="number" min={0} max={4} step={0.05}
-          value={normalizeV8Volume(sc.voiceover_volume, 1)}
-          onChange={e => updateScene(idx, { voiceover_volume: normalizeV8Volume(Number(e.target.value), 1) })}
-          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
-        <label>Эмбиент <input aria-label="Громкость эмбиента" type="number" min={0} max={4} step={0.05}
-          value={normalizeV8Volume(sc.ambient_volume, 0.35)}
-          onChange={e => updateScene(idx, { ambient_volume: normalizeV8Volume(Number(e.target.value), 0.35) })}
-          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
-        <input aria-label="Файл эмбиента сцены" placeholder="ambient.wav (GDrive)"
-          value={sc.ambient_audio || ''} onChange={e => updateScene(idx, { ambient_audio: e.target.value })}
-          className="flex-1 min-w-[100px] bg-slate-900 border border-slate-700 rounded px-1" />
-      </div>
-      <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
-        <label title="Видимость верхней фирменной плашки при включённом глобальном Brand Identity">Brand Visibility <select aria-label="Видимость бренда" value={sc.brand_identity_visible === undefined ? 'auto' : sc.brand_identity_visible ? 'show' : 'hide'} onChange={e=>updateScene(idx,{brand_identity_visible:e.target.value==='auto'?undefined:e.target.value==='show'})} className="bg-slate-900 border border-slate-700 rounded">
-          <option value="auto">Auto — скрыть на bumper</option><option value="show">Show</option><option value="hide">Hide</option>
-        </select></label>
-        <label><input type="checkbox" checked={sc.cta_config?.enabled === true && sc.cta_config.style === 'subscribe_bell'} onChange={e=>updateScene(idx,{cta_config:e.target.checked ? {...defaultCTA(sc.duration),...sc.cta_config,enabled:true,style:'subscribe_bell'} : {...(sc.cta_config ?? defaultCTA(sc.duration)),enabled:false}})}/> Subscribe & Bell</label>
-        {sc.cta_config?.enabled && sc.cta_config.style === 'subscribe_bell' && <>
-          {(['start','click','bell','end'] as const).map(key=>{
-            const c = {...defaultCTA(sc.duration),...sc.cta_config};
-            const interval = c.show_sec ?? defaultCTA(sc.duration).show_sec!;
-            const value = key==='start'?interval[0]:key==='end'?interval[1]:key==='click'?c.click_sec:c.bell_sec;
-            return <label key={key}>{key} (с) <input aria-label={'CTA '+key} type="number" min={0} step={0.05} value={value ?? 0} onChange={e=>{
-              const n=Number(e.target.value);
-              updateScene(idx,{cta_config:{...c,...(key==='start'?{show_sec:[n,interval[1]] as [number,number]}:key==='end'?{show_sec:[interval[0],n] as [number,number]}:key==='click'?{click_sec:n}:{bell_sec:n})}});
-            }} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>;
-          })}
-          <label><input type="checkbox" checked={sc.cta_config.sfx_enabled !== false} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_enabled:e.target.checked}})}/> CTA SFX</label>
-          <label>SFX <input type="number" aria-label="CTA SFX volume" min={0} max={1} step={0.05} disabled={sc.cta_config.sfx_enabled===false} value={sc.cta_config.sfx_volume ?? 0.5} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_volume:Math.max(0,Math.min(1,Number(e.target.value)))}})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
-        </>}
-      </div>
       {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
       <div className="col-span-3 flex items-center gap-1.5 min-w-0">
         <input
@@ -1135,12 +1079,79 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
           />
         </label>
       </div>
+      <details className="rounded border border-slate-700/70 bg-slate-900/50 p-2">
+        <summary className="cursor-pointer text-xs text-cyan-300">Настройки сцены V8.1 · Video / Audio / Branding / CTA</summary>
+        <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-3 [&>div]:rounded [&>div]:border [&>div]:border-slate-700/60 [&>div]:p-2 [&_select]:max-w-full [&_label]:flex [&_label]:flex-wrap [&_label]:items-center [&_label]:gap-1">
+      <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-300">
+        <span className="w-full font-semibold text-cyan-300">Camera Policy</span>
+        <label>Камера <select aria-label="Политика камеры" value={sc.camera_policy ?? 'auto'} onChange={e=>updateScene(idx,{camera_policy:normalizeCameraPolicy(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto (video: Native, image: Cinematic)</option>
+          <option value="native">Native — оригинал</option>
+          <option value="cinematic">Cinematic — движение Studio</option>
+        </select></label>
+        <label>Масштаб камеры</label>
+        <input aria-label="Масштаб камеры" type="range" min={100} max={150} step={1}
+          disabled={sc.camera_policy === 'native' || sc.camera_movement === 'static'}
+          value={Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}
+          onChange={e => updateScene(idx, { camera_zoom: Number(e.target.value) / 100 })}
+          className="w-24 max-w-full" />
+        <span>{Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}%</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-300">
+        <span className="w-full font-semibold text-cyan-300">Video &amp; Synchronization</span>
+        <label>Синхронизация <select aria-label="Режим длительности" value={sc.video_duration_mode ?? 'auto'} onChange={e=>updateScene(idx,{video_duration_mode:normalizeDurationMode(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto (renderer)</option><option value="hybrid">Hybrid</option><option value="native">Native</option><option value="freeze">Freeze</option><option value="stretch">Stretch</option><option value="loop">Loop</option>
+        </select></label>
+        <label>Макс. продление, с <input type="number" min={0} max={2} step={0.1} value={normalizeExtension(sc.max_extension_sec)} disabled={!!sc.video_duration_mode && sc.video_duration_mode !== 'hybrid'} onChange={e=>updateScene(idx,{max_extension_sec:normalizeExtension(Number(e.target.value))})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
+        <label><input type="checkbox" checked={sc.allow_video_reuse === true} onChange={e=>updateScene(idx,{allow_video_reuse:e.target.checked})}/> Разрешить повтор файла</label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-300">
+        <span className="w-full font-semibold text-cyan-300">Audio Mixer</span>
+        <label title="Автоматическая коррекция громкости отдельных дорожек"><input type="checkbox" checked={sc.adaptive_audio !== false} onChange={e=>updateScene(idx,{adaptive_audio:e.target.checked})}/> Adaptive Audio</label>
+        <label title="Приглушение фоновых дорожек во время речи"><input type="checkbox" checked={sc.audio_ducking !== false} onChange={e=>updateScene(idx,{audio_ducking:e.target.checked})}/> Smart Ducking</label>
+        <label><input type="checkbox" checked={sc.source_audio_enabled !== false} onChange={e=>updateScene(idx,{source_audio_enabled:e.target.checked})}/> Оригинальный звук видео</label>
+        <label>Окружение MP4 <input aria-label="Громкость оригинального окружения" type="number" min={0} max={4} step={0.05} disabled={sc.source_audio_enabled === false}
+          value={normalizeV8Volume(sc.source_audio_volume,1)} onChange={e=>updateScene(idx,{source_audio_volume:normalizeV8Volume(Number(e.target.value),1)})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
+        <label>Диктор <input aria-label="Громкость диктора" type="number" min={0} max={4} step={0.05}
+          value={normalizeV8Volume(sc.voiceover_volume, 1)}
+          onChange={e => updateScene(idx, { voiceover_volume: normalizeV8Volume(Number(e.target.value), 1) })}
+          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
+        <label>Эмбиент <input aria-label="Громкость эмбиента" type="number" min={0} max={4} step={0.05}
+          value={normalizeV8Volume(sc.ambient_volume, 0.35)}
+          onChange={e => updateScene(idx, { ambient_volume: normalizeV8Volume(Number(e.target.value), 0.35) })}
+          className="w-16 bg-slate-900 border border-slate-700 rounded px-1" /></label>
+        <input aria-label="Файл эмбиента сцены" placeholder="ambient.wav (GDrive)"
+          value={sc.ambient_audio || ''} onChange={e => updateScene(idx, { ambient_audio: e.target.value })}
+          className="flex-1 min-w-[100px] bg-slate-900 border border-slate-700 rounded px-1" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-300">
+        <span className="w-full font-semibold text-cyan-300">Branding &amp; CTA</span>
+        <label title="Видимость верхней фирменной плашки при включённом глобальном Brand Identity">Brand Visibility <select aria-label="Видимость бренда" value={sc.brand_identity_visible === undefined ? 'auto' : sc.brand_identity_visible ? 'show' : 'hide'} onChange={e=>updateScene(idx,{brand_identity_visible:e.target.value==='auto'?undefined:e.target.value==='show'})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto — скрыть на bumper</option><option value="show">Show</option><option value="hide">Hide</option>
+        </select></label>
+        <label><input type="checkbox" checked={sc.cta_config?.enabled === true && sc.cta_config.style === 'subscribe_bell'} onChange={e=>updateScene(idx,{cta_config:e.target.checked ? {...defaultCTA(sc.duration),...sc.cta_config,enabled:true,style:'subscribe_bell'} : {...(sc.cta_config ?? defaultCTA(sc.duration)),enabled:false}})}/> Subscribe & Bell</label>
+        {sc.cta_config?.enabled && sc.cta_config.style === 'subscribe_bell' && <>
+          {(['start','click','bell','end'] as const).map(key=>{
+            const c = {...defaultCTA(sc.duration),...sc.cta_config};
+            const interval = c.show_sec ?? defaultCTA(sc.duration).show_sec!;
+            const value = key==='start'?interval[0]:key==='end'?interval[1]:key==='click'?c.click_sec:c.bell_sec;
+            return <label key={key}>{key} (с) <input aria-label={'CTA '+key} type="number" min={0} step={0.05} value={value ?? 0} onChange={e=>{
+              const n=Number(e.target.value);
+              updateScene(idx,{cta_config:{...c,...(key==='start'?{show_sec:[n,interval[1]] as [number,number]}:key==='end'?{show_sec:[interval[0],n] as [number,number]}:key==='click'?{click_sec:n}:{bell_sec:n})}});
+            }} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>;
+          })}
+          <label><input type="checkbox" checked={sc.cta_config.sfx_enabled !== false} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_enabled:e.target.checked}})}/> CTA SFX</label>
+          <label>SFX <input type="number" aria-label="CTA SFX volume" min={0} max={1} step={0.05} disabled={sc.cta_config.sfx_enabled===false} value={sc.cta_config.sfx_volume ?? 0.5} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_volume:Math.max(0,Math.min(1,Number(e.target.value)))}})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
+        </>}
+      </div>
+        </div>
+      </details>
     </>
   );
 
   if (!canDrag) {
     return (
-      <div style={{ height: `${ROW_HEIGHT}px` }} className={rowClassName}>
+      <div style={{ minHeight: `${ROW_HEIGHT}px` }} className={rowClassName}>
         {rowCells}
       </div>
     );
@@ -1161,7 +1172,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
       }}
       onDragEnd={onDragEndNotify}
       as="div"
-      style={{ height: `${ROW_HEIGHT}px` }}
+      style={{ minHeight: `${ROW_HEIGHT}px` }}
       className={`${rowClassName} select-none`}
     >
       {rowCells}
@@ -4261,16 +4272,16 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       );
   }, [narrativeScenes, searchQuery]);
 
-  // Вычисление видимого окна виртуализации
+  // Pagination keeps variable-height expanded rows out of fixed-height virtualization.
   const totalRows = indexedFilteredScenes.length;
-  const startRowIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS);
-  const visibleRowCount = Math.ceil(VIEWPORT_HEIGHT / ROW_HEIGHT) + OVERSCAN_ROWS * 2;
-  const endRowIdx = Math.min(totalRows, startRowIdx + visibleRowCount);
-
+  const [scenePage, setScenePage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(totalRows / PAGE_ROWS));
+  const currentPage = Math.min(scenePage, pageCount - 1);
+  const startRowIdx = currentPage * PAGE_ROWS;
+  const endRowIdx = Math.min(totalRows, startRowIdx + PAGE_ROWS);
   const visibleSlice = indexedFilteredScenes.slice(startRowIdx, endRowIdx);
-  const topSpacerHeight = startRowIdx * ROW_HEIGHT;
-  const bottomSpacerHeight = Math.max(0, (totalRows - endRowIdx) * ROW_HEIGHT);
-
+  useEffect(() => { setScenePage(0); }, [searchQuery]);
+  useEffect(() => { if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0; }, [currentPage]);
   const filledScenesCount = narrativeScenes.filter(s => Boolean(s.file_name.trim())).length;
 
   const handlePasteScenarioJson = (e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -5682,15 +5693,20 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               <span>⋮⋮ Потяните сцену за ручку для смены порядка ({totalRows} сцен)</span>
             ) : (
               <span>
-                Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows} (Виртуализация DOM активна)
+                Отображаются строки: {totalRows > 0 ? startRowIdx + 1 : 0}–{endRowIdx} из {totalRows}
               </span>
             )}
           </span>
         </div>
 
+        {(searchQuery.trim() || narrativeScenes.length > 220) && <div className="flex items-center gap-3 text-xs text-slate-300">
+          <button type="button" disabled={currentPage===0} onClick={()=>setScenePage(currentPage-1)}>← Назад</button>
+          <span>Страница {currentPage+1} / {pageCount}</span>
+          <button type="button" disabled={currentPage+1>=pageCount} onClick={()=>setScenePage(currentPage+1)}>Далее →</button>
+        </div>}
         {/* Горизонтальный контейнер для узких экранов (< 960px) чтобы строки 12-колонной таблицы не сжимались */}
         <div className="overflow-x-auto custom-scroll border border-slate-800 rounded-xl bg-[#090d16]">
-          <div className="min-w-[960px]">
+          <div className="min-w-[1200px]">
             {/* Шапка колонок компактной строчной таблицы */}
             <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-900/90 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               <div className="col-span-2">⋮⋮ № / ID / Камера</div>
@@ -5743,7 +5759,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                   })}
                 </Reorder.Group>
               ) : (
-                <div style={{ paddingTop: `${topSpacerHeight}px`, paddingBottom: `${bottomSpacerHeight}px` }}>
+                <div>
                   {visibleSlice.map(({ scene: sc, originalIndex: idx }) => {
                     const rowKey = getSceneRowKey(sc);
                     const t = continuousSceneTimings[idx];
