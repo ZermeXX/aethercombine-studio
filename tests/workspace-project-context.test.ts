@@ -55,3 +55,15 @@ test('atomic initial payload and scoped module updates preserve unrelated conten
  await expect(saveModulePatch(c,{...hs,workspaceId:'the_whisker_trio'},e.project.revision,{module:'seo',seoScript:'Wrong'})).rejects.toThrow();
  }finally{s.close();}
 });
+
+import {hydrateCombine,captureCombine} from '../src/utils/nativeCombineBinding';
+test('native combine projection retains locks branding and timeline',()=>{
+ const original={...emptyProjectPayload(),production:{fps:24 as const,codec:'libx264' as const,resolution:'4k' as const,loopHours:6,scenes:[],timeline_slots:[]},legacyExtras:{branding:{brand_identity:{enabled:true,name:'HISTOVIVA',episode_label:'EP02'}},combine:{v21_locks:{hardFrameLock:false}}}};
+ const slice=hydrateCombine(original);
+ const next=captureCombine(original,{...slice,project_name:'History',narrative_scenes:[]});
+ expect(next.production?.timeline_slots).toEqual([]);
+ expect(next.production?.loopHours).toBe(6);
+ expect(next.legacyExtras?.combine?.v21_locks).toEqual({hardFrameLock:false});
+ expect(next.legacyExtras?.branding?.brand_identity).toEqual(original.legacyExtras.branding.brand_identity);
+ expect(hydrateCombine(next).narrative_scenes).toEqual([]);
+});

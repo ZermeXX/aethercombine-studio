@@ -50,5 +50,16 @@ with sync_playwright() as p:
     expect(script).to_have_value("Native history narration")
     assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
     assert page.evaluate("localStorage.getItem('ac_youtube_seo_state_v1')")=="seo-fixture"
+    page.get_by_role("button",name="Open scoped Loop settings").click()
+    expect(page.get_by_label("Loop loopHours")).to_have_value("6")
+    page.get_by_label("Loop loopHours").select_option("10")
+    ws.select_option("the_whisker_trio")
+    ws.select_option("histoviva")
+    expect(script).to_have_value("Native history narration")
+    page.get_by_role("button",name="Open scoped Loop settings").click()
+    expect(page.get_by_label("Loop loopHours")).to_have_value("10")
+    page.get_by_role("button",name="Open native Montage Combine").click()
+    expect(page.get_by_role("group",name="Native Montage Combine")).to_be_visible()
+    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

@@ -1,3 +1,6 @@
+import {MontageCombineView} from '../components/MontageCombineView';
+import {hydrateCombine,captureCombine} from '../utils/nativeCombineBinding';
+import type {AetherCombineDraftSlice} from '../utils/aetherPersistence';
 import {VerbaFlowTextWorkbench} from '../components/VerbaFlowTextWorkbench';
 import {YouTubeSeoView} from '../components/YouTubeSeoView';
 import {createDefaultYoutubeSeoState,type YoutubeSeoState} from '../utils/englishExport';
@@ -29,13 +32,14 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [badge,setBadge]=useState('');
  const [production,setProduction]=useState('');
  const [extras,setExtras]=useState('');
- const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'>('none');
+ const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'|'combine'|'loop'>('none');
  const [notice,setNotice]=useState('');
+ const combineInvalid=useRef(false);
  const [dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
-  setNativeTab('none');setNotice('');
+  combineInvalid.current=false;setNativeTab('none');setNotice('');
   setProduction(snapshot?.payload?.production===undefined?'':JSON.stringify(snapshot.payload.production,null,2));setExtras(snapshot?.payload?.legacyExtras===undefined?'':JSON.stringify(snapshot.payload.legacyExtras,null,2));
   setActive(snapshot);setScript(snapshot?.payload?.script??'');setChapters(snapshot?.payload?.chapters??'');setSeo(snapshot?.payload?.seoScript??'');setTitle(snapshot?.payload?.thumbnailTitle??'');setBadge(snapshot?.payload?.thumbnailBadge??'');setDirty(false);
  }
@@ -61,6 +65,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   finally{locked.current=false;setBusy(false);}
  }
  async function save(c:WorkspaceProjectContext){
+  if(combineInvalid.current)throw new Error('Unpersistable Montage changes');
   if(!active?.payload||!dirty)return;
   // One atomic revision, retaining other module data from the loaded snapshot.
   const scope={workspaceId:active.project.workspaceId,projectId:active.project.projectId};
@@ -94,7 +99,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   if(!active?.payload)throw new Error('No project');
   return projectPayload({...active.payload,script,chapters,seoScript:seo,thumbnailTitle:title,thumbnailBadge:badge,production:production.trim()?JSON.parse(production):undefined,legacyExtras:extras.trim()?JSON.parse(extras):undefined});
  }
- function openNative(tab:'verbaflow'|'seo'){
+ function openNative(tab:'verbaflow'|'seo'|'combine'|'loop'){
   // Save and validate advanced JSON before mounting a native component.
   void run(async c=>{await save(c);setNativeTab(tab);});
  }
@@ -114,6 +119,23 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    setExtras(JSON.stringify(projected.legacyExtras,null,2));setDirty(true);
   }catch{setNotice('SEO update rejected. Existing draft retained.');}
  }
+ const combineCapture=useRef<(slice:AetherCombineDraftSlice)=>void>(()=>{});
+ combineCapture.current=slice=>{
+  try{
+   const next=captureCombine(currentDraft(),slice);
+   combineInvalid.current=false;
+   const p=JSON.stringify(next.production,null,2),e=JSON.stringify(next.legacyExtras,null,2);
+   if(p!==production||e!==extras){setProduction(p);setExtras(e);setDirty(true);}
+  }catch{combineInvalid.current=true;setDirty(true);setError('Montage changes could not be represented by the project schema. Close module only after resolving the error.');}
+ };
+ const onCombineChange=useRef((slice:AetherCombineDraftSlice)=>combineCapture.current(slice)).current;
+ function changeLoop(key:'fps'|'codec'|'resolution'|'loopHours',value:string){
+  try{
+   const draft=currentDraft(),prev=draft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]};
+   const next=projectPayload({...draft,production:{...prev,[key]:key==='fps'||key==='loopHours'?Number(value):value}});
+   setProduction(JSON.stringify(next.production,null,2));setDirty(true);
+  }catch{setNotice('Invalid loop setting');}
+ }
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
@@ -129,7 +151,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <div className="flex gap-2">
  <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
  <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
- <button type="button" onClick={()=>setNativeTab('none')} disabled={busy||nativeTab==='none'}>Close native module</button>
+ <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>
+ <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>
+ <button type="button" onClick={()=>setNativeTab('none')} disabled={busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
  </div>
  {notice&&<p>{notice}</p>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
@@ -137,6 +161,14 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  </fieldset>}
  {nativeDraft&&nativeTab==='seo'&&<fieldset disabled={busy} key={active?.project.projectId+':seo'} aria-label="Native YouTube SEO">
  <YouTubeSeoView projectName={active?.project.name??''} scriptContext={seo||script} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} loopSlots={nativeDraft.production?.timeline_slots??[]} externalChaptersTxt={chapters} onClearExternalChapters={()=>{setChapters('');setDirty(true);}} seoState={(nativeDraft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient')} onSeoStateChange={updateNativeSeo} onApplyTitleToThumbnail={v=>{setTitle(v);setDirty(true);}} onNotify={setNotice}/>
+ </fieldset>}
+ {nativeDraft&&nativeTab==='combine'&&<fieldset disabled={busy} key={active?.project.projectId+':combine'} aria-label="Native Montage Combine">
+ <MontageCombineView isolatedEditing ghToken="" ghRepo="" ghBranch="" gdriveFolderId="" onGdriveFolderIdChange={()=>{}} driveUser={null} driveToken={null} onDriveAuthChange={()=>{}} initialCombineDraft={hydrateCombine(nativeDraft)} onCombineDraftChange={onCombineChange} transferredScript="" onClearTransferredScript={()=>{}} onOpenConfigModal={()=>setNotice('External actions disabled in preview')} onStartRenderStatus={()=>{}} onCancelRenderRun={()=>{}} onNotify={setNotice} encodeManifestBase64={()=>''} terminalStatus="idle" terminalSeconds={0} terminalLogs={[]} onClearTerminalLogs={()=>{}}/>
+ </fieldset>}
+ {nativeDraft&&nativeTab==='loop'&&<fieldset disabled={busy} aria-label="Scoped Loop settings">
+ <p>Scoped loop settings preview; original Loop Builder not mounted.</p>
+ {(['fps','codec','resolution','loopHours'] as const).map(k=><label key={k}>{k}<select aria-label={'Loop '+k} value={String(nativeDraft.production?.[k]??({fps:24,codec:'libx264',resolution:'4k',loopHours:3}[k]))} onChange={e=>changeLoop(k,e.target.value)}>{({fps:['24','30','60'],codec:['libx264','libx265'],resolution:['720p','1080p','2k','4k'],loopHours:['3','6','10']}[k]).map(v=><option key={v}>{v}</option>)}</select></label>)}
+ <p>Timeline slots: {nativeDraft.production?.timeline_slots?.length??0}</p>
  </fieldset>}
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
