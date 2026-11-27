@@ -210,7 +210,7 @@ const writeSessionSecrets = (patch: Partial<SessionSecrets>, sessionStorage: Sto
 /** Однократная миграция: секреты уезжают в sessionStorage и стираются из localStorage. */
 export const migrateLegacySecrets = (localStorage: Storage = globalThis.localStorage, sessionStorage: Storage = globalThis.sessionStorage): void => {
   try {
-    if (sessionStorage.getItem(SECRETS_PURGED_FLAG)) return;
+    if (sessionStorage.getItem(SECRETS_PURGED_FLAG) && localStorage.getItem('ac_gdrive_sa_key') === null) return;
 
     const legacy = readJson<Partial<AetherGoogleAuthRecord>>(
       localStorage,
@@ -251,7 +251,12 @@ export const migrateLegacySecrets = (localStorage: Storage = globalThis.localSto
     removeKey(localStorage, 'ac_gh_token');
     removeKey(localStorage, 'ac_tg_bot_token');
     removeKey(localStorage, 'ac_tg_chat_id');
-    // Preserve unsupported legacy service-account credentials until explicit migration or removal.
+    // Unsupported service-account keys must never enter project storage.
+    // Keep the original until the owner explicitly revokes/removes it.
+    if (localStorage.getItem('ac_gdrive_sa_key') !== null) {
+      sessionStorage.removeItem(SECRETS_PURGED_FLAG);
+      return;
+    }
     if (['ac_gh_token','ac_tg_bot_token','ac_tg_chat_id'].some(k => localStorage.getItem(k) !== null)) return;
     const remaining = readJson<Partial<AetherGoogleAuthRecord>>(localStorage, AETHER_GOOGLE_AUTH_STORAGE_KEY);
     if (remaining?.access_token || remaining?.github_token) return;
