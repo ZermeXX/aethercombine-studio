@@ -1,3 +1,6 @@
+import {legacyExtras,type LegacyExtras} from './legacyExtras';
+import {narrativeScenes} from './narrativeSceneProjection';
+import type {NarrativeSceneItem} from '../components/MontageCombineView';
 import type { TimelineSlot } from '../App';
 function projectTimeline(input:unknown):TimelineSlot[] {
  if(!Array.isArray(input))throw new Error('Invalid timeline');
@@ -33,7 +36,8 @@ export interface ProjectPayload {
  thumbnailTitle:string;
  thumbnailBadge:string;
  chapters:string;
- production?: { fps:24|30|60; codec:'libx264'|'libx265'; resolution:'720p'|'1080p'|'2k'|'4k'; loopHours:number; audio_mastering?:AudioMasteringConfig; timeline_slots?:TimelineSlot[]; render?: {crf:number; audioBitrate:192|256|320; actCrossfadeSec:number; internalCrossfadeSec:number; finalBlackEnabled:boolean; finalBlackSec:number; bitratePreset:'standard'|'cinema'|'eco'; transitionMode:'crossfade'|'pingpong'; useEmbeddedAudio:boolean}; scenes:{id:string;durationSec:number;text:string}[] };
+ legacyExtras?:LegacyExtras;
+ production?: { fps:24|30|60; codec:'libx264'|'libx265'; resolution:'720p'|'1080p'|'2k'|'4k'; loopHours:number; narrative_scenes?:NarrativeSceneItem[]; audio_mastering?:AudioMasteringConfig; timeline_slots?:TimelineSlot[]; render?: {crf:number; audioBitrate:192|256|320; actCrossfadeSec:number; internalCrossfadeSec:number; finalBlackEnabled:boolean; finalBlackSec:number; bitratePreset:'standard'|'cinema'|'eco'; transitionMode:'crossfade'|'pingpong'; useEmbeddedAudio:boolean}; scenes:{id:string;durationSec:number;text:string}[] };
 }
 export function projectPayload(input:unknown):ProjectPayload {
  if(!input||typeof input!=='object')throw new Error('Invalid payload');
@@ -46,10 +50,10 @@ export function projectPayload(input:unknown):ProjectPayload {
   const t=q.render;
   if(t!==undefined && (!t || !Number.isFinite(t.crf)||t.crf<0||t.crf>51||![192,256,320].includes(t.audioBitrate)||[t.actCrossfadeSec,t.internalCrossfadeSec,t.finalBlackSec].some(v=>!Number.isFinite(v)||v<0)||typeof t.finalBlackEnabled!=='boolean'||typeof t.useEmbeddedAudio!=='boolean'||!['standard','cinema','eco'].includes(t.bitratePreset)||!['crossfade','pingpong'].includes(t.transitionMode)))throw new Error('Invalid render settings');
   const render=t===undefined?{}:{render:{crf:t.crf,audioBitrate:t.audioBitrate,actCrossfadeSec:t.actCrossfadeSec,internalCrossfadeSec:t.internalCrossfadeSec,finalBlackEnabled:t.finalBlackEnabled,finalBlackSec:t.finalBlackSec,bitratePreset:t.bitratePreset,transitionMode:t.transitionMode,useEmbeddedAudio:t.useEmbeddedAudio}};
-  production={...render,...(q.timeline_slots===undefined?{}:{timeline_slots:projectTimeline(q.timeline_slots)}),...(q.audio_mastering===undefined?{}:{audio_mastering:mastering(q.audio_mastering)}),fps:q.fps,codec:q.codec,resolution:q.resolution,loopHours:q.loopHours,scenes:q.scenes.map(s=>{
+  production={...render,...(q.narrative_scenes===undefined?{}:{narrative_scenes:narrativeScenes(q.narrative_scenes)}),...(q.timeline_slots===undefined?{}:{timeline_slots:projectTimeline(q.timeline_slots)}),...(q.audio_mastering===undefined?{}:{audio_mastering:mastering(q.audio_mastering)}),fps:q.fps,codec:q.codec,resolution:q.resolution,loopHours:q.loopHours,scenes:q.scenes.map(s=>{
    if(!s||typeof s.id!=='string'||typeof s.text!=='string'||!Number.isFinite(s.durationSec)||s.durationSec<=0)throw new Error('Invalid scene');
    return {id:s.id,text:s.text,durationSec:s.durationSec};
   })};
  }
- return {...(production===undefined?{}:{production}),schemaVersion:1,script:p.script,seoScript:p.seoScript,thumbnailTitle:p.thumbnailTitle,thumbnailBadge:p.thumbnailBadge,chapters:p.chapters};
+ return {...(p.legacyExtras===undefined?{}:{legacyExtras:legacyExtras(p.legacyExtras)}),...(production===undefined?{}:{production}),schemaVersion:1,script:p.script,seoScript:p.seoScript,thumbnailTitle:p.thumbnailTitle,thumbnailBadge:p.thumbnailBadge,chapters:p.chapters};
 }
