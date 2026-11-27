@@ -4,6 +4,7 @@
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { StudioShell } from './design-system/StudioShell';
 import {
   Layers,
   Clapperboard,
@@ -4245,117 +4246,19 @@ export default function App() {
                     isGdriveConfigured ? 'text-emerald-400' : 'text-emerald-400/75'
                   }`}
                 />
-                <span>GDrive Ready</span>
+                <span>{isGdriveConfigured ? "GDrive Configured" : "GDrive Not configured"}</span>
               </span>
             </button>
           </div>
         </div>
 
-        <nav
-          role="tablist"
-          aria-label="Цехи продакшна AetherCombine"
-          className="mx-auto mt-2.5 sm:mt-3 flex max-w-[1600px] flex-nowrap overflow-x-auto no-scrollbar xl:flex-wrap items-center gap-1.5 rounded-2xl border border-white/[0.08] bg-[#0f1623]/85 backdrop-blur-md p-1.5"
-        >
-          {[
-            {
-              id: 'combine' as TabId,
-              domId: 'tab-combine',
-              cls: 'nav-tab-combine',
-              iconCls: 'nav-icon-combine',
-              emoji: '🎬',
-              glow: 'rgba(147,51,234,0.95)',
-              label: 'Повествовательный монтаж'
-            },
-            {
-              id: 'loop' as TabId,
-              domId: 'tab-loop',
-              cls: 'nav-tab-loop',
-              iconCls: 'nav-icon-loop',
-              emoji: '🔁',
-              glow: 'rgba(245,158,11,0.95)',
-              label: 'Многочасовой Луп (N-Слотов)'
-            },
-            {
-              id: 'verbaflow' as TabId,
-              domId: 'tab-verbaflow',
-              cls: 'nav-tab-verbaflow',
-              iconCls: 'nav-icon-verbaflow',
-              emoji: '📝',
-              glow: 'rgba(56,189,248,0.95)',
-              label: 'VerbaFlow • Сценарии & Текст'
-            },
-            {
-              id: 'seo' as TabId,
-              domId: 'tab-seo',
-              cls: 'nav-tab-seo',
-              iconCls: 'nav-icon-seo',
-              emoji: '📈',
-              glow: 'rgba(14,165,233,0.95)',
-              label: 'YouTube SEO'
-            },
-            {
-              id: 'thumb' as TabId,
-              domId: 'tab-thumb',
-              cls: 'nav-tab-thumb',
-              iconCls: 'nav-icon-thumb',
-              emoji: '🎨',
-              glow: 'rgba(16,185,129,0.95)',
-              label: '4К Превью & Арт-цех'
-            },
-            {
-              id: 'editor' as TabId,
-              domId: 'tab-editor',
-              cls: 'nav-tab-editor',
-              iconCls: 'nav-icon-editor',
-              emoji: '🖼️',
-              glow: 'rgba(34,211,238,0.95)',
-              label: 'Арт-Редактор & Фон'
-            }
-          ].map(tabItem => {
-            const isActive = activeTab === tabItem.id;
-            return (
-              <button
-                key={tabItem.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => handleSelectTab(tabItem.id)}
-                id={tabItem.domId}
-                className={`relative group nav-tab ${tabItem.cls} min-h-[44px] shrink-0 flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold whitespace-nowrap cursor-pointer overflow-hidden ${
-                  isActive
-                    ? 'active text-[#f8fafc] border border-amber-400/45 shadow-[0_6px_20px_-4px_rgba(245,158,11,0.28)]'
-                    : 'border border-transparent text-white/60 hover:bg-white/[0.04] hover:text-white'
-                }`}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="activeStudioTabIndicator"
-                    className="absolute inset-0 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-emerald-500/15 -z-0"
-                    transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                  />
-                )}
-                <span
-                  key={isActive ? `${tabItem.id}-active-${tabPulseKey}` : `${tabItem.id}-idle`}
-                  className={`relative z-10 icon-container nav-icon-box ${tabItem.iconCls}`}
-                  aria-hidden="true"
-                >
-                  <span
-                    style={{ filter: `drop-shadow(0 0 8px ${tabItem.glow})` }}
-                    className="text-[16px] leading-none select-none"
-                  >
-                    {tabItem.emoji}
-                  </span>
-                </span>
-                <span className="relative z-10">{tabItem.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+
       </header>
 
+      <StudioShell active={activeTab} onSelect={handleSelectTab}>
       <main
         onPaste={handleGlobalManifestPaste}
-        className="relative z-10 flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
+        className="relative z-10 flex-1 min-w-0 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
       >
         <section
           id="view-combine"
@@ -6956,6 +6859,7 @@ export default function App() {
           </div>
         )}
       </main>
+      </StudioShell>
 
       {isResetProjectModalOpen && (
         <div
