@@ -82,10 +82,14 @@ with sync_playwright() as p:
     page.get_by_label("Slot filename 1").fill("scene.mp4")
     page.get_by_role("button",name="Loop preset 5 hours").click()
     expect(page.get_by_label("Slot duration 1")).to_have_value("18000")
+    page.get_by_label("Slot source duration 1").fill("12")
+    page.get_by_label("Slot loop seam 1").fill("2")
     page.get_by_label("integrated_lufs").fill("-14.5")
     page.get_by_role("button",name="Save project").click()
     page.get_by_role("button",name="Open scoped Loop settings").click()
     expect(page.get_by_label("Slot title 1")).to_have_value("History slot")
+    expect(page.get_by_label("Slot source duration 1")).to_have_value("12")
+    expect(page.get_by_label("Slot loop seam 1")).to_have_value("2")
     page.get_by_label("Attach referenced file").set_input_files({"name":"scene.mp4","mimeType":"video/mp4","buffer":b"fixture media"})
     expect(page.get_by_text("Asset attached and verified",exact=True)).to_be_visible()
     ws.select_option("the_whisker_trio")
@@ -126,6 +130,31 @@ with sync_playwright() as p:
     page.get_by_label("Project image A",exact=True).set_input_files({"name":"cover.png","mimeType":"image/png","buffer":png})
     expect(page.get_by_text("Project image saved: A",exact=True)).to_be_visible()
     expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    # Hold the actual decoder, attempt a competing upload in the same JS turn,
+    # then reject the first operation and verify the lock is released.
+    page.evaluate("""() => {
+      window.__realDecode = window.createImageBitmap;
+      window.createImageBitmap = (...args) => new Promise((resolve,reject) => {
+        window.__rejectDecode = reject;
+      });
+      const upload = label => {
+        const input=document.querySelector('input[aria-label="'+label+'"]');
+        const dt=new DataTransfer();dt.items.add(new File(['bad'],'bad.png',{type:'image/png'}));
+        input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+      };
+      upload('Project image B');upload('Project image C');
+    }""")
+    expect(ws).to_be_disabled()
+    expect(page.get_by_label("Project image C",exact=True)).to_be_disabled()
+    page.evaluate("""() => {window.createImageBitmap=window.__realDecode;window.__rejectDecode(new Error('synthetic decode failure'));}""")
+    expect(page.get_by_text("Project image rejected",exact=True)).to_be_visible()
+    expect(ws).to_be_enabled()
+    expect(page.get_by_alt_text("Stored project image B")).to_have_count(0)
+    expect(page.get_by_alt_text("Stored project image C")).to_have_count(0)
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    page.get_by_label("Project image B",exact=True).set_input_files({"name":"recovery.png","mimeType":"image/png","buffer":png})
+    expect(page.get_by_text("Project image saved: B",exact=True)).to_be_visible()
+    print("ASSET_WRITE_FAILURE_RECOVERY_PASS")
     ws.select_option("the_whisker_trio")
     expect(page.get_by_alt_text("Stored project image A")).to_have_count(0)
     ws.select_option("histoviva")
