@@ -78,6 +78,9 @@ function normalizeV8TransitionDuration(value: unknown, mode: string): number {
 }
 
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down' | 'static';
+type VideoDurationMode = 'hybrid' | 'native' | 'stretch' | 'freeze' | 'loop';
+const normalizeDurationMode = (v: unknown): VideoDurationMode | undefined => ['hybrid','native','stretch','freeze','loop'].includes(String(v)) ? v as VideoDurationMode : undefined;
+const normalizeExtension = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? Math.max(0,Math.min(2,v)) : 2;
 const normalizeCameraZoom = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? Math.min(1.5, Math.max(1, value)) : 1.12;
 
 export type CinematicOverlayId =
@@ -139,6 +142,9 @@ export interface NarrativeSceneItem {
   voice_end?: number;
   camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  video_duration_mode?: VideoDurationMode;
+  max_extension_sec?: number;
+  allow_video_reuse?: boolean;
   visual_style?: string;
   needs_revision?: boolean;
   revision_note?: string;
@@ -174,6 +180,9 @@ export interface NarrativeSceneItem {
       | string;
     camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  video_duration_mode?: VideoDurationMode;
+  max_extension_sec?: number;
+  allow_video_reuse?: boolean;
     [key: string]: unknown;
   };
   audio_processing?: {
@@ -214,6 +223,9 @@ export interface ExportedNarrativeSceneItem {
   voice_end?: number;
   camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  video_duration_mode?: VideoDurationMode;
+  max_extension_sec?: number;
+  allow_video_reuse?: boolean;
   visual_style?: string;
   transition: string;
   transition_duration: number;
@@ -236,6 +248,9 @@ export interface ExportedNarrativeSceneItem {
     };
     camera_movement?: CameraVectorType;
   camera_zoom?: number;
+  video_duration_mode?: VideoDurationMode;
+  max_extension_sec?: number;
+  allow_video_reuse?: boolean;
     [key: string]: unknown;
   };
   audio_processing: {
@@ -417,6 +432,9 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (![sc.file_name,sc.video_file,a.video_file,a.image_reference].some(v=>typeof v==='string'&&v.trim())) add('error',label+'нет визуального файла.');
     if (![sc.voiceover_file,sc.audio_file,a.voiceover_file].some(v=>typeof v==='string'&&v.trim())) add('warning',label+'нет файла диктора.');
     if (sc.camera_movement !== undefined && !['zoom_in','zoom_out','pan_left','pan_right','pan_up','pan_down','static'].includes(String(sc.camera_movement))) add('error',label+'неизвестный режим камеры.');
+    if (sc.video_duration_mode !== undefined && !normalizeDurationMode(sc.video_duration_mode)) add('error',label+'неизвестный режим длительности.');
+    if (sc.max_extension_sec !== undefined && !valid(sc.max_extension_sec,0,2)) add('error',label+'продление вне 0–2 секунд.');
+    if (sc.allow_video_reuse !== undefined && typeof sc.allow_video_reuse !== 'boolean') add('error',label+'allow_video_reuse должен быть boolean.');
     if (sc.camera_zoom !== undefined && !valid(sc.camera_zoom,1,1.5)) add('error',label+'масштаб камеры вне 1–1.5.');
     if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
     if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
@@ -812,6 +830,11 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         <span>{Math.round(normalizeCameraZoom(sc.camera_zoom) * 100)}%</span>
       </div>
       <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
+        <label>Синхронизация <select aria-label="Режим длительности" value={sc.video_duration_mode ?? 'auto'} onChange={e=>updateScene(idx,{video_duration_mode:normalizeDurationMode(e.target.value)})} className="bg-slate-900 border border-slate-700 rounded">
+          <option value="auto">Auto (renderer)</option><option value="hybrid">Hybrid</option><option value="native">Native</option><option value="freeze">Freeze</option><option value="stretch">Stretch</option><option value="loop">Loop</option>
+        </select></label>
+        <label>Макс. продление, с <input type="number" min={0} max={2} step={0.1} value={normalizeExtension(sc.max_extension_sec)} disabled={!!sc.video_duration_mode && sc.video_duration_mode !== 'hybrid'} onChange={e=>updateScene(idx,{max_extension_sec:normalizeExtension(Number(e.target.value))})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
+        <label><input type="checkbox" checked={sc.allow_video_reuse === true} onChange={e=>updateScene(idx,{allow_video_reuse:e.target.checked})}/> Разрешить повтор файла</label>
         <label>Диктор <input aria-label="Громкость диктора" type="number" min={0} max={4} step={0.05}
           value={normalizeV8Volume(sc.voiceover_volume, 1)}
           onChange={e => updateScene(idx, { voiceover_volume: normalizeV8Volume(Number(e.target.value), 1) })}
@@ -2025,6 +2048,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             ...(typeof sc.voice_end === 'number' ? { voice_end: sc.voice_end } : {}),
             ...(cameraMovement ? { camera_movement: cameraMovement } : {}),
             camera_zoom: normalizeCameraZoom(sc.camera_zoom ?? scVideoProc?.camera_zoom),
+            video_duration_mode: normalizeDurationMode(sc.video_duration_mode),
+            max_extension_sec: normalizeExtension(sc.max_extension_sec),
+            allow_video_reuse: sc.allow_video_reuse === true,
             voiceover_volume: normalizeV8Volume(sc.voiceover_volume, typeof scAudioProc?.voiceover_gain_db === 'number' ? normalizeV8Volume(Math.pow(10, scAudioProc.voiceover_gain_db / 20), 1) : 1),
             ambient_volume: normalizeV8Volume(sc.ambient_volume ?? (typeof sc.ambient_audio === 'object' && sc.ambient_audio ? (sc.ambient_audio as Record<string, unknown>).volume : undefined), 0.35),
             ambient_audio: typeof sc.ambient_audio === 'string' ? sc.ambient_audio : typeof sc.ambient_audio === 'object' && sc.ambient_audio ? String((sc.ambient_audio as Record<string, unknown>).file_name || '') : '',
@@ -3072,6 +3098,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         : {}),
       camera_movement: resolvedCamera,
       camera_zoom: normalizeCameraZoom(sc.camera_zoom),
+      ...(sc.video_duration_mode ? {video_duration_mode:sc.video_duration_mode} : {}),
+      max_extension_sec: normalizeExtension(sc.max_extension_sec),
+      allow_video_reuse: sc.allow_video_reuse === true,
       ...(sc.visual_style ? { visual_style: sc.visual_style } : {}),
       transition: resolvedTransType,
       transition_duration: resolvedTransDur,
@@ -3483,6 +3512,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         duration_sec: sc.duration,
         camera_movement: sc.camera_movement,
         camera_zoom: normalizeCameraZoom(sc.camera_zoom),
+        ...(sc.video_duration_mode ? {video_duration_mode:sc.video_duration_mode} : {}),
+        max_extension_sec: normalizeExtension(sc.max_extension_sec),
+        allow_video_reuse: sc.allow_video_reuse === true,
         transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
         transition_duration: sc.transition_duration,
         voiceover_volume: sc.voiceover_volume,
