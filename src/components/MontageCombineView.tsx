@@ -1686,6 +1686,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   const [importedScenarioName, setImportedScenarioName] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
+  const [renderMode, setRenderMode] = useState<'preview' | 'master'>('preview');
 
   const scenarioJsonInputRef = useRef<HTMLInputElement | null>(null);
   const masterAudioInputRef = useRef<HTMLInputElement | null>(null);
@@ -4201,7 +4202,9 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
           body: JSON.stringify({
             ref: 'main',
             inputs: {
-              manifest_payload: serialized.payload
+              manifest_payload: serialized.payload,
+              render_mode: renderMode,
+              preflight_only: 'false'
             }
           })
         }
@@ -4209,17 +4212,17 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
       if (response.status === 204) {
         onStartRenderStatus(
-          'Сборка успешно запущена в GitHub Actions!',
-          `Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)} • ${serialized.finalLength} симв.) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
+          `${renderMode === 'preview' ? 'Fast Preview 720p' : 'Master Render'} успешно запущен в GitHub Actions!`,
+          `Режим: ${renderMode} | Workflow: render_scenes.yml (${fullManifestToDispatch.total_scenes} сцен • ${calcTotalDuration(narrativeScenes)} • ${serialized.finalLength} симв.) | Папка GDrive: ${gdriveFolderId || 'не указана'}`,
           'ZermeXX/aetherflow-render',
           dispatchTime,
           {
             workflow: 'render_scenes.yml',
-            branch: (ghBranch || 'main').trim(),
+            branch: 'main',
             projectName: fullManifestToDispatch.project_name
           }
         );
-        onNotify('Сборка успешно запущена в GitHub Actions!', 'success');
+        onNotify(`${renderMode === 'preview' ? 'Fast Preview 720p' : 'Master Render'} успешно запущен в GitHub Actions!`, 'success');
       } else {
         const errBody = await response.text().catch(() => '');
         const exactError = errBody.trim() || response.statusText || `HTTP ${response.status}`;
@@ -5797,6 +5800,14 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
               <span>👁️ Раскадровка (.html)</span>
             </button>
 
+            <label className="flex flex-col gap-1 text-xs text-slate-300">
+              Режим облачного рендера
+              <select aria-label="Режим облачного рендера" value={renderMode} disabled={isDispatching || isRunnerBusy} onChange={e=>setRenderMode(e.target.value==='master'?'master':'preview')} className="bg-slate-900 border border-indigo-400/40 rounded-lg px-3 py-2">
+                <option value="preview">Fast Preview — 720p / полный фильм</option>
+                <option value="master">Master — настройки экспорта</option>
+              </select>
+              <span className="text-[10px] text-slate-400">{renderMode==='preview'?'Прямой 720p, CRF 24, ultrafast; без 4K master.':'Полный master по выбранному профилю экспорта.'}</span>
+            </label>
             <button
               type="button"
               onClick={startNarrativeScenesRender}
@@ -5812,7 +5823,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
                 ? 'Отправка задачи в GitHub Actions...'
                 : isRunnerBusy
                 ? `⏳ Сборка ${terminalStatus === 'queued' ? 'QUEUED' : 'RUNNING'} • ${formatTerminalTime(terminalSeconds)}`
-                : '🚀 Запустить облачную сборку'}
+                : renderMode === 'preview' ? 'Запустить Fast Preview 720p' : 'Запустить Master Render'}
             </button>
             {isRunnerBusy && terminalRunUrl && terminalRunUrl !== '#' && (
               <a
