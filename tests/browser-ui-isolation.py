@@ -60,6 +60,7 @@ with sync_playwright() as p:
     expect(script).to_have_value("Native history narration")
     page.get_by_role("button",name="Open scoped Loop settings").click()
     expect(page.get_by_label("Loop loopHours")).to_have_value("10")
+    expect(page.get_by_label("Loop project name")).to_have_value("History UI")
     expect(page.get_by_label("Render crf")).to_have_value("20")
     expect(page.get_by_label("Render bitrate preset")).to_have_value("cinema")
     page.get_by_role("button",name="Add timeline slot").click()

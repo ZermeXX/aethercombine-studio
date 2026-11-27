@@ -106,3 +106,24 @@ test('fixed project image slots replace only within the owning project',async()=
  await expect(s.replaceProjectImage('histoviva',h.project.projectId,'B',new Blob(['x'],{type:'text/plain'}))).rejects.toThrow();
  }finally{s.close();}
 });
+
+import {projectPayload} from '../src/utils/projectPayload';
+test('nonempty V8.1 scene, CTA, branding and locks survive project save and database reopen',async()=>{
+ const factory=new IDBFactory();
+ let s=new ProjectStorage(await openProjectDatabase(factory));
+ try{
+ const c=new WorkspaceProjectContext(s),h=await c.create('histoviva','History'),w=await c.create('the_whisker_trio','Ambient');
+ const scope={workspaceId:'histoviva' as const,projectId:h.project.projectId};
+ const fixture=projectPayload({...emptyProjectPayload(),script:'Narration',production:{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[],narrative_scenes:[{scene_id:'scene-1',scene_index:0,file_name:'scene.mp4',text_overlay:'History',duration:8,start_time:0,transition:{type:'fade',duration_sec:0.5},brand_identity_visible:true,cta_config:{enabled:true,style:'subscribe_bell',show_sec:[1,7],click_sec:2,bell_sec:4,sfx_enabled:true,sfx_volume:1}}]},legacyExtras:{combine:{project_name:'History',v21_locks:{hardFrameLock:true,apadAtrimLock:true,zeroSpeechOverlap:true}},branding:{brand_identity:{enabled:true,name:'HISTOVIVA',episode_label:'EP02'},lower_third_config:{style:'histoviva_broadcast_en',enabled:true,show_sec:[1,4],bar_bg_rgba:[0,0,0,200]}},voice:{activeEngine:'edgetts',activeAccount:'2',selectedLang:'English UK',selectedGender:'male',selectedVoiceId:'en-GB-RyanNeural',favorites:['en-GB-RyanNeural']}}});
+ const next=captureCombine(fixture,hydrateCombine(fixture));
+ expect(next.production?.narrative_scenes).toEqual(fixture.production?.narrative_scenes);
+ expect(next.legacyExtras?.branding).toEqual(fixture.legacyExtras?.branding);
+ expect(next.legacyExtras?.combine?.v21_locks).toEqual(fixture.legacyExtras?.combine?.v21_locks);
+ expect(next.legacyExtras?.voice).toEqual(fixture.legacyExtras?.voice);
+ await c.save(scope,h.project.revision,next);
+ s.close();s=new ProjectStorage(await openProjectDatabase(factory));
+ const restored=new WorkspaceProjectContext(s);
+ expect((await restored.read(scope)).payload).toEqual(next);
+ expect((await restored.read({workspaceId:'the_whisker_trio',projectId:w.project.projectId})).payload).toEqual(emptyProjectPayload());
+ }finally{s.close();}
+});
