@@ -11,9 +11,9 @@ export const emptyProjectPayload=():ProjectPayload=>({schemaVersion:1,script:'',
 export class WorkspaceProjectContext {
  constructor(private readonly storage:ProjectStorage){}
  async read(scope:ProjectScope):Promise<ProjectSnapshot>{
-  const project=await this.storage.getProject(scope.workspaceId,scope.projectId);
-  if(!project)throw new Error('Project unavailable in workspace');
-  return {project,payload:await this.storage.getPayload(scope.workspaceId,scope.projectId)};
+  const snapshot=await this.storage.getSnapshot(scope.workspaceId,scope.projectId);
+  if(!snapshot)throw new Error('Project unavailable in workspace');
+  return snapshot;
  }
  async openWorkspace(workspaceId:WorkspaceId):Promise<WorkspaceSnapshot>{
   if(!isWorkspaceId(workspaceId))throw new Error('Invalid workspace');
@@ -24,9 +24,8 @@ export class WorkspaceProjectContext {
  async create(workspaceId:WorkspaceId,name:string):Promise<ProjectSnapshot>{
   const project=createProject(workspaceId,name);
   const payload=emptyProjectPayload();
-  await this.storage.createProject(project);
-  const saved=await this.storage.saveProject(project,project.revision,payload);
-  return {project:saved,payload};
+  await this.storage.createProject(project,payload);
+  return {project,payload};
  }
  async select(scope:ProjectScope):Promise<ProjectSnapshot>{
   const snapshot=await this.read(scope);

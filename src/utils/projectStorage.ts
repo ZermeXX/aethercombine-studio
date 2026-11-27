@@ -61,10 +61,17 @@ export class ProjectStorage {
  // Hash outside the IndexedDB transaction to avoid transaction inactivity.
  constructor(private readonly db:IDBDatabase){}
  close(){this.db.close();}
- createProject(input:ProjectRecord):Promise<void>{
+ createProject(input:ProjectRecord,payload?:ProjectPayload):Promise<void>{
   const p=projectMetadata(input);
   if(p.revision!==1)throw new Error('Initial revision must be 1');
-  return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add(p);done(undefined);});
+  const content=payload===undefined?undefined:projectPayload(payload);
+  return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add({...p,...(content===undefined?{}:{payload:content})});done(undefined);});
+ }
+ getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
+  return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{const p=r.result;done(p?.workspaceId===workspaceId?{project:projectMetadata(p),payload:p.payload===undefined?null:projectPayload(p.payload)}:null);}catch(e){fail(e);}};
+  });
  }
  getProject(workspaceId:WorkspaceId,projectId:string):Promise<ProjectRecord|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{

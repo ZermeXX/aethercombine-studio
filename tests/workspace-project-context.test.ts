@@ -37,3 +37,21 @@ test('switch serializes flush and preserves selection when flush fails',async()=
  expect((await c.read(ws)).payload?.script).toBe('');
  }finally{s.close();}
 });
+
+import {saveModulePatch} from '../src/utils/scopedModulePersistence';
+test('atomic initial payload and scoped module updates preserve unrelated content',async()=>{
+ const s=new ProjectStorage(await openProjectDatabase(new IDBFactory())),c=new WorkspaceProjectContext(s);
+ try{
+ const h=await c.create('histoviva','H'),w=await c.create('the_whisker_trio','W');
+ expect(h.project.revision).toBe(1);
+ const hs={workspaceId:'histoviva' as const,projectId:h.project.projectId},ws={workspaceId:'the_whisker_trio' as const,projectId:w.project.projectId};
+ const a=await saveModulePatch(c,hs,1,{module:'verbaflow',script:'Narration',chapters:'Intro'});
+ const b=await saveModulePatch(c,hs,a.project.revision,{module:'seo',seoScript:'History SEO'});
+ const d=await saveModulePatch(c,hs,b.project.revision,{module:'thumb',thumbnailTitle:'Amazon',thumbnailBadge:'Documentary'});
+ const e=await saveModulePatch(c,hs,d.project.revision,{module:'loop',production:{fps:24,codec:'libx264',resolution:'4k',loopHours:6}});
+ expect(e.payload?.script).toBe('Narration');expect(e.payload?.seoScript).toBe('History SEO');expect(e.payload?.thumbnailTitle).toBe('Amazon');expect(e.payload?.production?.loopHours).toBe(6);
+ expect((await c.read(ws)).payload).toEqual(emptyProjectPayload());
+ await expect(saveModulePatch(c,hs,1,{module:'seo',seoScript:'Stale'})).rejects.toThrow();
+ await expect(saveModulePatch(c,{...hs,workspaceId:'the_whisker_trio'},e.project.revision,{module:'seo',seoScript:'Wrong'})).rejects.toThrow();
+ }finally{s.close();}
+});
