@@ -175,7 +175,7 @@ const removeKey = (storage: Storage, key: string): void => {
   }
 };
 
-const readSessionSecrets = (): SessionSecrets => {
+const readSessionSecrets = (sessionStorage: Storage = globalThis.sessionStorage): SessionSecrets => {
   const g = readJson<{ access_token?: string; expires_at?: number }>(
     sessionStorage,
     GOOGLE_TOKEN_SESSION_KEY
@@ -188,9 +188,9 @@ const readSessionSecrets = (): SessionSecrets => {
   };
 };
 
-const writeSessionSecrets = (patch: Partial<SessionSecrets>): void => {
+const writeSessionSecrets = (patch: Partial<SessionSecrets>, sessionStorage: Storage = globalThis.sessionStorage): void => {
   if (patch.access_token !== undefined || patch.expires_at !== undefined) {
-    const cur = readSessionSecrets();
+    const cur = readSessionSecrets(sessionStorage);
     const next = {
       access_token: patch.access_token ?? cur.access_token,
       expires_at: patch.expires_at ?? cur.expires_at
@@ -208,7 +208,7 @@ const writeSessionSecrets = (patch: Partial<SessionSecrets>): void => {
 };
 
 /** Однократная миграция: секреты уезжают в sessionStorage и стираются из localStorage. */
-const migrateLegacySecrets = (): void => {
+export const migrateLegacySecrets = (localStorage: Storage = globalThis.localStorage, sessionStorage: Storage = globalThis.sessionStorage): void => {
   try {
     if (sessionStorage.getItem(SECRETS_PURGED_FLAG)) return;
 
@@ -217,15 +217,15 @@ const migrateLegacySecrets = (): void => {
       AETHER_GOOGLE_AUTH_STORAGE_KEY
     );
     const legacyGh = localStorage.getItem('ac_gh_token') || '';
-    const cur = readSessionSecrets();
+    const cur = readSessionSecrets(sessionStorage);
 
     const expected = {
       access_token: cur.access_token || legacy?.access_token || '',
       expires_at: cur.expires_at || Number(legacy?.expires_at) || 0,
       github_token: cur.github_token || legacy?.github_token || legacyGh || ''
     };
-    writeSessionSecrets(expected);
-    const verified = readSessionSecrets();
+    writeSessionSecrets(expected, sessionStorage);
+    const verified = readSessionSecrets(sessionStorage);
     if (verified.access_token !== expected.access_token || verified.expires_at !== expected.expires_at || verified.github_token !== expected.github_token) return;
 
     const tgBot = localStorage.getItem('ac_tg_bot_token') || '';
