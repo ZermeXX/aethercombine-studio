@@ -80,6 +80,13 @@ function normalizeV8TransitionDuration(value: unknown, mode: string): number {
 export type CameraVectorType = 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down' | 'static';
 type CameraPolicy = 'native' | 'cinematic';
 const normalizeCameraPolicy = (v: unknown): CameraPolicy | undefined => v === 'native' || v === 'cinematic' ? v : undefined;
+type CTAConfig = { enabled: boolean; style: string; show_sec?: [number,number]; click_sec?: number; bell_sec?: number; sfx_enabled?: boolean; sfx_volume?: number };
+const defaultCTA = (duration: number): CTAConfig => {
+  const end = Math.min(8.2, Math.max(0.2,duration));
+  const start = Math.min(1,end/5);
+  return {enabled:true,style:'subscribe_bell',show_sec:[start,end],click_sec:start+(end-start)*0.35,bell_sec:start+(end-start)*0.65,sfx_enabled:true,sfx_volume:0.5};
+};
+const readCTA = (v: unknown): CTAConfig | undefined => v && typeof v === 'object' && !Array.isArray(v) ? v as CTAConfig : undefined;
 type VideoDurationMode = 'hybrid' | 'native' | 'stretch' | 'freeze' | 'loop';
 const normalizeDurationMode = (v: unknown): VideoDurationMode | undefined => ['hybrid','native','stretch','freeze','loop'].includes(String(v)) ? v as VideoDurationMode : undefined;
 const normalizeExtension = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? Math.max(0,Math.min(2,v)) : 2;
@@ -196,6 +203,7 @@ export interface NarrativeSceneItem {
     sfx_gain_db?: number;
     [key: string]: unknown;
   };
+  cta_config?: CTAConfig;
   adaptive_audio?: boolean;
   audio_ducking?: boolean;
   source_audio_enabled?: boolean;
@@ -240,6 +248,7 @@ export interface ExportedNarrativeSceneItem {
   transition_duration: number;
   mute_audio: boolean;
   ambient_gain_db: number;
+  cta_config?: CTAConfig;
   adaptive_audio?: boolean;
   audio_ducking?: boolean;
   source_audio_enabled?: boolean;
@@ -454,6 +463,17 @@ export function validateManifestV8(input: unknown): ManifestIssue[] {
     if (sc.transition !== undefined && !['fade','dip_to_black','dip_to_white','cut','none'].includes(String(sc.transition))) add('error',label+'неизвестный переход.');
     if (sc.transition_duration !== undefined && !valid(sc.transition_duration,0)) add('error',label+'некорректная длительность перехода.');
     else if (valid(d,0.001) && valid(sc.transition_duration,0) && sc.transition_duration>d) add('warning',label+'переход длиннее сцены.');
+    if (sc.cta_config !== undefined) {
+      const c = obj(sc.cta_config);
+      if (typeof c.enabled !== 'boolean') add('error',label+'CTA enabled должен быть boolean.');
+      if (c.enabled === true && c.style === 'subscribe_bell') {
+        const t = c.show_sec;
+        if (!Array.isArray(t) || t.length !== 2 || !valid(t[0],0) || !valid(t[1],0) || !valid(c.click_sec,0) || !valid(c.bell_sec,0) || !(t[0]<c.click_sec && c.click_sec<c.bell_sec && c.bell_sec<t[1])) add('error',label+'CTA: требуется start < click < bell < end.');
+        else if (valid(d,0.001) && t[1]>d) add('warning',label+'CTA выходит за плановую длительность; проверьте исходное видео.');
+        if (c.sfx_enabled !== undefined && typeof c.sfx_enabled !== 'boolean') add('error',label+'CTA sfx_enabled должен быть boolean.');
+        if (c.sfx_volume !== undefined && !valid(c.sfx_volume,0,1)) add('error',label+'CTA SFX вне 0–1.');
+      }
+    }
     for (const key of ['adaptive_audio','audio_ducking']) if (sc[key] !== undefined && typeof sc[key] !== 'boolean') add('error',label+key+' должен быть boolean.');
     if (sc.source_audio_enabled !== undefined && typeof sc.source_audio_enabled !== 'boolean') add('error',label+'source_audio_enabled должен быть boolean.');
     for (const key of ['voiceover_volume','ambient_volume','source_audio_volume']) if (sc[key] !== undefined && !valid(sc[key],0,4)) add('error',label+key+' вне 0–4.');
@@ -874,6 +894,22 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
         <input aria-label="Файл эмбиента сцены" placeholder="ambient.wav (GDrive)"
           value={sc.ambient_audio || ''} onChange={e => updateScene(idx, { ambient_audio: e.target.value })}
           className="flex-1 min-w-[100px] bg-slate-900 border border-slate-700 rounded px-1" />
+      </div>
+      <div className="col-span-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
+        <label><input type="checkbox" checked={sc.cta_config?.enabled === true && sc.cta_config.style === 'subscribe_bell'} onChange={e=>updateScene(idx,{cta_config:e.target.checked ? {...defaultCTA(sc.duration),...sc.cta_config,enabled:true,style:'subscribe_bell'} : {...(sc.cta_config ?? defaultCTA(sc.duration)),enabled:false}})}/> Subscribe & Bell</label>
+        {sc.cta_config?.enabled && sc.cta_config.style === 'subscribe_bell' && <>
+          {(['start','click','bell','end'] as const).map(key=>{
+            const c = {...defaultCTA(sc.duration),...sc.cta_config};
+            const interval = c.show_sec ?? defaultCTA(sc.duration).show_sec!;
+            const value = key==='start'?interval[0]:key==='end'?interval[1]:key==='click'?c.click_sec:c.bell_sec;
+            return <label key={key}>{key} (с) <input aria-label={'CTA '+key} type="number" min={0} step={0.05} value={value ?? 0} onChange={e=>{
+              const n=Number(e.target.value);
+              updateScene(idx,{cta_config:{...c,...(key==='start'?{show_sec:[n,interval[1]] as [number,number]}:key==='end'?{show_sec:[interval[0],n] as [number,number]}:key==='click'?{click_sec:n}:{bell_sec:n})}});
+            }} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>;
+          })}
+          <label><input type="checkbox" checked={sc.cta_config.sfx_enabled !== false} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_enabled:e.target.checked}})}/> CTA SFX</label>
+          <label>SFX <input type="number" aria-label="CTA SFX volume" min={0} max={1} step={0.05} disabled={sc.cta_config.sfx_enabled===false} value={sc.cta_config.sfx_volume ?? 0.5} onChange={e=>updateScene(idx,{cta_config:{...defaultCTA(sc.duration),...sc.cta_config,sfx_volume:Math.max(0,Math.min(1,Number(e.target.value)))}})} className="w-16 bg-slate-900 border border-slate-700 rounded"/></label>
+        </>}
       </div>
       {/* 2. Имя видеофайла (file_name) + индикатор промпта VerbaFlow */}
       <div className="col-span-3 flex items-center gap-1.5 min-w-0">
@@ -2080,6 +2116,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
             video_duration_mode: normalizeDurationMode(sc.video_duration_mode),
             max_extension_sec: normalizeExtension(sc.max_extension_sec),
             allow_video_reuse: sc.allow_video_reuse === true,
+            cta_config: readCTA(sc.cta_config),
             adaptive_audio: sc.adaptive_audio !== false,
             audio_ducking: sc.audio_ducking !== false,
             source_audio_enabled: sc.source_audio_enabled !== false,
@@ -3140,6 +3177,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
       transition_duration: resolvedTransDur,
       mute_audio: resolvedMute,
       ambient_gain_db: resolvedAmbientGainDb,
+      ...(sc.cta_config ? {cta_config:sc.cta_config} : {}),
       adaptive_audio: sc.adaptive_audio !== false,
       audio_ducking: sc.audio_ducking !== false,
       source_audio_enabled: sc.source_audio_enabled !== false,
@@ -3556,6 +3594,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         allow_video_reuse: sc.allow_video_reuse === true,
         transition: normalizeV8Transition(typeof sc.transition === 'object' && sc.transition !== null ? (sc.transition as {type?: string}).type : sc.transition),
         transition_duration: sc.transition_duration,
+        ...(sc.cta_config ? {cta_config:sc.cta_config} : {}),
         adaptive_audio: sc.adaptive_audio !== false,
         audio_ducking: sc.audio_ducking !== false,
         source_audio_enabled: sc.source_audio_enabled !== false,
