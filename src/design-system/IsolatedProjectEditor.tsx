@@ -1,3 +1,4 @@
+import {synchronizeTimeline,timelineDuration} from '../utils/timelineSynchronization';
 import {LoopDurationControls} from '../components/LoopDurationControls';
 import {LoopBuilderHeader} from '../components/LoopBuilderHeader';
 import {ScopedRenderSettings} from './ScopedRenderSettings';
@@ -148,9 +149,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  function changeLoop(key:'fps'|'codec'|'resolution'|'loopHours',value:string){
   try{
    const draft=currentDraft(),prev=draft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]};
-   const next=projectPayload({...draft,production:{...prev,[key]:key==='fps'||key==='loopHours'?Number(value):value}});
+   const next=projectPayload({...draft,production:{...prev,[key]:key==='fps'||key==='loopHours'?Number(value):value,...(key==='loopHours'&&prev.timeline_slots?{timeline_slots:synchronizeTimeline(prev.timeline_slots,Number(value),prev.fps)}:{})}});
    setProduction(JSON.stringify(next.production,null,2));setDirty(true);
-  }catch{setNotice('Invalid loop setting');}
+  }catch{setNotice('Invalid loop setting or target would truncate existing timeline data. No changes saved.');}
  }
  const captureExtras=useRef<(section:'thumbnails'|'voice',value:unknown)=>void>(()=>{});
  captureExtras.current=(section,value)=>{
@@ -211,7 +212,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <LoopBuilderHeader loopProjectName={active?.project.name??''} videoCodec={nativeDraft.production?.codec??'libx264'} videoCrf={nativeDraft.production?.render?.crf??18} videoFps={nativeDraft.production?.fps??24} audioBitrateKbps={nativeDraft.production?.render?.audioBitrate??320} actCrossfadeSec={nativeDraft.production?.render?.actCrossfadeSec??1} internalLoopCrossfadeSec={nativeDraft.production?.render?.internalCrossfadeSec??1} slotCount={nativeDraft.production?.timeline_slots?.length??0} totalInsertsCount={nativeDraft.production?.timeline_slots?.reduce((n,s)=>n+s.inserts.length,0)??0} durationLabel={'Target '+(nativeDraft.production?.loopHours??3)+'h'}/>
  <p>Shared native header with scoped editing panels. Legacy manifest import and render dispatch are not mounted.</p>
  {(['fps','codec','resolution','loopHours'] as const).map(k=><label key={k}>{k}<select aria-label={'Loop '+k} value={String(nativeDraft.production?.[k]??({fps:24,codec:'libx264',resolution:'4k',loopHours:3}[k]))} onChange={e=>changeLoop(k,e.target.value)}>{({fps:['24','30','60'],codec:['libx264','libx265'],resolution:['720p','1080p','2k','4k'],loopHours:['3','4','5','6','7','8','9','10']}[k]).map(v=><option key={v}>{v}</option>)}</select></label>)}
- <LoopDurationControls loopHours={nativeDraft.production?.loopHours??3} durationSummary="Target duration only; existing timeline slots are not rescaled in preview." onPreset={hours=>changeLoop('loopHours',String(hours))} onExact={value=>{const n=Number(value);if(Number.isInteger(n)&&n>=3&&n<=10)changeLoop('loopHours',value);}}/>
+ <LoopDurationControls loopHours={nativeDraft.production?.loopHours??3} durationSummary={nativeDraft.production?.timeline_slots?.length?'Calculated timeline: '+timelineDuration(nativeDraft.production.timeline_slots).toFixed(3)+' sec (excluding final black)':'No timeline slots yet; target only.'} onPreset={hours=>changeLoop('loopHours',String(hours))} onExact={value=>{const n=Number(value);if(Number.isInteger(n)&&n>=3&&n<=10)changeLoop('loopHours',value);}}/>
  <ScopedRenderSettings production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid render settings');}}}/>
  <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings');}}}/>
  </fieldset>}

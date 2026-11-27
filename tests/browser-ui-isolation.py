@@ -66,6 +66,8 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Add timeline slot").click()
     page.get_by_label("Slot title 1").fill("History slot")
     page.get_by_label("Slot filename 1").fill("scene.mp4")
+    page.get_by_role("button",name="Loop preset 5 hours").click()
+    expect(page.get_by_label("Slot duration 1")).to_have_value("18000")
     page.get_by_label("integrated_lufs").fill("-14.5")
     page.get_by_role("button",name="Save project").click()
     page.get_by_role("button",name="Open scoped Loop settings").click()

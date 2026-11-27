@@ -127,3 +127,18 @@ test('nonempty V8.1 scene, CTA, branding and locks survive project save and data
  expect((await restored.read({workspaceId:'the_whisker_trio',projectId:w.project.projectId})).payload).toEqual(emptyProjectPayload());
  }finally{s.close();}
 });
+
+import {synchronizeTimeline,timelineDuration} from '../src/utils/timelineSynchronization';
+import type {TimelineSlot} from '../src/App';
+test('timeline synchronization preserves references and achieves frame-aligned target',()=>{
+ const slot=(id:string):TimelineSlot=>({slot_index:1,slot_id:id,title:id,asset_id:id,file_name:id+'.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:100,inserts:[],slot_transition_out:{type:'xfade',duration_sec:1.5}});
+ const original=[slot('a'),{...slot('b'),slot_index:2,slot_transition_out:{type:'none' as const,duration_sec:0}}];
+ const next=synchronizeTimeline(original,6,24);
+ expect(timelineDuration(next)).toBeCloseTo(21600,8);
+ expect(next.map(s=>s.file_name)).toEqual(original.map(s=>s.file_name));
+ expect(next.map(s=>s.slot_transition_out)).toEqual(original.map(s=>s.slot_transition_out));
+ expect(original[0].slot_duration_sec).toBe(100);
+ expect(next.every(s=>Math.abs(s.slot_duration_sec*24-Math.round(s.slot_duration_sec*24))<1e-6)).toBe(true);
+ expect(()=>synchronizeTimeline(original,2,24)).toThrow();
+ expect(synchronizeTimeline([],3,24)).toEqual([]);
+});
