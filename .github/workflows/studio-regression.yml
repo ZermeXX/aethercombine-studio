@@ -17,6 +17,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - run: bun add --no-save --dev --exact fake-indexeddb@6.2.4
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
