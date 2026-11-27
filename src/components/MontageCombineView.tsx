@@ -435,6 +435,12 @@ function normalizeV8Export(settings: NarrativeExportSettings): NarrativeExportSe
     preview_duration_sec: Number.isFinite(settings.preview_duration_sec) ? Math.max(0, settings.preview_duration_sec ?? 0) : 0 };
 }
 
+// V8.0 and V8.1 share the full-manifest round-trip contract.
+export function isLosslessManifestImport(raw: Record<string, unknown>): boolean {
+  return ['8.0', '8.1'].includes(String(raw.manifest_version)) &&
+    Array.isArray(raw.timeline) && Array.isArray(raw.scenes);
+}
+
 type ManifestIssue = { severity: 'error' | 'warning'; message: string };
 
 // Preserve imported V8.1 JSON; apply only changes relative to the imported UI projection.
@@ -2209,7 +2215,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
         });
 
       if (parsedScenes.length > 0) {
-        roundTripRef.current = raw.manifest_version === '8.1' && Array.isArray(raw.timeline) && Array.isArray(raw.scenes) ? { original: JSON.parse(JSON.stringify(raw)) } : null;
+        roundTripRef.current = isLosslessManifestImport(raw) ? { original: JSON.parse(JSON.stringify(raw)) } : null;
         setNarrativeScenes(parsedScenes);
         setCustomScenesCountInput(parsedScenes.length);
         if (scrollContainerRef.current) {
@@ -3437,6 +3443,11 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Проверка и авто-нормализация пустых file_name (подстановка scene_001_vid.mp4) перед экспортом/отправкой
   const prepareValidatedManifestForOutput = (): NarrativeMontageManifest => {
+    const imported = roundTripRef.current;
+    if (imported) {
+      if (!imported.baseline) throw new Error('Imported manifest baseline is not ready; retry export.');
+      return mergeManifestRoundTrip(imported.original, imported.baseline, buildNormalizedManifestForScenes(narrativeScenes)) as NarrativeMontageManifest;
+    }
     let filledAny = false;
     const normalizedStateScenes = narrativeScenes.map((sc, idx) => {
       const fallbackName = `scene_${String(idx + 1).padStart(3, '0')}_vid.mp4`;
@@ -3468,8 +3479,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
     onNotify(formatScenesReadyLabel(normalizedStateScenes.length), 'success');
     const generated = buildNormalizedManifestForScenes(normalizedStateScenes);
-    const rt = roundTripRef.current;
-    return rt?.baseline ? mergeManifestRoundTrip(rt.original, rt.baseline, generated) as NarrativeMontageManifest : generated;
+    return generated;
   };
 
   // Полный JSON-манифест для N-сцен (схема 2.2-FINAL с одновременными scenes[] и timeline[])
