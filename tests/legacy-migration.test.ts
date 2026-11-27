@@ -137,3 +137,32 @@ test('combine settings and V21 locks survive migration and recovery',async()=>{
  expect(await s.getPayload('histoviva',copy.projectId)).toEqual(p);
  }finally{s.close();}
 });
+
+import {collectAssetNames,attachMigrationAsset,auditMigrationAssets} from '../src/utils/migrationAssets';
+test('completeness report counts omitted fields without revealing names or values',()=>{
+ const raw=JSON.stringify({...draft,combine:{project_name:'EP02',private_fixture_name:'private_fixture_value',v21_locks:{hardFrameLock:false,hidden_fixture:'secret_fixture'}}});
+ const p=previewLegacyDraft(raw,'histoviva');
+ expect(p.omitted).toContain('combine: 2 omitted or changed fields');
+ expect(JSON.stringify(p.omitted)).not.toContain('private_fixture');
+ expect(JSON.stringify(p.omitted)).not.toContain('secret_fixture');
+ expect(p.payload.legacyExtras?.combine?.v21_locks).toEqual({hardFrameLock:false});
+});
+test('referenced assets can be attached and checked without crossing workspace boundaries',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ const raw=JSON.stringify({...draft,combine:{narrative_scenes:[scene],master_audio:{file_name:'voice.wav',volume:1}}});
+ try{
+ const r=await migrateLegacyDraft(db,local(raw),'histoviva',true);
+ if(r.status==='missing')throw new Error('Missing');
+ const p=await s.getPayload('histoviva',r.projectId);
+ expect(collectAssetNames(p!)).toEqual(['scene.mp4','voice.wav']);
+ expect((await auditMigrationAssets(s,'histoviva',r.projectId)).map(a=>a.status)).toEqual(['unverified','unverified']);
+ await attachMigrationAsset(s,'histoviva',r.projectId,'scene.mp4',new Blob(['test media']));
+ const ref={name:'voice.wav',fileId:'fixtureFile123',folderId:'fixtureFolder123'};
+ expect((await auditMigrationAssets(s,'histoviva',r.projectId,[ref])).map(a=>a.status)).toEqual(['local_verified','external_unverified']);
+ expect((await auditMigrationAssets(s,'histoviva',r.projectId,[ref],async()=>false)).map(a=>a.status)).toEqual(['local_verified','missing']);
+ expect((await auditMigrationAssets(s,'histoviva',r.projectId,[ref],async()=>true)).map(a=>a.status)).toEqual(['local_verified','external_verified']);
+ await expect(attachMigrationAsset(s,'the_whisker_trio',r.projectId,'scene.mp4',new Blob(['x']))).rejects.toThrow();
+ await expect(attachMigrationAsset(s,'histoviva',r.projectId,'unknown.mp4',new Blob(['x']))).rejects.toThrow();
+ await expect(rollbackLegacyImport(db,'histoviva',r.projectId)).rejects.toThrow();
+ }finally{s.close();}
+});
