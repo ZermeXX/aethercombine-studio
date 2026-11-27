@@ -1,3 +1,4 @@
+import {IsolatedProjectEditor} from './design-system/IsolatedProjectEditor';
 /**
  @license
  SPDX-License-Identifier: Apache-2.0
@@ -478,7 +479,14 @@ const DEFAULT_SEAMLESS_ASYMMETRY: SeamlessAsymmetryConfig = {
   random_interval: [1200, 2400]
 };
 
-export default function App() {
+export default function App(){
+ // Do not unmount live legacy production state: isolated mode is only offered before mounting it.
+ const [mode,setMode]=useState<'choose'|'legacy'|'isolated'>(()=>new URLSearchParams(window.location.search).get('v9-project-preview')==='1'?'choose':'legacy');
+ if(mode==='choose')return <main className="mx-auto max-w-xl space-y-4 p-6 text-studio-text"><h1>AetherCombine Studio V9.0</h1><p>Choose legacy production or the isolated project editor preview. No automatic migration.</p><button type="button" onClick={()=>setMode('legacy')}>Open legacy Studio</button><button type="button" onClick={()=>setMode('isolated')}>Open isolated project editor</button></main>;
+ if(mode==='isolated')return <IsolatedProjectEditor onExit={()=>setMode('choose')}/>;
+ return <LegacyStudio/>;
+}
+function LegacyStudio() {
   const [bootSnapshot] = useState(() => {
     const googleAuth = loadGoogleAuthRecord();
     const restoredGoogleSession = getRestoredGoogleSession();
