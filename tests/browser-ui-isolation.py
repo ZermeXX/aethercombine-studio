@@ -4,6 +4,19 @@ with sync_playwright() as p:
     page = browser.new_page()
     page.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
     page.evaluate("""() => {localStorage.setItem('aether_workspace_draft','legacy-fixture');localStorage.setItem('ac_youtube_seo_state_v1','seo-fixture');}""")
+    # Audit storage calls made by application code, not fixture setup/assertions.
+    audit = """() => {
+      window.__storageAudit = [];
+      window.__auditEnabled = true;
+      for (const method of ['getItem','setItem','removeItem','clear','key']) {
+        const original = Storage.prototype[method];
+        Storage.prototype[method] = function(...args) {
+          if(window.__auditEnabled) window.__storageAudit.push({method,key:String(args[0]??''),area:this===sessionStorage?'session':'local'});
+          return original.apply(this,args);
+        };
+      }
+    }"""
+    page.evaluate(audit)
     page.get_by_role("button",name="Open isolated project editor").click()
     ws=page.get_by_label("Isolated workspace")
     name=page.get_by_label("New project name")
@@ -33,8 +46,8 @@ with sync_playwright() as p:
     expect(ws).to_have_value("histoviva")
     expect(script).to_have_value("History narration")
     expect(production).to_have_value('{"invalid":true}')
-    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
-    assert page.evaluate("localStorage.getItem('ac_youtube_seo_state_v1')")=="seo-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_workspace_draft')}finally{window.__auditEnabled=true}}")=="legacy-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_youtube_seo_state_v1')}finally{window.__auditEnabled=true}}")=="seo-fixture"
     production.fill('{"fps":24,"codec":"libx264","resolution":"4k","loopHours":6,"scenes":[]}')
     page.get_by_role("button",name="Open native VerbaFlow").click()
     native=page.get_by_role("group",name="Native VerbaFlow")
@@ -48,8 +61,8 @@ with sync_playwright() as p:
     expect(script).to_have_value("Ambient narration")
     ws.select_option("histoviva")
     expect(script).to_have_value("Native history narration")
-    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
-    assert page.evaluate("localStorage.getItem('ac_youtube_seo_state_v1')")=="seo-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_workspace_draft')}finally{window.__auditEnabled=true}}")=="legacy-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_youtube_seo_state_v1')}finally{window.__auditEnabled=true}}")=="seo-fixture"
     page.get_by_role("button",name="Open scoped Loop settings").click()
     expect(page.get_by_label("Loop loopHours")).to_have_value("6")
     page.get_by_role("button",name="Loop preset 10 hours").click()
@@ -83,7 +96,7 @@ with sync_playwright() as p:
     expect(page.get_by_text("scene.mp4: Attached (local)",exact=True)).to_be_visible()
     page.get_by_role("button",name="Open native Montage Combine").click()
     expect(page.get_by_role("group",name="Native Montage Combine")).to_be_visible()
-    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_workspace_draft')}finally{window.__auditEnabled=true}}")=="legacy-fixture"
     import base64
     page.get_by_role("button",name="Close native module").click()
     # Generate a valid PNG using Chromium's own encoder rather than a hardcoded fixture.
@@ -102,7 +115,7 @@ with sync_playwright() as p:
     expect(page.get_by_text("Native image saved: A",exact=True)).to_be_visible()
     page.get_by_label("Project image art",exact=True).set_input_files({"name":"art.png","mimeType":"image/png","buffer":png})
     expect(page.get_by_text("Project image saved: art",exact=True)).to_be_visible()
-    page.evaluate("""() => {localStorage.setItem('aether_voice_settings','voice-fixture');localStorage.setItem('favorite_voices','favorites-fixture');localStorage.setItem('aether_thumb_abc_slots_v2','thumb-fixture');}""")
+    page.evaluate("""() => {window.__auditEnabled=false;localStorage.setItem('aether_voice_settings','voice-fixture');localStorage.setItem('favorite_voices','favorites-fixture');localStorage.setItem('aether_thumb_abc_slots_v2','thumb-fixture');window.__auditEnabled=true;}""")
     page.get_by_role("button",name="Open native Voice Studio").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_be_visible()
     expect(page.get_by_placeholder("sk_... (введите ElevenLabs API Key #1)")).to_be_disabled()
@@ -111,7 +124,9 @@ with sync_playwright() as p:
     page.locator("#voice_gender_select").select_option("female")
     page.get_by_role("button",name="Save project").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_have_count(0)
+    assert page.evaluate('window.__storageAudit') == [], page.evaluate('window.__storageAudit')
     page.reload()
+    page.evaluate(audit)
     page.get_by_role("button",name="Open isolated project editor").click()
     expect(page.get_by_label("VerbaFlow script")).to_have_value("Native history narration")
     page.get_by_role("button",name="Open native Voice Studio").click()
@@ -119,12 +134,14 @@ with sync_playwright() as p:
     expect(page.locator("#voice_gender_select")).to_have_value("female")
     page.get_by_role("button",name="Open native Image Art Editor").click()
     expect(page.get_by_role("group",name="Native Image Art Editor")).to_be_visible()
-    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_workspace_draft')}finally{window.__auditEnabled=true}}")=="legacy-fixture"
     expect(page.get_by_alt_text("Stored project image art")).to_be_visible()
     page.get_by_role("button",name="Применить к Обложке A").click()
     expect(page.get_by_text("Native image saved: art, A",exact=True)).to_be_visible()
-    assert page.evaluate("localStorage.getItem('aether_voice_settings')")=="voice-fixture"
-    assert page.evaluate("localStorage.getItem('favorite_voices')")=="favorites-fixture"
-    assert page.evaluate("localStorage.getItem('aether_thumb_abc_slots_v2')")=="thumb-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_voice_settings')}finally{window.__auditEnabled=true}}")=="voice-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
+    assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
+    assert page.evaluate('window.__storageAudit') == [], page.evaluate('window.__storageAudit')
+    print('ISOLATED_STORAGE_ACCESS_PASS')
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

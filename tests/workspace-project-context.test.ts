@@ -142,3 +142,13 @@ test('timeline synchronization preserves references and achieves frame-aligned t
  expect(()=>synchronizeTimeline(original,2,24)).toThrow();
  expect(synchronizeTimeline([],3,24)).toEqual([]);
 });
+
+test('timeline shortening rejects insert truncation and preserves original slot',()=>{
+ const slot:TimelineSlot={slot_index:1,slot_id:'long',title:'Long',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:20000,inserts:[{insert_id:'insert-1',asset_id:'cutaway',file_name:'insert.mp4',trigger_at_sec:12000,duration_sec:20,transition_in:{type:'fade',duration_sec:1},transition_out:{type:'fade',duration_sec:1}}],slot_transition_out:{type:'none',duration_sec:0}};
+ const before=structuredClone(slot);
+ expect(()=>synchronizeTimeline([slot],3,24)).toThrow();
+ expect(slot).toEqual(before);
+ const next=synchronizeTimeline([slot],6,24);
+ expect(next[0].inserts).toEqual(before.inserts);
+ expect(next[0].slot_duration_sec).toBe(21600);
+});
