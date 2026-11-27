@@ -50,6 +50,7 @@ export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceI
   marker.onsuccess=()=>{try{
    const previous=marker.result;
    if(previous){
+    if(previous.status==='rolled_back')throw new Error('Import rolled back; explicit recovery required');
     if(previous.workspaceId!==workspaceId||previous.digest!==digest)throw new Error('Legacy import already exists; manual review required');
     const check=projects.get(previous.projectId);
     check.onsuccess=()=>{try{const p=projectMetadata(check.result);if(p.workspaceId!==workspaceId)throw new Error('Migration ownership mismatch');result={status:'already_imported',projectId:p.projectId,workspaceId};}catch(e){fail(e);}};
@@ -60,6 +61,44 @@ export async function migrateLegacyDraft(db:IDBDatabase,local:Storage,workspaceI
    meta.add({key:MARKER,projectId:project.projectId,workspaceId,digest,status:'imported_partial'});
    const check=projects.get(project.projectId);
    check.onsuccess=()=>{try{if(projectMetadata(check.result).projectId!==project.projectId||JSON.stringify(projectPayload(check.result.payload))!==JSON.stringify(payload))throw new Error('Migration read-back mismatch');result={status:'imported_partial',projectId:project.projectId,workspaceId};}catch(e){fail(e);}};
+  }catch(e){fail(e);}};
+ });
+}
+
+// Recovery is deliberately non-destructive: original backup and imported project remain.
+export async function restoreMigrationBackup(db:IDBDatabase,workspaceId:WorkspaceId):Promise<ProjectRecord>{
+ const backup=await new Promise<any>((resolve,reject)=>{
+  const tx=db.transaction('migration_backups','readonly');const req=tx.objectStore('migration_backups').get(MARKER);
+  tx.oncomplete=()=>resolve(req.result);tx.onabort=()=>reject(tx.error);
+ });
+ if(!backup||backup.workspaceId!==workspaceId)throw new Error('Backup unavailable');
+ const payload=projectPayload(backup.payload);
+ const name=string(backup.name);
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify({name,payload})))),b=>b.toString(16).padStart(2,'0')).join('');
+ if(digest!==backup.digest)throw new Error('Backup checksum mismatch');
+ const scan=(x:unknown):void=>{if(typeof x==='string')string(x);else if(x&&typeof x==='object')Object.values(x).forEach(scan);};scan(payload);
+ const project=createProject(workspaceId,name+' (Recovered)');
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('projects','readwrite');
+  tx.oncomplete=()=>resolve(project);tx.onabort=()=>reject(tx.error);
+  tx.objectStore('projects').add({...project,payload});
+ });
+}
+// Rollback only unmodified, inactive imports with no associated assets or history.
+// Retain the backup and marker so the operation cannot silently reimport.
+export function rollbackLegacyImport(db:IDBDatabase,workspaceId:WorkspaceId,projectId:string):Promise<void>{
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(['metadata','projects','workspace_state','project_assets','project_revisions','migration_backups'],'readwrite');
+  let error:unknown;tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error??tx.error);
+  const fail=(e:unknown)=>{error=e;tx.abort();};
+  const meta=tx.objectStore('metadata'),projects=tx.objectStore('projects');
+  const requests=[meta.get(MARKER),projects.get(projectId),tx.objectStore('workspace_state').get(workspaceId),tx.objectStore('project_assets').index('projectId').count(projectId),tx.objectStore('project_revisions').index('projectId').count(projectId),tx.objectStore('migration_backups').get(MARKER)];
+  let pending=requests.length;
+  for(const request of requests)request.onsuccess=()=>{if(--pending!==0)return;try{
+   const [marker,record,active,assets,revisions,backup]=requests.map(r=>r.result);
+   const p=projectMetadata(record);
+   if(!marker||marker.status!=='imported_partial'||marker.workspaceId!==workspaceId||marker.projectId!==projectId||p.workspaceId!==workspaceId||p.revision!==1||active?.projectId===projectId||assets||revisions||!backup||backup.projectId!==projectId||backup.workspaceId!==workspaceId||backup.digest!==marker.digest||backup.name!==p.name||JSON.stringify(projectPayload(record.payload))!==JSON.stringify(projectPayload(backup.payload)))throw new Error('Rollback unsafe; preserve project');
+   projects.delete(projectId);meta.put({...marker,status:'rolled_back'});
   }catch(e){fail(e);}};
  });
 }
