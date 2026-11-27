@@ -1,3 +1,4 @@
+import { projectPayload, type ProjectPayload } from './projectPayload';
 import { projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
 import { isWorkspaceId, type WorkspaceId } from '../design-system/workspaces';
 export const DATABASE_NAME='aether_studio_v9';
@@ -53,16 +54,25 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{done(r.result.map(projectMetadata));}catch(e){fail(e);}};
   });
  }
- saveProject(input:ProjectRecord,expectedRevision:number):Promise<ProjectRecord>{
+ saveProject(input:ProjectRecord,expectedRevision:number,payload?:ProjectPayload):Promise<ProjectRecord>{
   const p=projectMetadata(input);
+  const content=payload===undefined?undefined:projectPayload(payload);
   return transaction(this.db,['projects','project_revisions'],'readwrite',(tx,done,fail)=>{
    const s=tx.objectStore('projects');const r=s.get(p.projectId);
    r.onsuccess=()=>{try{
     const old=projectMetadata(r.result);
     if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt)throw new Error('Ownership or revision conflict');
     const next=projectMetadata({...p,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
-    tx.objectStore('project_revisions').add(old);s.put(next);done(next);
+    const previous=r.result.payload===undefined?undefined:projectPayload(r.result.payload);
+    tx.objectStore('project_revisions').add({...old,...(previous===undefined?{}:{payload:previous})});
+    const current=content??previous;s.put({...next,...(current===undefined?{}:{payload:current})});done(next);
    }catch(e){fail(e);}};
+  });
+ }
+ getPayload(workspaceId:WorkspaceId,projectId:string):Promise<ProjectPayload|null>{
+  return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{done(r.result?.workspaceId===workspaceId&&r.result.payload!==undefined?projectPayload(r.result.payload):null);}catch(e){fail(e);}};
   });
  }
  setActiveProject(workspaceId:WorkspaceId,projectId:string):Promise<void>{
