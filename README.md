@@ -1,21 +1,59 @@
 <div align="center">
 
 # AETHERCOMBINE STUDIO
-### V8.1 · Cloud Production Control Center
+### V9.0 · Cloud Production Control Center
+**V8.1 Rendering Contract · V9.0 Studio Foundation**
 
 **Облачная студия 4K-продакшна для YouTube — от сценария до готового мастера на Google Drive**
 
-[![Version](https://img.shields.io/badge/Studio-V8.1-06B6D4?style=for-the-badge)](#)
+[![Studio](https://img.shields.io/badge/Studio-V9.0%20Foundation-22D3EE?style=for-the-badge)](#)
+[![Regression](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/studio-regression.yml/badge.svg?branch=main)](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/studio-regression.yml)
 [![Deploy](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ZermeXX/aethercombine-studio/actions/workflows/deploy.yml)
 [![Live](https://img.shields.io/badge/Live-GitHub%20Pages-2ea44f?logo=githubpages&logoColor=white)](https://zermexx.github.io/aethercombine-studio/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-96%25-3178C6?logo=typescript&logoColor=white)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](#)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](#)
 [![Vite](https://img.shields.io/badge/Vite-Bun-646CFF?logo=vite&logoColor=white)](#)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](#лицензия)
 
 [**🌐 Открыть студию**](https://zermexx.github.io/aethercombine-studio/) · [**⚙️ Репозиторий раннера**](https://github.com/ZermeXX/aetherflow-render) · [**📋 Задачи для агента**](tasks/)
 
 </div>
+
+---
+
+## Статус проекта
+
+| Контур | Состояние на 27 ноября 2026 |
+|---|---|
+| **Studio main** | V9.0 design system, профили каналов, реестр проектов, IndexedDB и safe migration foundation |
+| **Production rendering** | Стабильный контракт Renderer V8.1 |
+| **Workspace isolation** | Экспериментальная интеграция в [Draft PR #3](https://github.com/ZermeXX/aethercombine-studio/pull/3), не выпущена в main |
+| **Контроль CI** | [Main regression #56](https://github.com/ZermeXX/aethercombine-studio/actions/runs/46067164320) · [PR regression #80](https://github.com/ZermeXX/aethercombine-studio/actions/runs/46084511728): 109 тестов, 0 ошибок |
+
+### Два канала — одна производственная платформа
+
+| | HISTOVIVA | The Whisker Trio |
+|---|---|---|
+| Направление | Исторические документальные фильмы | Cozy ambience / cinematic loops |
+| Основной модуль | Montage Combine | Loop Builder |
+| Формат | 4K · 24 FPS · English | 4K · 24 FPS · English · 3–10 часов |
+| Акцент интерфейса | Gold `#D4A64E` | Warm gold `#D6A477` |
+
+> [!IMPORTANT]
+> Профили каналов уже существуют в main, но полноценная изоляция производственного UI пока находится в PR #3. Не следует использовать экспериментальный редактор для незаменимых рабочих данных. Внешний рендер в нём отключён.
+
+<details>
+<summary><b>V9.0 — что проверено в PR #3</b></summary>
+
+- Проектный контекст, переключение и восстановление данных через IndexedDB.
+- Native previews для VerbaFlow, SEO, Montage, Thumbnail, Voice и Art Editor.
+- Бинарные изображения A/B/C, растровый Art round-trip, синхронизация Timeline по кадрам.
+- Строгий аудит контролируемых Storage API, включая cold start.
+- Миграция искусственных legacy credentials при запуске Legacy Studio.
+
+Открытые критерии: полный Loop Builder, оставшиеся графические операции, конкурентные стресс-тесты, реальная OAuth-авторизация Google Drive и финальная приёмка PR.
+
+</details>
 
 ---
 
@@ -51,19 +89,19 @@ flowchart LR
 
 > QC-индикаторы не заменяют режиссёрскую приёмку. Lossless-экспорт сохраняет исходную версию манифеста; миграция версии — отдельная операция.
 
-### HISTOVIVA EP02 · контрольный Preview #35
+### HISTOVIVA EP02 · контрольный Master / Run #41
 
 | Сцены | Хронометраж | Кадры | A/V delta | LUFS | True Peak |
 |---:|---:|---:|---:|---:|---:|
 | 34 | 05:04.500 | 7308/7308 | 0 ms | −14.15 | −1.41 dBTP |
 
-Технический QC пройден; финальная коррекция громкости CTA и приёмка 4K Master ещё впереди.
+Исторический эталон: 3840×2160, 24 FPS, 304.500 с. Director Acceptance PASS по отчёту проекта. Измеренный True Peak на 0.09 dB выше целевого −1.5 dBTP. Исходные производственные файлы впоследствии удалены владельцем; повторный рендер не выполнялся.
 
 ---
 
 ## ✨ Что это
 
-**AetherCombine Studio** — браузерный комбайн для производства двух форматов видео под канал [@Histoviva](https://youtube.com/@Histoviva):
+**AetherCombine Studio** — браузерный комбайн для производства двух форматов видео для HISTOVIVA и The Whisker Trio:
 
 - 🏛️ **Документальные фильмы** (~8–16 мин, 100–200+ сцен) — покадровый таймлайн, дикторская озвучка, lower-thirds, субтитры.
 - 🌙 **Многочасовые ambience-лупы** (3–10 ч, 4K) — бесшовные петли, кроссфейды актов, асимметричные врезки, loudnorm.
@@ -117,15 +155,15 @@ flowchart LR
 git clone https://github.com/ZermeXX/aethercombine-studio.git
 cd aethercombine-studio
 
-bun install          # или npm install
-bun run dev          # → http://localhost:5173
+bun install --frozen-lockfile
+bun run dev:static   # Vite dev server; адрес выводится в терминале
 ```
 
 Сборка и проверка типов:
 
 ```bash
 bun run typecheck
-bun test tests/manifest-v8.test.ts tests/manifest-v81.test.ts tests/manifest-roundtrip.test.ts
+bun test
 bun run build
 bun run preview
 ```
@@ -133,7 +171,7 @@ bun run preview
 <details>
 <summary><b>🔧 Требования</b></summary>
 
-- [Bun](https://bun.sh) ≥ 1.1 (или Node.js ≥ 20 + npm)
+- [Bun](https://bun.sh) (актуальная версия, как в CI)
 - Аккаунт Google с доступом к Drive API
 - Fine-grained GitHub PAT с правами **Actions: Read and write** на репозиторий раннера
 - Настроенные Secrets в `aetherflow-render` (см. ниже)
@@ -165,24 +203,24 @@ TELEGRAM_BOT_TOKEN     # опционально
 TELEGRAM_CHAT_ID
 ```
 
-> 🛡️ **Приватный ключ Service Account никогда не попадает в браузер.** Он живёт только в GitHub Secrets и используется раннером.
+> 🛡️ **Приватный ключ Service Account не должен попадать в браузер.** Он живёт только в GitHub Secrets и используется раннером.
 
 ---
 
 ## 🛡️ Безопасность
 
 - ✅ OAuth-токен Google и GitHub PAT — **только `sessionStorage`**, стираются при закрытии вкладки
-- ✅ Legacy-ключи автоматически мигрируют из `localStorage` и удаляются оттуда
+- ✅ Поддерживаемые legacy-секреты мигрируют в `sessionStorage`; неподдерживаемый Service Account требует явного удаления владельцем
 - ✅ `sanitizeLogText()` маскирует токены в терминале, в «Копировать лог» и в персисте джобы
 - ✅ Манифест перед отправкой очищается от полей `bot_token`, `pat`, `access_token`, `private_key`, …
 - ✅ Preflight-гейт: запуск и копирование `filter_complex` заблокированы при пустых `file_name`
 
-Проверка в консоли браузера (должно вернуть `[]`):
+Диагностическая проверка в консоли браузера (возвращает только имена подозрительных ключей, не значения):
 
 ```js
-Object.entries(localStorage).filter(([k, v]) =>
-  /ya29\.|access_token|github_pat_|ghp_|bot_token|api_token|private_key/i.test(k + v)
-)
+Object.entries(localStorage)
+  .filter(([k, v]) => /ya29\.|access_token|github_pat_|ghp_|bot_token|api_token|private_key/i.test(k + v))
+  .map(([k]) => k)
 ```
 
 ---
@@ -193,8 +231,10 @@ Object.entries(localStorage).filter(([k, v]) =>
 aethercombine-studio/
 ├── .github/workflows/
 │   ├── deploy.yml           # сборка + деплой на GitHub Pages
+│   ├── studio-regression.yml # TypeScript, Bun, build, browser storage
 │   └── ai-fix-web.yml       # Gemini-агент → автоматический PR
 ├── src/
+│   ├── design-system/       # токены, оболочка, workspace / project registry
 │   ├── components/          # цеха студии, терминал, шейдерный фон
 │   ├── utils/
 │   │   ├── aetherPersistence.ts    # профиль в localStorage, токены в sessionStorage
@@ -217,6 +257,7 @@ aethercombine-studio/
 
 | Workflow | Триггер | Что делает |
 |---|---|---|
+| **Studio Regression** | push / PR в `main`, вручную | frozen lockfile → typecheck → все Bun tests → build → Chromium IndexedDB |
 | **Deploy** | push в `main` | `bun install` → typecheck → manifest tests → build → публикация на GitHub Pages |
 | **AI Fix Web** | ручной `workflow_dispatch` | Gemini CLI читает `tasks/*.md`, правит код, гоняет typecheck + build, открывает PR |
 
@@ -234,15 +275,22 @@ aethercombine-studio/
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap · V9.0
 
-- [x] **P0** — бесшовный loop-baker, честные кроссфейды актов, stream-upload, санитайз секретов, preflight-гейт, 20 бейджей, End Screen от реальной длительности
-- [ ] **P1** — единый store манифеста, waveform мастер-аудио, ассет-браузер Drive, дальнейшая оптимизация больших таймлайнов
-- [ ] **P2** — иконки вместо эмодзи, i18n, blind A/B-тест обложек, ONNX-сегментация для удаления фона
+| Этап | Статус |
+|---|---|
+| 010.1 — V8.1 Baseline & Regression Protection | CI accepted |
+| 010.2–010.5 — Design tokens, components, shell, workspace profiles | Реализовано в main |
+| 010.6 — Project Context & Persistence | Foundation в main; isolation в Draft PR #3 |
+| 010.7 — Storage Profile Foundation | План |
+| 010.8 — Global Render Manager | План |
+| 010.9–010.12 — Safety, accessibility, integration, acceptance | План |
+
+Эталонная ветка: [baseline/v8.1](https://github.com/ZermeXX/aethercombine-studio/tree/baseline/v8.1). Не является защищённой веткой автоматически.
 
 ---
 
-## 📄 Лицензия
+## Лицензия
 
 Распространяется под лицензией **Apache 2.0**. См. заголовки `SPDX-License-Identifier: Apache-2.0` в исходниках.
 
