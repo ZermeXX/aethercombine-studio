@@ -35,5 +35,20 @@ with sync_playwright() as p:
     expect(production).to_have_value('{"invalid":true}')
     assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
     assert page.evaluate("localStorage.getItem('ac_youtube_seo_state_v1')")=="seo-fixture"
+    production.fill('{"fps":24,"codec":"libx264","resolution":"4k","loopHours":6,"scenes":[]}')
+    page.get_by_role("button",name="Open native VerbaFlow").click()
+    native=page.get_by_role("group",name="Native VerbaFlow")
+    expect(native).to_be_visible()
+    source=native.locator('textarea').first
+    expect(source).to_have_value("History narration")
+    source.fill("Native history narration")
+    page.get_by_role("button",name="Open native YouTube SEO").click()
+    expect(page.get_by_role("group",name="Native YouTube SEO")).to_be_visible()
+    ws.select_option("the_whisker_trio")
+    expect(script).to_have_value("Ambient narration")
+    ws.select_option("histoviva")
+    expect(script).to_have_value("Native history narration")
+    assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
+    assert page.evaluate("localStorage.getItem('ac_youtube_seo_state_v1')")=="seo-fixture"
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

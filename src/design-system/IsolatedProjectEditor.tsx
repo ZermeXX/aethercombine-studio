@@ -1,3 +1,10 @@
+import {VerbaFlowTextWorkbench} from '../components/VerbaFlowTextWorkbench';
+import {YouTubeSeoView} from '../components/YouTubeSeoView';
+import {createDefaultYoutubeSeoState,type YoutubeSeoState} from '../utils/englishExport';
+import type {NarrativeSceneItem} from '../components/MontageCombineView';
+import {applyModulePatch} from '../utils/scopedModulePersistence';
+import type {ProjectPayload} from '../utils/projectPayload';
+import type {SetStateAction} from 'react';
 import {projectPayload} from '../utils/projectPayload';
 import {useEffect,useRef,useState} from 'react';
 import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
@@ -22,10 +29,13 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [badge,setBadge]=useState('');
  const [production,setProduction]=useState('');
  const [extras,setExtras]=useState('');
+ const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'>('none');
+ const [notice,setNotice]=useState('');
  const [dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
+  setNativeTab('none');setNotice('');
   setProduction(snapshot?.payload?.production===undefined?'':JSON.stringify(snapshot.payload.production,null,2));setExtras(snapshot?.payload?.legacyExtras===undefined?'':JSON.stringify(snapshot.payload.legacyExtras,null,2));
   setActive(snapshot);setScript(snapshot?.payload?.script??'');setChapters(snapshot?.payload?.chapters??'');setSeo(snapshot?.payload?.seoScript??'');setTitle(snapshot?.payload?.thumbnailTitle??'');setBadge(snapshot?.payload?.thumbnailBadge??'');setDirty(false);
  }
@@ -79,10 +89,36 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  async function create(){
   await run(async c=>{await save(c);const next=await c.create(workspace,name);const selected=await c.select({workspaceId:workspace,projectId:next.project.projectId});setProjects(await c.openWorkspace(workspace).then(x=>x.projects));hydrate(selected);setName('');});
  }
- const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={busy||!active?.payload} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
+ // Native components use the same draft as the JSON editor, never global LocalStorage.
+ function currentDraft():ProjectPayload{
+  if(!active?.payload)throw new Error('No project');
+  return projectPayload({...active.payload,script,chapters,seoScript:seo,thumbnailTitle:title,thumbnailBadge:badge,production:production.trim()?JSON.parse(production):undefined,legacyExtras:extras.trim()?JSON.parse(extras):undefined});
+ }
+ function openNative(tab:'verbaflow'|'seo'){
+  // Save and validate advanced JSON before mounting a native component.
+  void run(async c=>{await save(c);setNativeTab(tab);});
+ }
+ function transferScenes(scenes:NarrativeSceneItem[],fullScript:string){
+  try{
+   const draft=currentDraft();
+   const next=applyModulePatch(draft,{module:'combine',narrativeScenes:scenes});
+   setProduction(JSON.stringify(next.production,null,2));setScript(fullScript);setSeo(fullScript);setDirty(true);setNotice('Scenes copied to current project draft.');
+  }catch{setNotice('Scene transfer rejected: unsupported scene data. Existing draft retained.');}
+ }
+ function updateNativeSeo(action:SetStateAction<YoutubeSeoState>){
+  try{
+   const draft=currentDraft();
+   const previous=(draft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient');
+   const next=typeof action==='function'?action(previous):action;
+   const projected=applyModulePatch(draft,{module:'seo',seoScript:seo,seo:next});
+   setExtras(JSON.stringify(projected.legacyExtras,null,2));setDirty(true);
+  }catch{setNotice('SEO update rejected. Existing draft retained.');}
+ }
+ const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
+ const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
  <h1 className="text-xl font-semibold">V9 Isolated Project Editor · Preview</h1>
- <p>Text and validated production settings are editable here. Legacy production modules, rendering and credentials are not mounted.</p>
+ <p>Text, validated production settings, native VerbaFlow and YouTube SEO are available. Other legacy production modules, rendering and credentials are not mounted.</p>
  <button type="button" disabled={busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
  <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -90,6 +126,18 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <label>New project name<input aria-label="New project name" value={name} disabled={!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
  <button type="button" disabled={!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
+ <div className="flex gap-2">
+ <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
+ <button type="button" disabled={busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
+ <button type="button" onClick={()=>setNativeTab('none')} disabled={busy||nativeTab==='none'}>Close native module</button>
+ </div>
+ {notice&&<p>{notice}</p>}
+ {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
+ <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
+ </fieldset>}
+ {nativeDraft&&nativeTab==='seo'&&<fieldset disabled={busy} key={active?.project.projectId+':seo'} aria-label="Native YouTube SEO">
+ <YouTubeSeoView projectName={active?.project.name??''} scriptContext={seo||script} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} loopSlots={nativeDraft.production?.timeline_slots??[]} externalChaptersTxt={chapters} onClearExternalChapters={()=>{setChapters('');setDirty(true);}} seoState={(nativeDraft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient')} onSeoStateChange={updateNativeSeo} onApplyTitleToThumbnail={v=>{setTitle(v);setDirty(true);}} onNotify={setNotice}/>
+ </fieldset>}
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
  <button type="button" disabled={!dirty||busy||!active?.payload} onClick={()=>void run(save)}>Save project</button>
