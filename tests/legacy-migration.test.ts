@@ -59,3 +59,17 @@ test('migration transaction conflict rolls back all new records',async()=>{
  expect(await s.listProjects('histoviva')).toEqual([]);
  }finally{s.close();}
 });
+
+const scene={scene_index:1,scene_id:'s1',file_name:'scene.mp4',start_time:0,duration:8,text_overlay:'Upano',camera_policy:'cinematic',video_duration_mode:'hybrid',allow_video_reuse:false,transition:{type:'fade',duration_sec:0.5},brand_identity_visible:true,cta_config:{enabled:true,style:'subscribe_bell',show_sec:[1,7],click_sec:3,bell_sec:5,sfx_enabled:true,sfx_volume:1},audio_processing:{video_ambient_mute:false,sfx_gain_db:1},subtitles:{en:'Hello',ru:'Привет'},historical_location:'Upano Valley'};
+test('narrative scene migration preserves supported fields and drops unknown properties',async()=>{
+ const db=await openProjectDatabase(new IDBFactory()),s=new ProjectStorage(db);
+ const raw=JSON.stringify({...draft,combine:{narrative_scenes:[{...scene,apiKey:'fixture-only',audio_processing:{...scene.audio_processing,token:'fixture-only'}}]}});
+ try{
+ const result=await migrateLegacyDraft(db,local(raw),'histoviva',true);
+ if(result.status==='missing')throw new Error('Missing');
+ expect((await s.getPayload('histoviva',result.projectId))?.production?.narrative_scenes).toEqual([scene]);
+ const recovered=await restoreMigrationBackup(db,'histoviva');
+ expect((await s.getPayload('histoviva',recovered.projectId))?.production?.narrative_scenes).toEqual([scene]);
+ expect(()=>previewLegacyDraft(JSON.stringify({...draft,combine:{narrative_scenes:[scene,scene]}}),'histoviva')).toThrow();
+ }finally{s.close();}
+});
