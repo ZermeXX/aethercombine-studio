@@ -35,16 +35,19 @@ async function main(){
  if(duplicate.status!=='already_imported'||duplicate.projectId!==result.projectId)throw new Error('Duplicate guard failed');
  const copy=await restoreMigrationBackup(db,'histoviva');
  if(JSON.stringify(await migrationStorage.getPayload('histoviva',copy.projectId))!==JSON.stringify(content))throw new Error('Recovery mismatch');
- await rollbackLegacyImport(db,'histoviva',result.projectId);
- if(await migrationStorage.getProject('histoviva',result.projectId)!==null||localStorage.getItem(LEGACY_DRAFT_KEY)!==raw)throw new Error('Rollback failed');
- await attachMigrationAsset(migrationStorage,'histoviva',copy.projectId,'scene.mp4',new Blob(['fixture media']));
- await persistExternalAssetReferences(db,'histoviva',copy.projectId,[{name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'}]);
+ await attachMigrationAsset(migrationStorage,'histoviva',result.projectId,'scene.mp4',new Blob(['fixture media']));
+ await persistExternalAssetReferences(db,'histoviva',result.projectId,[{name:'scene.mp4',fileId:'fixtureFile123',folderId:'fixtureFolder123'}]);
+ const assetCopy=await restoreMigrationBackup(db,'histoviva');
+ let refused=false;try{await rollbackLegacyImport(db,'histoviva',result.projectId);}catch{refused=true;}
+ if(!refused||!await migrationStorage.getProject('histoviva',result.projectId)||localStorage.getItem(LEGACY_DRAFT_KEY)!==raw)throw new Error('Unsafe rollback protection failed');
  const reopen=await openProjectDatabase();const reopened=new ProjectStorage(reopen);
  try{
- const refs=await readExternalAssetReferences(reopen,'histoviva',copy.projectId);
+ const refs=await readExternalAssetReferences(reopen,'histoviva',assetCopy.projectId);
  if(refs.length!==1||refs[0].fileId!=='fixtureFile123')throw new Error('Registry persistence failed');
- if((await readExternalAssetReferences(reopen,'the_whisker_trio',copy.projectId)).length)throw new Error('Registry isolation failed');
- if((await auditMigrationAssets(reopened,'histoviva',copy.projectId,refs))[0]?.status!=='local_verified')throw new Error('Binary attachment verification failed');
+ if((await readExternalAssetReferences(reopen,'the_whisker_trio',assetCopy.projectId)).length)throw new Error('Registry isolation failed');
+ if((await auditMigrationAssets(reopened,'histoviva',assetCopy.projectId,refs))[0]?.status!=='local_verified')throw new Error('Binary attachment verification failed');
+ const asset=await reopened.getAsset('histoviva',assetCopy.projectId,'legacy-file:scene.mp4');
+ if(!asset||await asset.blob.text()!=='fixture media')throw new Error('Recovered binary mismatch');
  }finally{reopened.close();}
  console.log('BROWSER_MIGRATION_PASS');
  }finally{migrationStorage.close();}
