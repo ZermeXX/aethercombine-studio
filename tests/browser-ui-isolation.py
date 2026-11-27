@@ -79,7 +79,9 @@ with sync_playwright() as p:
     assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
     import base64
     page.get_by_role("button",name="Close native module").click()
-    png=base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=")
+    # Generate a valid PNG using Chromium's own encoder rather than a hardcoded fixture.
+    png=base64.b64decode(page.evaluate("""() => {const c=document.createElement('canvas');c.width=16;c.height=16;const ctx=c.getContext('2d');ctx.fillStyle='#d4a64e';ctx.fillRect(0,0,16,16);return c.toDataURL('image/png').split(',')[1];}"""))
+    expect(page.get_by_label("Project image A",exact=True)).to_be_enabled()
     page.get_by_label("Project image A",exact=True).set_input_files({"name":"cover.png","mimeType":"image/png","buffer":png})
     expect(page.get_by_text("Project image saved: A",exact=True)).to_be_visible()
     expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
