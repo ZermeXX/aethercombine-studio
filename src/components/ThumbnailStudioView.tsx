@@ -32,6 +32,7 @@ declare global {
 
 interface ThumbnailStudioViewProps {
   isolatedEditing?: boolean;
+  onProjectImageFile?: (slot:ThumbnailSlotId,file:File)=>void;
   projectImageUrls?: Partial<Record<ThumbnailSlotId,string>>;
   initialSlots?: Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
   onSlotsChange?: (slots: Record<ThumbnailSlotId, ThumbnailSlotConfig>) => void;
@@ -987,6 +988,7 @@ const computeEndScreenWindow = (durationSec: number): string => {
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   isolatedEditing = false,
   projectImageUrls,
+  onProjectImageFile,
   initialSlots,
   onSlotsChange,
   thumbTitle,
@@ -2195,6 +2197,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if(isolatedEditing&&onProjectImageFile){e.target.value='';onProjectImageFile(slot,file);return;}
     const reader = new FileReader();
     reader.onload = ev => {
       const result = ev.target?.result;
@@ -3083,7 +3086,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
               <input
                 type="file"
                 accept="image/*"
-                onChange={e => handleLoadImageForSlot(e, activeSlot)}
+                aria-label="Native thumbnail background" onChange={e => handleLoadImageForSlot(e, activeSlot)}
                 className="w-full text-xs text-white/60 file:mr-3 file:min-h-[36px] file:py-1.5 file:px-3 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-[#111827] file:text-amber-300 hover:file:bg-white/[0.1] cursor-pointer"
               />
             </div>

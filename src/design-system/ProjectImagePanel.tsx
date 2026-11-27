@@ -3,21 +3,21 @@ import type {ProjectStorage} from '../utils/projectStorage';
 import type {ProjectScope} from '../utils/workspaceProjectContext';
 export type ImageSlot='A'|'B'|'C'|'art';
 export type ProjectImageUrls=Partial<Record<ImageSlot,string>>;
-export function ProjectImagePanel({storage,scope,onUrls,onBusy,busy}:{storage:ProjectStorage;scope:ProjectScope;onUrls:(urls:ProjectImageUrls)=>void;onBusy:(busy:boolean)=>void;busy:boolean}){
+export function ProjectImagePanel({storage,scope,onUrls,onBusy,busy,refresh=0}:{storage:ProjectStorage;scope:ProjectScope;onUrls:(urls:ProjectImageUrls)=>void;onBusy:(busy:boolean)=>void;busy:boolean;refresh?:number}){
  const [urls,setUrls]=useState<ProjectImageUrls>({});
  const [message,setMessage]=useState('');
  const [loading,setLoading]=useState(true);
  const owned=useRef<ProjectImageUrls>({});
  const live=useRef(false);
  useEffect(()=>{
-  live.current=true;setLoading(true);
+  live.current=true;let cancelled=false;setLoading(true);
   void (async()=>{const next:ProjectImageUrls={};try{
    for(const slot of ['A','B','C','art'] as const){const asset=await storage.getAsset(scope.workspaceId,scope.projectId,'project-image:'+slot);if(asset)next[slot]=URL.createObjectURL(asset.blob);}
-   if(!live.current){Object.values(next).forEach(URL.revokeObjectURL);return;}
+   if(cancelled){Object.values(next).forEach(URL.revokeObjectURL);return;}
    owned.current=next;setUrls(next);onUrls(next);
-  }catch{Object.values(next).forEach(URL.revokeObjectURL);if(live.current)setMessage('Image recovery failed');}finally{if(live.current)setLoading(false);}})();
-  return()=>{live.current=false;Object.values(owned.current).forEach(URL.revokeObjectURL);owned.current={};};
- },[storage,scope.workspaceId,scope.projectId]);
+  }catch{Object.values(next).forEach(URL.revokeObjectURL);if(!cancelled)setMessage('Image recovery failed');}finally{if(!cancelled)setLoading(false);}})();
+  return()=>{cancelled=true;live.current=false;Object.values(owned.current).forEach(URL.revokeObjectURL);owned.current={};};
+ },[storage,scope.workspaceId,scope.projectId,refresh]);
  async function attach(slot:ImageSlot,file:File){
   onBusy(true);setMessage('');
   try{

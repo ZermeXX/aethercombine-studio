@@ -91,10 +91,23 @@ with sync_playwright() as p:
     expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
     page.get_by_role("button",name="Open native Thumbnail Studio").click()
     expect(page.get_by_role("group",name="Native Thumbnail Studio")).to_be_visible()
+    page.get_by_label("Native thumbnail background").set_input_files({"name":"native.png","mimeType":"image/png","buffer":png})
+    expect(page.get_by_text("Native image saved: A",exact=True)).to_be_visible()
+    page.get_by_label("Project image art",exact=True).set_input_files({"name":"art.png","mimeType":"image/png","buffer":png})
+    expect(page.get_by_text("Project image saved: art",exact=True)).to_be_visible()
+    page.evaluate("""() => {localStorage.setItem('aether_voice_settings','voice-fixture');localStorage.setItem('favorite_voices','favorites-fixture');localStorage.setItem('aether_thumb_abc_slots_v2','thumb-fixture');}""")
     page.get_by_role("button",name="Open native Voice Studio").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_be_visible()
+    expect(page.get_by_placeholder("sk_... (введите ElevenLabs API Key #1)")).to_be_disabled()
+    expect(page.get_by_placeholder("sk_... (введите ElevenLabs API Key #2)")).to_be_disabled()
     page.get_by_role("button",name="Open native Image Art Editor").click()
     expect(page.get_by_role("group",name="Native Image Art Editor")).to_be_visible()
     assert page.evaluate("localStorage.getItem('aether_workspace_draft')")=="legacy-fixture"
+    expect(page.get_by_alt_text("Stored project image art")).to_be_visible()
+    page.get_by_role("button",name="Применить к Обложке A").click()
+    expect(page.get_by_text("Native image saved: art, A",exact=True)).to_be_visible()
+    assert page.evaluate("localStorage.getItem('aether_voice_settings')")=="voice-fixture"
+    assert page.evaluate("localStorage.getItem('favorite_voices')")=="favorites-fixture"
+    assert page.evaluate("localStorage.getItem('aether_thumb_abc_slots_v2')")=="thumb-fixture"
     browser.close()
     print("BROWSER_UI_ISOLATION_PASS")

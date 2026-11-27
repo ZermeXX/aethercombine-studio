@@ -47,6 +47,8 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false);
  const [assetBusy,setAssetBusy]=useState(false);
+ const imageWrite=useRef(false);
+ const [imageRefresh,setImageRefresh]=useState(0);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
   combineInvalid.current=false;setNativeTab('none');setNotice('');setArtInput(null);
@@ -70,7 +72,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);
  },[dirty]);
  async function run(action:(c:WorkspaceProjectContext)=>Promise<void>){
-  if(locked.current||assetBusy||!context.current)return;
+  if(locked.current||imageWrite.current||assetBusy||!context.current)return;
   locked.current=true;setBusy(true);setError('');
   try{await action(context.current);}catch{setError('Operation failed. Current edits retained. Reload or retry after resolving storage conflicts.');}
   finally{locked.current=false;setBusy(false);}
@@ -154,6 +156,21 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  };
  const onSlots=useRef<NonNullable<ComponentProps<typeof ThumbnailStudioView>['onSlotsChange']>>(value=>captureExtras.current('thumbnails',value)).current;
  const onVoice=useRef<NonNullable<ComponentProps<typeof VoiceStudioView>['onPreferencesChange']>>(value=>captureExtras.current('voice',value)).current;
+ async function persistNativeImage(slots:('A'|'B'|'C'|'art')[],source:Blob|string,nextTab?:'art'|'thumb'){
+  if(!active||!storage.current||locked.current||imageWrite.current||assetBusy)return;
+  const db=storage.current,scope={workspaceId:active.project.workspaceId,projectId:active.project.projectId};
+  imageWrite.current=true;setAssetBusy(true);setError('');
+  try{
+   if(typeof source==='string'&&!/^data:image\/(png|jpeg|webp);base64,/i.test(source))throw new Error('Only local raster data accepted');
+   const blob=typeof source==='string'?await (await fetch(source)).blob():source;
+   if(blob.size>32*1024*1024)throw new Error('Image too large');
+   const bitmap=await createImageBitmap(blob);bitmap.close();
+   await db.replaceProjectImages(scope.workspaceId,scope.projectId,slots,blob);
+   setImageRefresh(v=>v+1);setNotice('Native image saved: '+slots.join(', '));
+   if(nextTab){setArtInput(null);setNativeTab(nextTab);}
+  }catch{setError('Native image could not be saved. Existing stored images retained.');}
+  finally{imageWrite.current=false;setAssetBusy(false);}
+ }
  const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
@@ -196,16 +213,16 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} onBusy={setAssetBusy} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
  </fieldset>}
 
- {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} onUrls={setImageUrls} onBusy={setAssetBusy} busy={busy||assetBusy}/>}
+ {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} refresh={imageRefresh} onUrls={setImageUrls} onBusy={setAssetBusy} busy={busy||assetBusy}/>}
  {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
- <ThumbnailStudioView isolatedEditing projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={(dataUrl,label)=>{setArtInput({dataUrl,label,nonce:Date.now()});setNativeTab('art');}} onNotify={setNotice}/>
+ <ThumbnailStudioView isolatedEditing onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='voice'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':voice'} aria-label="Native Voice Studio">
  <VoiceStudioView isolatedEditing initialPreferences={nativeDraft.legacyExtras?.voice as ComponentProps<typeof VoiceStudioView>['initialPreferences']} onPreferencesChange={onVoice} scriptText={script} onScriptTextChange={v=>{setScript(v);setDirty(true);}} onMasterVoiceoverReady={()=>{}} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='art'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':art'} aria-label="Native Image Art Editor">
- <p>Art canvas is temporary; export manually before switching projects.</p>
- <ImageArtEditorView incomingAsset={artSource} onNotify={setNotice}/>
+ <p>Apply to cover A saves the flattened art result and cover A atomically. Unsaved canvas edits remain temporary.</p>
+ <ImageArtEditorView incomingAsset={artSource} onApplyToThumbnailCoverA={url=>void persistNativeImage(['art','A'],url,'thumb')} onNotify={setNotice}/>
  </fieldset>}
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>

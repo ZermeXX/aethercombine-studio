@@ -48,11 +48,16 @@ export class ProjectStorage {
  }
  /** Fixed image slots only; ownership checked in the write transaction. */
  async replaceProjectImage(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'|'art',blob:Blob):Promise<void>{
+  return this.replaceProjectImages(workspaceId,projectId,[slot],blob);
+ }
+ async replaceProjectImages(workspaceId:WorkspaceId,projectId:string,slots:readonly ('A'|'B'|'C'|'art')[],blob:Blob):Promise<void>{
+  if(!slots.length||slots.some(slot=>!['A','B','C','art'].includes(slot)))throw new Error('Invalid image slots');
+  const slot=slots[0];
   if(!['A','B','C','art'].includes(slot)||!(blob instanceof Blob)||!blob.size||blob.size>32*1024*1024||!['image/png','image/jpeg','image/webp'].includes(blob.type))throw new Error('Invalid project image');
   const record={projectId,assetId:'project-image:'+slot,name:'project-image-'+slot,blob,sha256:await assetDigest(blob)};
   return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
-   r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').put(record);done(undefined);}catch(e){fail(e);}};
+   r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');for(const target of slots)tx.objectStore('project_assets').put({...record,assetId:'project-image:'+target,name:'project-image-'+target});done(undefined);}catch(e){fail(e);}};
   });
  }
  listAssets(workspaceId:WorkspaceId,projectId:string):Promise<{assetId:string;name:string;size:number}[]>{
