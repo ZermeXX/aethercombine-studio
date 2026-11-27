@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mergeManifestRoundTrip as merge } from '../src/components/MontageCombineView';
+import { mergeManifestRoundTrip as merge, isLosslessManifestImport } from '../src/components/MontageCombineView';
 
 test('unchanged projection preserves original metadata and disabled flags', () => {
   const original = { youtube_seo: {title:'Amazon'}, shorts_export:{enabled:false}, drift_guard:{diff_sec:0}, scenes:[{scene_id:'1',lower_third:{location:'Upano'},voice_start:0.2}] };
@@ -19,4 +19,17 @@ test('explicit false and removal survive merge', () => {
 });
 test('new and removed scenes are reflected', () => {
   expect(merge([{scene_id:'1',extra:1}],[{scene_id:'1'}],[{scene_id:'2',duration:9}])).toEqual([{scene_id:'2',duration:9}]);
+});
+
+for (const version of ['8.0', '8.1']) {
+  test('full manifest activates lossless import for '+version, () => {
+    const original = {manifest_version:version, scenes:[{scene_id:'1',location:'Upano'}], timeline:[{scene_id:'1',location:'Upano'}]};
+    const projection = {manifest_version:'8.1', scenes:[{scene_id:'1'}], timeline:[{scene_id:'1'}]};
+    expect(isLosslessManifestImport(original)).toBe(true);
+    expect(merge(original,projection,structuredClone(projection))).toEqual(original);
+  });
+}
+test('legacy and incomplete manifests do not activate full round trip', () => {
+  expect(isLosslessManifestImport({manifest_version:'2.4-FINAL',scenes:[],timeline:[]})).toBe(false);
+  expect(isLosslessManifestImport({manifest_version:'8.1',timeline:[]})).toBe(false);
 });
