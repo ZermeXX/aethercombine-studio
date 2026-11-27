@@ -36,3 +36,14 @@ test('successful session migration verifies credentials before cleanup',()=>{
  expect(l.getItem('ac_tg_bot_token')).toBeNull();
  expect(JSON.parse(l.getItem('aether_google_auth')!).access_token).toBeUndefined();
 });
+
+test('legacy service account remains untouched and blocks completion',()=>{
+ const l=storage({ac_gdrive_sa_key:'fixture-not-a-real-key'});
+ const s=storage({aether_secrets_purged_v1:'1'});
+ migrateLegacySecrets(l,s);
+ expect(l.getItem('ac_gdrive_sa_key')).toBe('fixture-not-a-real-key');
+ expect(s.getItem('ac_gdrive_sa_key')).toBeNull();
+ expect(s.getItem('aether_secrets_purged_v1')).toBeNull();
+ l.removeItem('ac_gdrive_sa_key');migrateLegacySecrets(l,s);
+ expect(s.getItem('aether_secrets_purged_v1')).toBe('1');
+});
