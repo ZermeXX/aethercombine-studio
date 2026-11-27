@@ -24,3 +24,18 @@ test('schema, ownership, payload, active project and concurrent revisions',async
  expect(count).toBe(2);
  }finally{s.close();}
 });
+
+test('binary asset round trip and ownership',async()=>{
+ const db=await openProjectDatabase(new IDBFactory());const s=new ProjectStorage(db);
+ try{
+ const p=createProject('histoviva','Assets');await s.createProject(p);
+ const a={assetId:'a1',name:'fixture.bin',blob:new Blob([new Uint8Array([1,2,3])])};
+ await expect(s.putAsset('the_whisker_trio',p.projectId,a)).rejects.toThrow();
+ await s.putAsset('histoviva',p.projectId,a);
+ await expect(s.putAsset('histoviva',p.projectId,a)).rejects.toThrow();
+ expect(await s.getAsset('the_whisker_trio',p.projectId,'a1')).toBeNull();
+ const restored=await s.getAsset('histoviva',p.projectId,'a1');
+ expect(restored?.name).toBe(a.name);
+ expect(Array.from(new Uint8Array(await restored!.blob.arrayBuffer()))).toEqual([1,2,3]);
+ }finally{s.close();}
+});
