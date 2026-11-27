@@ -1,3 +1,8 @@
+import {ThumbnailStudioView} from '../components/ThumbnailStudioView';
+import {VoiceStudioView} from '../components/VoiceStudioView';
+import {ImageArtEditorView} from '../components/ImageArtEditorView';
+import type {ComponentProps} from 'react';
+import {legacyExtras} from '../utils/legacyExtras';
 import {ScopedTimelinePanel,ScopedAssetPanel} from './ScopedTimelinePanel';
 import {MontageCombineView} from '../components/MontageCombineView';
 import {hydrateCombine,captureCombine} from '../utils/nativeCombineBinding';
@@ -33,15 +38,16 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [badge,setBadge]=useState('');
  const [production,setProduction]=useState('');
  const [extras,setExtras]=useState('');
- const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'|'combine'|'loop'>('none');
+ const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'>('none');
  const [notice,setNotice]=useState('');
+ const [artInput,setArtInput]=useState<{dataUrl:string;label:string;nonce:number}|null>(null);
  const combineInvalid=useRef(false);
  const [dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false);
  const [assetBusy,setAssetBusy]=useState(false);
  const [error,setError]=useState('');
  function hydrate(snapshot:ProjectSnapshot|null){
-  combineInvalid.current=false;setNativeTab('none');setNotice('');
+  combineInvalid.current=false;setNativeTab('none');setNotice('');setArtInput(null);
   setProduction(snapshot?.payload?.production===undefined?'':JSON.stringify(snapshot.payload.production,null,2));setExtras(snapshot?.payload?.legacyExtras===undefined?'':JSON.stringify(snapshot.payload.legacyExtras,null,2));
   setActive(snapshot);setScript(snapshot?.payload?.script??'');setChapters(snapshot?.payload?.chapters??'');setSeo(snapshot?.payload?.seoScript??'');setTitle(snapshot?.payload?.thumbnailTitle??'');setBadge(snapshot?.payload?.thumbnailBadge??'');setDirty(false);
  }
@@ -101,7 +107,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   if(!active?.payload)throw new Error('No project');
   return projectPayload({...active.payload,script,chapters,seoScript:seo,thumbnailTitle:title,thumbnailBadge:badge,production:production.trim()?JSON.parse(production):undefined,legacyExtras:extras.trim()?JSON.parse(extras):undefined});
  }
- function openNative(tab:'verbaflow'|'seo'|'combine'|'loop'){
+ function openNative(tab:'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'){
   // Save and validate advanced JSON before mounting a native component.
   void run(async c=>{await save(c);setNativeTab(tab);});
  }
@@ -138,6 +144,13 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    setProduction(JSON.stringify(next.production,null,2));setDirty(true);
   }catch{setNotice('Invalid loop setting');}
  }
+ const captureExtras=useRef<(section:'thumbnails'|'voice',value:unknown)=>void>(()=>{});
+ captureExtras.current=(section,value)=>{
+  try{const draft=currentDraft();const next=legacyExtras({...draft.legacyExtras,[section]:value});const encoded=JSON.stringify(next,null,2);if(encoded!==extras){setExtras(encoded);setDirty(true);}}
+  catch{setError('Unsupported module preferences');}
+ };
+ const onSlots=useRef<NonNullable<ComponentProps<typeof ThumbnailStudioView>['onSlotsChange']>>(value=>captureExtras.current('thumbnails',value)).current;
+ const onVoice=useRef<NonNullable<ComponentProps<typeof VoiceStudioView>['onPreferencesChange']>>(value=>captureExtras.current('voice',value)).current;
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
@@ -155,6 +168,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('thumb')}>Open native Thumbnail Studio</button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('voice')}>Open native Voice Studio</button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('art')}>Open native Image Art Editor</button>
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
  </div>
  {notice&&<p>{notice}</p>}
@@ -176,6 +192,16 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} onBusy={setAssetBusy} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
  </fieldset>}
 
+ {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
+ <ThumbnailStudioView isolatedEditing initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={(dataUrl,label)=>{setArtInput({dataUrl,label,nonce:Date.now()});setNativeTab('art');}} onNotify={setNotice}/>
+ </fieldset>}
+ {nativeDraft&&nativeTab==='voice'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':voice'} aria-label="Native Voice Studio">
+ <VoiceStudioView isolatedEditing initialPreferences={nativeDraft.legacyExtras?.voice as ComponentProps<typeof VoiceStudioView>['initialPreferences']} onPreferencesChange={onVoice} scriptText={script} onScriptTextChange={v=>{setScript(v);setDirty(true);}} onMasterVoiceoverReady={()=>{}} onNotify={setNotice}/>
+ </fieldset>}
+ {nativeDraft&&nativeTab==='art'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':art'} aria-label="Native Image Art Editor">
+ <p>Art canvas is temporary; export manually before switching projects.</p>
+ <ImageArtEditorView incomingAsset={artInput} onNotify={setNotice}/>
+ </fieldset>}
  {field('VerbaFlow script',script,setScript)}{field('Chapters',chapters,setChapters)}{field('SEO script',seo,setSeo)}{field('Thumbnail title',title,setTitle)}{field('Thumbnail badge',badge,setBadge)}
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
  <button type="button" disabled={!dirty||busy||!active?.payload} onClick={()=>void run(save)}>Save project</button>
