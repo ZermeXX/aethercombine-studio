@@ -33,7 +33,7 @@ jobs:
         run: bun run typecheck
 
       - name: Manifest V8 and V8.1 Tests
-        run: bun test tests/manifest-v8.test.ts tests/manifest-v81.test.ts
+        run: bun test tests/manifest-v8.test.ts tests/manifest-roundtrip.test.ts tests/manifest-v81.test.ts
 
       - name: Build Project
         run: bun run build
