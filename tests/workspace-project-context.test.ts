@@ -225,7 +225,7 @@ test('production preflight never equates local evidence with runner access',asyn
  await expect(prepareLoopPreflight(storage,scope,unsafe,'fixture-folder')).rejects.toThrow('Unsafe runner asset filename');
 });
 
-import {dispatchStrictPreflight,findStrictPreflightRun} from '../src/utils/strictPreflightDispatch';
+import {dispatchStrictPreflight,findStrictPreflightRun,verifyStrictPreflightJobs} from '../src/utils/strictPreflightDispatch';
 import {RENDERER_CANDIDATE} from '../src/utils/loopProductionPreflight';
 test('authenticated dispatch uses fixed preflight-only inputs and rejects candidate mismatch',async()=>{
  const production:NonNullable<import('../src/utils/projectPayload').ProjectPayload['production']>={fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[],timeline_slots:[{slot_index:1,slot_id:'one',title:'One',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:10800,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}],render:{crf:18,audioBitrate:320,actCrossfadeSec:1,internalCrossfadeSec:1,finalBlackEnabled:false,finalBlackSec:0,bitratePreset:'standard',transitionMode:'crossfade',useEmbeddedAudio:true}};
@@ -258,4 +258,16 @@ test('preflight run lookup rejects unrelated and ambiguous runs',async()=>{
  expect(await findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([{...run,head_sha:'wrong'}]))).toBeNull();
  expect(await findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([run]))).toEqual({id:42,status:'completed',conclusion:'success',runnerVerified:false});
  await expect(findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([run,run]))).rejects.toThrow('Ambiguous');
+});
+
+test('strict preflight requires all runner proof and no render or upload',async()=>{
+ const names=['Strict Project Dispatch Identity Guard','Preflight Asset Check','Download Source Clips (only needed files)','Strict Project Media Verification','Build and Run FFmpeg Pipeline','Upload Output Video, Shorts & Metadata to Google Drive'];
+ const steps=names.map((name,i)=>({name,status:'completed',conclusion:i<4?'success':'skipped'}));
+ const job={run_id:42,head_sha:RENDERER_CANDIDATE,name:'render_and_upload',status:'completed',conclusion:'success',steps};
+ const mock=(jobs:unknown[])=>(async()=>Response.json({jobs})) as typeof fetch;
+ expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([job]))).toBe(true);
+ expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.filter(s=>s.name!==names[3])}]))).toBe(false);
+ expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.map((s,i)=>i===4?{...s,conclusion:'success'}:s)}]))).toBe(false);
+ expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,head_sha:'wrong'}]))).toBe(false);
+ expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([job,job]))).toBe(false);
 });
