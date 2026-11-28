@@ -103,6 +103,31 @@ with sync_playwright() as p:
     expect(page.get_by_label("Insert duration_sec 1.1")).to_have_value("12")
     expect(page.get_by_label("Insert transition_in seconds 1.1")).to_have_value("1.5")
     print("SCOPED_INSERT_ROUNDTRIP_PASS")
+    # Temporary compatible export fixture; restore the original production data afterwards.
+    import json
+    original=production.input_value()
+    export_fixture=json.loads(original)
+    export_fixture.pop("audio_mastering",None)
+    export_fixture["render"].update({"finalBlackEnabled":False,"transitionMode":"crossfade","useEmbeddedAudio":True,"bitratePreset":"standard"})
+    page.get_by_role("button",name="Close native module").click()
+    production.fill(json.dumps(export_fixture))
+    page.get_by_role("button",name="Open scoped Loop settings").click()
+    page.get_by_label("Export Drive folder ID").fill("synthetic-folder")
+    with page.expect_download() as download_info:
+        page.get_by_role("button",name="Download loop manifest JSON").click()
+    downloaded=download_info.value
+    assert downloaded.suggested_filename=="loop_manifest.json"
+    with open(downloaded.path(),encoding="utf-8") as handle:
+        exported=json.load(handle)
+    assert exported["cloud_export"]["target_folder_id"]=="synthetic-folder"
+    assert exported["timeline_slots"][0]["slot_duration_sec"]==18000
+    assert exported["timeline_slots"][0]["inserts"][0]["transition_duration_sec"]==1.5
+    assert exported["timeline_slots"][0]["inserts"][0]["trigger_at_sec"]==120
+    print("NATIVE_MANIFEST_DOWNLOAD_PASS")
+    page.get_by_role("button",name="Close native module").click()
+    production.fill(original)
+    page.get_by_role("button",name="Open scoped Loop settings").click()
+
     page.get_by_label("Attach referenced file").set_input_files({"name":"scene.mp4","mimeType":"video/mp4","buffer":b"fixture media"})
     expect(page.get_by_text("Asset attached and verified",exact=True)).to_be_visible()
     ws.select_option("the_whisker_trio")

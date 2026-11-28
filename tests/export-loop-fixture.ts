@@ -1,0 +1,3 @@
+import {buildScopedLoopManifest} from '../src/utils/loopRendererAdapter';
+const manifest=buildScopedLoopManifest({fps:24,codec:'libx264',resolution:'720p',loopHours:5/3600,scenes:[],timeline_slots:[{slot_index:1,slot_id:'fixture',title:'Fixture',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:2,internal_loop_crossfade_sec:0,slot_duration_sec:5,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}],render:{crf:24,audioBitrate:192,actCrossfadeSec:0,internalCrossfadeSec:0,finalBlackEnabled:false,finalBlackSec:0,bitratePreset:'standard',transitionMode:'crossfade',useEmbeddedAudio:true}},'synthetic-folder');
+console.log(JSON.stringify(manifest));

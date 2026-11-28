@@ -35,3 +35,29 @@ jobs:
           mkdir -p /tmp/aether-browser-smoke/aethercombine-studio
           cp -r dist/. /tmp/aether-browser-smoke/aethercombine-studio/
           python tests/browser-ui-isolation.py
+      - name: Synthetic loop renderer integration
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          work=$(mktemp -d)
+          bun tests/export-loop-fixture.ts > "$work/manifest.json"
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/78ac0c2219fd8f290b6c4a67857b6683148aaee3/build_timeline.py -o "$work/build_timeline.py"
+          cd "$work"
+          mkdir input_clips
+          ffmpeg -v error -f lavfi -i color=c=blue:s=1280x720:r=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/base.mp4
+          # Never permit cloud fallback in this local fixture.
+          mkdir blocked-bin
+          printf '#!/bin/sh\nexit 99\n' > blocked-bin/rclone
+          chmod +x blocked-bin/rclone
+          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py
+          python - <<'PY'
+          import json, subprocess
+          result=json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams","-show_format","-of","json","output.mp4"]))
+          video=next(s for s in result["streams"] if s["codec_type"]=="video")
+          assert (video["width"],video["height"],video["r_frame_rate"])==(1280,720,"24/1")
+          assert any(s["codec_type"]=="audio" for s in result["streams"])
+          assert abs(float(result["format"]["duration"])-5)<0.25
+          assert json.load(open("qc_report.json"))["status"]=="PASS"
+          print("SYNTHETIC_LOOP_RENDER_PASS")
+          PY
