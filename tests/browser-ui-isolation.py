@@ -145,6 +145,10 @@ with sync_playwright() as p:
     menu.get_by_role("button",name="Rename").click()
     expect(header.locator(".nexus-header-item strong").last).to_have_text("History UI")
     menu.locator("summary").click()
+    import base64
+    lifecycle_png=base64.b64decode(page.evaluate("""() => {const c=document.createElement('canvas');c.width=8;c.height=8;const ctx=c.getContext('2d');ctx.fillStyle='#123456';ctx.fillRect(0,0,8,8);return c.toDataURL('image/png').split(',')[1];}"""))
+    page.get_by_label("Project image A",exact=True).set_input_files({"name":"lifecycle.png","mimeType":"image/png","buffer":lifecycle_png})
+    expect(page.get_by_text("Project image saved: A",exact=True)).to_be_visible()
     print("NEXUS_PROJECT_RENAME_PASS")
     menu.locator("summary").click()
     page.once("dialog",lambda d:d.accept("Independent duplicate"))
@@ -161,6 +165,7 @@ with sync_playwright() as p:
     expect(script).to_have_value("History narration")
     duplicate.locator(":scope > button").click()
     expect(script).to_have_value("Independent narration")
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
     card.locator(":scope > button").click()
     expect(script).to_have_value("History narration")
     print("NEXUS_PROJECT_DUPLICATION_PASS")
@@ -175,6 +180,10 @@ with sync_playwright() as p:
     assert backup["content"]["project"]["name"]=="History UI"
     assert backup["content"]["payload"]["script"]=="History narration"
     assert len(backup["sha256"])==64
+    import hashlib
+    asset=next(a for a in backup["content"]["assets"] if a["assetId"]=="project-image:A")
+    assert base64.b64decode(asset["base64"])==lifecycle_png
+    assert asset["sha256"]==hashlib.sha256(lifecycle_png).hexdigest()
     print("NEXUS_PROJECT_EXPORT_PASS")
     picker=page.get_by_label("Import project backup")
     picker.set_input_files(str(exported.value.path()))
@@ -209,6 +218,7 @@ with sync_playwright() as p:
         archived_backup=json.load(f)
     assert archived_backup["content"]["project"]["archived"] is True
     assert archived_backup["content"]["payload"]["script"]=="History narration"
+    assert archived_backup["content"]["assets"]==backup["content"]["assets"]
     expect(script).to_have_value("History narration")
     print("NEXUS_PROJECT_ARCHIVE_PASS")
     archive.get_by_role("button",name="Restore project").click()
@@ -224,6 +234,7 @@ with sync_playwright() as p:
     assert restored_backup["content"]["project"]["revision"]==archived_backup["content"]["project"]["revision"]+1
     assert restored_backup["content"]["project"]["archived"] is False
     assert restored_backup["content"]["payload"]==archived_backup["content"]["payload"]
+    assert restored_backup["content"]["assets"]==archived_backup["content"]["assets"]
     print("NEXUS_PROJECT_RESTORE_PASS")
     page.once("dialog",lambda d:d.accept())
     restored.get_by_role("button",name="Archive project").click()
@@ -261,6 +272,8 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Open isolated project editor").click()
     expect(script).to_have_value("History narration")
     expect(restored).to_have_count(0)
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    print("NEXUS_PROJECT_BINARY_LIFECYCLE_PASS")
     print("NEXUS_PROJECT_DELETE_PERSISTENCE_PASS")
     print("NEXUS_PROJECT_DELETE_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
