@@ -2,9 +2,10 @@ import {buildScopedLoopManifest} from './loopRendererAdapter';
 import type {ProjectPayload} from './projectPayload';
 import type {ProjectStorage} from './projectStorage';
 import type {ProjectScope} from './workspaceProjectContext';
-export const RENDERER_CANDIDATE='52f4b90ed2a93736f8e86b38eb14de836f26931f';
+export const RENDERER_CANDIDATE='91838a817453d7ab3d6fc352a52befa244ba32a7';
 /** Local evidence is not evidence of runner access to Drive. No network or credentials. */
 export async function prepareLoopPreflight(storage:ProjectStorage,scope:ProjectScope,production:NonNullable<ProjectPayload['production']>,folderId:string){
+ if(!/^[A-Za-z0-9_-]{10,200}$/.test(folderId))throw new Error('Explicit project Drive folder required');
  const manifest=buildScopedLoopManifest(production,folderId);
  const names=[...new Set(manifest.timeline_slots.flatMap(s=>[s.base_content.file_name,...s.inserts.map(i=>i.file_name)]))].sort();
  const folded=new Set<string>();
