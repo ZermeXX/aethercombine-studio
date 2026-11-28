@@ -23,7 +23,7 @@ import {projectPayload} from '../utils/projectPayload';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
 import {WorkspaceProjectContext,type ProjectSnapshot} from '../utils/workspaceProjectContext';
-import {CHANNEL_PROFILES,type WorkspaceId} from './workspaces';
+import {CHANNEL_PROFILES,allowsModule,type WorkspaceId} from './workspaces';
 import type {ProjectRecord} from './projectRegistry';
 
 /** Explicit opt-in isolated editor. Never mounts legacy production modules. */
@@ -120,6 +120,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   return projectPayload({...active.payload,script,chapters,seoScript:seo,thumbnailTitle:title,thumbnailBadge:badge,production:production.trim()?JSON.parse(production):undefined,legacyExtras:extras.trim()?JSON.parse(extras):undefined});
  }
  function openNative(tab:'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'){
+  if(!active?.payload||!allowsModule(active.project.workspaceId,tab))return;
   // Save and validate advanced JSON before mounting a native component.
   void run(async c=>{await save(c);setNativeTab(tab);});
  }
@@ -194,11 +195,11 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   finally{releaseAssetWrite();}
  }
  const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
- const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload)return null;try{return currentDraft();}catch{return null;}})();
+ const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsModule(active.project.workspaceId,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
  <h1 className="text-xl font-semibold">V9 Isolated Project Editor · Preview</h1>
- <p>Project-scoped native module previews and validated production settings. External rendering and credentials are disabled.</p>
+ <p>Project-scoped native module previews and validated production settings. Production rendering is disabled. Authorized strict preflight is available in ambient projects only.</p>
  <button type="button" disabled={assetBusy||busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
  <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={assetBusy||!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -206,16 +207,16 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
  <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
- <div className="flex gap-2">
+ {active?.payload&&<nav aria-label="Production modules" className="flex flex-wrap gap-2">
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
- <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>
- <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>
+ {allowsModule(active!.project.workspaceId,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
+ {allowsModule(active!.project.workspaceId,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>}
  <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('thumb')}>Open native Thumbnail Studio</button>
  <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('voice')}>Open native Voice Studio</button>
  <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('art')}>Open native Image Art Editor</button>
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
- </div>
+ </nav>}
  {notice&&<p>{notice}</p>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
  <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
