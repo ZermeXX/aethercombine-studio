@@ -233,7 +233,7 @@ with sync_playwright() as p:
         assert download.failure() is None
         assert download.suggested_filename==f"thumbnail_{'4k' if width==3840 else '720p'}_{width}x{height}_C.{ext}"
         data=Path(download.path()).read_bytes()
-        assert data.startswith(b"\\x89PNG\\r\\n\\x1a\\n" if ext=="png" else b"\\xff\\xd8\\xff")
+        assert data.startswith(bytes.fromhex("89504e470d0a1a0a" if ext=="png" else "ffd8ff")), data[:8].hex()
         import base64
         mime="image/png" if ext=="png" else "image/jpeg"
         dimensions=page.evaluate("""async ({data,mime}) => {const img=new Image();img.src='data:'+mime+';base64,'+data;await img.decode();return [img.naturalWidth,img.naturalHeight]}""",{"data":base64.b64encode(data).decode(),"mime":mime})
