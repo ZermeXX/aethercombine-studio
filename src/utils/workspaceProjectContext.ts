@@ -1,4 +1,4 @@
-import {createProject,type ProjectRecord} from '../design-system/projectRegistry';
+import {createProject,type ProjectRecord,type ProjectFormat} from '../design-system/projectRegistry';
 import {isWorkspaceId,type WorkspaceId} from '../design-system/workspaces';
 import {projectPayload,type ProjectPayload} from './projectPayload';
 import {ProjectStorage} from './projectStorage';
@@ -21,8 +21,8 @@ export class WorkspaceProjectContext {
   const active=await this.storage.getActiveProject(workspaceId);
   return {workspaceId,projects,active:active?await this.read({workspaceId,projectId:active.projectId}):null};
  }
- async create(workspaceId:WorkspaceId,name:string):Promise<ProjectSnapshot>{
-  const project=createProject(workspaceId,name);
+ async create(workspaceId:WorkspaceId,name:string,format?:ProjectFormat):Promise<ProjectSnapshot>{
+  const project=createProject(workspaceId,name,format);
   const payload=emptyProjectPayload();
   await this.storage.createProject(project,payload);
   return {project,payload};
