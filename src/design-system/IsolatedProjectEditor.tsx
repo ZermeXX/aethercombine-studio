@@ -26,7 +26,7 @@ import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
 import {WorkspaceProjectContext,type ProjectSnapshot} from '../utils/workspaceProjectContext';
 import {CHANNEL_PROFILES,allowsModule,type WorkspaceId} from './workspaces';
 import {projectFormat,allowsProjectFormat,defaultProjectFormat,type ProjectRecord,type ProjectFormat} from './projectRegistry';
-function allowsProjectModule(p:ProjectRecord,tab:string){return allowsModule(p.workspaceId,tab)&& (tab!=='loop'||projectFormat(p)==='ambient');}
+function allowsProjectModule(p:ProjectRecord,tab:Parameters<typeof allowsModule>[1]){return allowsModule(p.workspaceId,tab)&& (tab!=='loop'||projectFormat(p)==='ambient');}
 
 /** Explicit opt-in isolated editor. Never mounts legacy production modules. */
 export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
