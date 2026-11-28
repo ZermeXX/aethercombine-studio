@@ -326,7 +326,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>{t("Close native module","Закрыть модуль")}</button>
  </nav></aside>}
  <section className="nexus-workspace-content">
- {notice&&<NexusToast kind={notification.kind} title={notification.kind==='success'?t("Success","Успешно"):notification.kind==='warning'?t("Warning","Внимание"):notification.kind==='error'?t("Error","Ошибка"):t("Notification","Уведомление")} message={notice} dismissLabel={t("Dismiss notification","Закрыть уведомление")} onDismiss={()=>setNotice('')}/>}
+ {notice&&<NexusToast kind={notification.kind} title={notification.kind==='success'?t("Success","Успешно"):notification.kind==='warning'?t("Warning","Внимание"):notification.kind==='error'?t("Error","Ошибка"):t("Notification","Уведомление")} message={notice} durationMs={notification.kind==='success'?6000:undefined} dismissLabel={t("Dismiss notification","Закрыть уведомление")} onDismiss={()=>setNotice('')}/>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
  <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
  </fieldset>}
