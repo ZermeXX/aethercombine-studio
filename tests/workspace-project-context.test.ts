@@ -152,3 +152,17 @@ test('timeline shortening rejects insert truncation and preserves original slot'
  expect(next[0].inserts).toEqual(before.inserts);
  expect(next[0].slot_duration_sec).toBe(21600);
 });
+
+import {validateSlotInserts} from '../src/utils/validateSlotInserts';
+test('scoped insert validation rejects overlap without mutating input and accepts adjacent inserts',()=>{
+ const slot:TimelineSlot={slot_index:1,slot_id:'slot',title:'Slot',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:100,inserts:[{insert_id:'a',asset_id:'a',file_name:'a.mp4',trigger_at_sec:10,duration_sec:10,transition_in:{type:'fade',duration_sec:1},transition_out:{type:'none',duration_sec:0}},{insert_id:'b',asset_id:'b',file_name:'b.mp4',trigger_at_sec:15,duration_sec:10,transition_in:{type:'dissolve',duration_sec:1},transition_out:{type:'fade',duration_sec:1}}],slot_transition_out:{type:'none',duration_sec:0}};
+ const before=structuredClone(slot);
+ expect(()=>validateSlotInserts(slot)).toThrow('Overlapping inserts');
+ expect(slot).toEqual(before);
+ slot.inserts[1].trigger_at_sec=20;
+ expect(()=>validateSlotInserts(slot)).not.toThrow();
+ slot.inserts.reverse();
+ expect(()=>validateSlotInserts(slot)).not.toThrow();
+ slot.inserts[0].transition_in.duration_sec=11;
+ expect(()=>validateSlotInserts(slot)).toThrow('Invalid insert transition');
+});
