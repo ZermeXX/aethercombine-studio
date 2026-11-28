@@ -192,6 +192,25 @@ with sync_playwright() as p:
     card.locator(":scope > button").click()
     expect(script).to_have_value("History narration")
     print("NEXUS_PROJECT_IMPORT_PASS")
+    archived_menu=restored.locator(".nexus-card-menu")
+    archived_menu.locator("summary").click()
+    page.once("dialog",lambda d:d.dismiss())
+    archived_menu.get_by_role("button",name="Archive project").click()
+    expect(restored).to_have_count(1)
+    page.once("dialog",lambda d:d.accept())
+    archived_menu.get_by_role("button",name="Archive project").click()
+    expect(restored).to_have_count(0)
+    archive=page.locator("details").filter(has=page.locator("summary",has_text="Archived projects"))
+    archive.locator("summary").click()
+    expect(archive).to_contain_text("History UI — imported")
+    with page.expect_download() as archived_export:
+        archive.get_by_role("button",name="Export project").click()
+    with open(archived_export.value.path(),encoding="utf-8") as f:
+        archived_backup=json.load(f)
+    assert archived_backup["content"]["project"]["archived"] is True
+    assert archived_backup["content"]["payload"]["script"]=="History narration"
+    expect(script).to_have_value("History narration")
+    print("NEXUS_PROJECT_ARCHIVE_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
     page.get_by_text("Advanced production settings (JSON)",exact=True).click()
