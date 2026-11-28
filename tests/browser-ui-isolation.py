@@ -73,6 +73,30 @@ with sync_playwright() as p:
     compact.click()
     expect(compact).to_have_attribute("aria-pressed","false")
     shell.close()
+    responsive=browser.new_page(viewport={"width":1280,"height":800})
+    responsive.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
+    responsive.get_by_role("button",name="Open isolated project editor").click()
+    long_name="HISTOVIVA — Documentary " + "LongProjectTitle"*5
+    expect(responsive.get_by_label("New project name")).to_be_enabled()
+    responsive.get_by_label("New project name").fill(long_name)
+    responsive.get_by_role("button",name="Create isolated project").click()
+    rh=responsive.locator(".nexus-smart-header")
+    expect(rh.locator(".nexus-header-item strong").last).to_have_attribute("title",long_name)
+    for width,height in [(320,640),(390,844),(768,1024),(1280,800),(1920,1080)]:
+        responsive.set_viewport_size({"width":width,"height":height})
+        for lang in ["EN","RU"]:
+            toggle=rh.get_by_role("button",name="Help language")
+            if toggle.inner_text()!=lang:
+                toggle.click()
+            expect(toggle).to_have_text(lang)
+            expect(rh.locator(".nexus-header-actions button").last).to_be_visible()
+            assert rh.evaluate("""el => {
+                const r=el.getBoundingClientRect();
+                return r.left>=-1 && r.right<=innerWidth+1 && el.scrollWidth<=el.clientWidth+1 &&
+                  [...el.querySelectorAll('button')].every(b=>{const q=b.getBoundingClientRect();return q.left>=r.left-1 && q.right<=r.right+1 && q.width>0 && q.height>0;});
+            }"""), f"Header overflow at {width}x{height} {lang}"
+            print(f"NEXUS_HEADER_LAYOUT_PASS {width}x{height} {lang}")
+    responsive.close()
     print("NEXUS_SHELL_LANGUAGE_HELP_NAV_PASS")
     name.fill("History UI")
     page.get_by_role("button",name="Create isolated project").click()
