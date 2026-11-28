@@ -197,3 +197,14 @@
 .nexus-loading-track span { display:block; width:35%; height:100%; background:linear-gradient(90deg,#42d8ff,#9747ff); animation:nexus-loading 1.3s ease-in-out infinite alternate; }
 @keyframes nexus-loading { from { transform:translateX(0); } to { transform:translateX(185%); } }
 @media(prefers-reduced-motion:reduce){ .nexus-loading-track span { animation:none; width:100%; } }
+
+.nexus-help-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.nexus-help-row > label { flex:1; min-width:150px; }
+.nexus-help { position:relative; }
+.nexus-help-trigger { color:#42d8ff; border:1px solid #405171; border-radius:50%; width:32px; height:32px; }
+.nexus-help-hover,.nexus-help-panel { position:absolute; right:0; top:100%; width:min(300px,80vw); z-index:20; padding:12px; border:1px solid #7563aa; border-radius:10px; background:#182238; color:#edf2ff; box-shadow:0 8px 24px #0008; }
+.nexus-help-hover { display:none; pointer-events:none; }
+.nexus-help:hover .nexus-help-hover,.nexus-help:focus-within .nexus-help-hover { display:block; }
+.nexus-help-panel button { margin-top:8px; color:#a78bfa; text-decoration:underline; }
+.nexus-help-panel dt { font-weight:700; margin-top:8px; }
+.nexus-help-panel dd { margin:0; color:#c1cce5; }
