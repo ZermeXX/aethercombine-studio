@@ -62,7 +62,8 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  const names=collectAssetNames(payload);
  const [preflightFolder,setPreflightFolder]=useState('');
  const [report,setReport]=useState('');
- useEffect(()=>{setReport('');},[scope.workspaceId,scope.projectId,payload,preflightFolder]);
+ const preflightKey=JSON.stringify([scope.workspaceId,scope.projectId,payload,preflightFolder]);
+ useEffect(()=>{setReport('');},[preflightKey]);
  async function checkPreflight(){
   if(!acquireWrite())return;setReport('');
   try{await saveBeforeAttach();if(!payload.production)throw new Error('No production settings');const result=await prepareLoopPreflight(storage,scope,payload.production,preflightFolder.trim());setReport(JSON.stringify({assets:result.assets,rendererCandidate:result.rendererCandidate,dispatchAllowed:result.dispatchAllowed,blockers:result.blockers},null,2));}catch(e){setReport(e instanceof Error?e.message:'Preflight failed');}finally{releaseWrite();}
