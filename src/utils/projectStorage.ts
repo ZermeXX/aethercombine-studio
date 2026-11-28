@@ -1,5 +1,5 @@
 import { projectPayload, type ProjectPayload } from './projectPayload';
-import { projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
+import { createProject, projectFormat, projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
 import { isWorkspaceId, type WorkspaceId } from '../design-system/workspaces';
 export const DATABASE_NAME='aether_studio_v9';
 export const DATABASE_VERSION=2;
@@ -109,6 +109,27 @@ export class ProjectStorage {
   if(p.revision!==1)throw new Error('Initial revision must be 1');
   const content=payload===undefined?undefined:projectPayload(payload);
   return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add({...p,...(content===undefined?{}:{payload:content})});done(undefined);});
+ }
+ duplicateProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number,name:string):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const projects=tx.objectStore('projects'),assets=tx.objectStore('project_assets');
+   const r=projects.get(projectId);
+   r.onsuccess=()=>{try{
+    const source=projectMetadata(r.result);
+    if(source.workspaceId!==workspaceId||source.revision!==expectedRevision)throw new Error('Ownership or revision conflict');
+    const copy=createProject(workspaceId,name,projectFormat(source));
+    const payload=r.result.payload===undefined?undefined:projectPayload(r.result.payload);
+    const a=assets.index('projectId').getAll(projectId);
+    a.onsuccess=()=>{try{
+     projects.add({...copy,...(payload===undefined?{}:{payload})});
+     for(const asset of a.result){
+      if(!(asset.blob instanceof Blob)||typeof asset.assetId!=='string'||typeof asset.name!=='string')throw new Error('Invalid stored asset');
+      assets.add({...asset,projectId:copy.projectId});
+     }
+     done(copy);
+    }catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
  }
  getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
