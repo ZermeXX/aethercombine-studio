@@ -47,9 +47,9 @@ with sync_playwright() as p:
     expect(second.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
     second.wait_for_timeout(6200)
     expect(second.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
-    second.get_by_role("button",name="Dismiss notification").click()
-    expect(second.get_by_role("alert")).to_have_count(0)
-    print("NEXUS_TOAST_ERROR_PERSISTENCE_PASS")
+    # Storage conflicts use a persistent inline alert, not a dismissible toast.
+    expect(second.get_by_role("alert")).to_be_visible()
+    print("NEXUS_INLINE_ERROR_PERSISTENCE_PASS")
     expect(second.get_by_label("VerbaFlow script")).to_have_value("Unsaved second tab")
     first.reload()
     first.get_by_role("button",name="Open isolated project editor").click()
