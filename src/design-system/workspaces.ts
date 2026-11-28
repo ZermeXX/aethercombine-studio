@@ -31,6 +31,7 @@ export function saveWorkspaceSelection(value:WorkspaceId,storage?:SelectionStora
 /** Production navigation follows the channel's production type. Shared tools remain available. */
 export function allowsModule(workspace:WorkspaceId,module:'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'):boolean {
  if(module==='loop')return CHANNEL_PROFILES[workspace].productionType==='ambient_loop';
- if(module==='combine')return CHANNEL_PROFILES[workspace].productionType==='documentary';
+ // Both channels produce edited videos and shorts; only the ambient channel needs Loop.
+ if(module==='combine')return true;
  return true;
 }
