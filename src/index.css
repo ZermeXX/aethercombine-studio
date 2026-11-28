@@ -247,3 +247,14 @@
 @media(prefers-reduced-motion:reduce){
  .nexus-preview button {transition:none;transform:none;}
 }
+
+/* Grouped navigation; temporary symbols until approved raster assets are integrated. */
+.nexus-nav-group {display:grid;gap:5px;min-width:0;}
+.nexus-nav-heading {font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--nx-muted);padding:6px 8px 2px;font-weight:600;}
+.nexus-nav-group > button {display:flex;align-items:center;gap:9px;min-height:44px;padding:8px 10px;text-align:left;border:1px solid transparent;border-radius:8px;background:var(--nx-panel);font-size:.85rem;line-height:1.3;}
+.nexus-nav-group > button > span:last-child {min-width:0;overflow-wrap:anywhere;}
+.nexus-nav-symbol {flex:0 0 24px;text-align:center;font-size:1.2rem;color:#b99aff;}
+.nexus-nav-group > button[aria-pressed=true] {border-color:#a78bfa;background:#30234b;box-shadow:inset 3px 0 var(--nx-cyan);}
+.nexus-nav-group > button:disabled {opacity:.45;}
+@media(hover:hover){.nexus-nav-group > button:hover:not(:disabled){border-color:var(--nx-border);background:var(--nx-raised);}}
+@media(max-width:760px){.nexus-module-nav:not([hidden]){grid-template-columns:1fr;}.nexus-nav-group{grid-template-columns:repeat(2,minmax(0,1fr));}.nexus-nav-heading{grid-column:1/-1;}}
