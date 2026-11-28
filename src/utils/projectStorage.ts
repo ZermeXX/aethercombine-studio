@@ -180,6 +180,21 @@ export class ProjectStorage {
    }catch(e){fail(e);}};
   });
  }
+ archiveProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','workspace_state','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const s=tx.objectStore('projects'),state=tx.objectStore('workspace_state');
+   const r=s.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||old.archived)throw new Error('Ownership or revision conflict');
+    const next=projectMetadata({...old,archived:true,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
+    tx.objectStore('project_revisions').add(r.result);
+    s.put({...r.result,...next});
+    const a=state.get(workspaceId);
+    a.onsuccess=()=>{if(a.result?.projectId===projectId)state.delete(workspaceId);done(next);};
+   }catch(e){fail(e);}};
+  });
+ }
  getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
@@ -206,7 +221,7 @@ export class ProjectStorage {
    const s=tx.objectStore('projects');const r=s.get(p.projectId);
    r.onsuccess=()=>{try{
     const old=projectMetadata(r.result);
-    if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt)throw new Error('Ownership or revision conflict');
+    if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt||old.archived||p.archived)throw new Error('Ownership or revision conflict');
     const next=projectMetadata({...p,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
     const previous=r.result.payload===undefined?undefined:projectPayload(r.result.payload);
     tx.objectStore('project_revisions').add({...old,...(previous===undefined?{}:{payload:previous})});
@@ -223,13 +238,13 @@ export class ProjectStorage {
  setActiveProject(workspaceId:WorkspaceId,projectId:string):Promise<void>{
   return transaction(this.db,['projects','workspace_state'],'readwrite',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
-   r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('workspace_state').put({workspaceId,projectId});done(undefined);}catch(e){fail(e);}};
+   r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId||projectMetadata(r.result).archived)throw new Error('Workspace mismatch or archived project');tx.objectStore('workspace_state').put({workspaceId,projectId});done(undefined);}catch(e){fail(e);}};
   });
  }
  getActiveProject(workspaceId:WorkspaceId):Promise<ProjectRecord|null>{
   return transaction(this.db,['projects','workspace_state'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('workspace_state').get(workspaceId);
-   r.onsuccess=()=>{if(!r.result){done(null);return;}const p=tx.objectStore('projects').get(r.result.projectId);p.onsuccess=()=>{try{done(p.result?.workspaceId===workspaceId?projectMetadata(p.result):null);}catch(e){fail(e);}};};
+   r.onsuccess=()=>{if(!r.result){done(null);return;}const p=tx.objectStore('projects').get(r.result.projectId);p.onsuccess=()=>{try{done(p.result?.workspaceId===workspaceId&&!p.result.archived?projectMetadata(p.result):null);}catch(e){fail(e);}};};
   });
  }
 }
