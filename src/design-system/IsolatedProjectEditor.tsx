@@ -1,4 +1,4 @@
-import {NexusToast} from './NexusToast';
+import {NexusToast,type NexusToastKind} from './NexusToast';
 import {NexusConfirmDialog} from './NexusConfirmDialog';
 import {readUiLanguage,saveUiLanguage,uiText} from './uiLanguage';
 import {ContextHelp,type HelpLanguage} from './ContextHelp';
@@ -63,7 +63,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   setNavCompact(next);
   try {localStorage.setItem('story-nexus.ui-navigation.v1',next?'compact':'full');} catch {}
  }
- const [notice,setNotice]=useState('');
+ const [notification,setNotification]=useState<{message:string;kind:NexusToastKind}>({message:'',kind:'info'});
+ const notice=notification.message;
+ function setNotice(message:string,kind:NexusToastKind='info'){setNotification({message,kind});}
  const [archiveTarget,setArchiveTarget]=useState<ProjectRecord|null>(null);
  const [deleteDialog,setDeleteDialog]=useState<{project:ProjectRecord;step:1|2;value:string}|null>(null);
  const [nameDialog,setNameDialog]=useState<{project:ProjectRecord;mode:'rename'|'duplicate';value:string}|null>(null);
@@ -221,8 +223,8 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   try{
    const draft=currentDraft();
    const next=applyModulePatch(draft,{module:'combine',narrativeScenes:scenes});
-   setProduction(JSON.stringify(next.production,null,2));setScript(fullScript);setSeo(fullScript);setDirty(true);setNotice('Scenes copied to current project draft.');
-  }catch{setNotice('Scene transfer rejected: unsupported scene data. Existing draft retained.');}
+   setProduction(JSON.stringify(next.production,null,2));setScript(fullScript);setSeo(fullScript);setDirty(true);setNotice('Scenes copied to current project draft.','success');
+  }catch{setNotice('Scene transfer rejected: unsupported scene data. Existing draft retained.','error');}
  }
  function updateNativeSeo(action:SetStateAction<YoutubeSeoState>){
   try{
@@ -231,7 +233,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    const next=typeof action==='function'?action(previous):action;
    const projected=applyModulePatch(draft,{module:'seo',seoScript:seo,seo:{tone:next.tone,selectedTitleId:next.selectedTitleId,titles:next.titles.map(t=>({id:t.id,category:t.category,categoryRu:t.categoryRu,title:t.title})),description:next.description,tagsString:next.tagsString}});
    setExtras(JSON.stringify(projected.legacyExtras,null,2));setDirty(true);
-  }catch{setNotice('SEO update rejected. Existing draft retained.');}
+  }catch{setNotice('SEO update rejected. Existing draft retained.','error');}
  }
  const combineCapture=useRef<(slice:AetherCombineDraftSlice)=>void>(()=>{});
  combineCapture.current=slice=>{
@@ -248,7 +250,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    const draft=currentDraft(),prev=draft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]};
    const next=projectPayload({...draft,production:{...prev,[key]:key==='fps'||key==='loopHours'?Number(value):value,...(key==='loopHours'&&prev.timeline_slots?{timeline_slots:synchronizeTimeline(prev.timeline_slots,Number(value),prev.fps)}:{})}});
    setProduction(JSON.stringify(next.production,null,2));setDirty(true);
-  }catch{setNotice('Invalid loop setting or target would truncate existing timeline data. No changes saved.');}
+  }catch{setNotice('Invalid loop setting or target would truncate existing timeline data. No changes saved.','warning');}
  }
  const captureExtras=useRef<(section:'thumbnails'|'voice',value:unknown)=>void>(()=>{});
  captureExtras.current=(section,value)=>{
@@ -267,7 +269,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    if(blob.size>32*1024*1024)throw new Error('Image too large');
    const bitmap=await createImageBitmap(blob);bitmap.close();
    await db.replaceProjectImages(scope.workspaceId,scope.projectId,slots,blob);
-   setImageRefresh(v=>v+1);setNotice('Native image saved: '+slots.join(', '));
+   setImageRefresh(v=>v+1);setNotice('Native image saved: '+slots.join(', '),'success');
    if(nextTab){setArtInput(null);setNativeTab(nextTab);}
   }catch{setError('Native image could not be saved. Existing stored images retained.');}
   finally{releaseAssetWrite();}
@@ -275,7 +277,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  async function attachReleaseThumbnail(blob:Blob){
   if(!active||!storage.current||!acquireAssetWrite())return;
   const db=storage.current,scope=active.project;setError('');
-  try{await db.saveReleaseThumbnail(scope.workspaceId,scope.projectId,blob);setImageRefresh(v=>v+1);setNotice('Project release thumbnail saved');}
+  try{await db.saveReleaseThumbnail(scope.workspaceId,scope.projectId,blob);setImageRefresh(v=>v+1);setNotice('Project release thumbnail saved','success');}
   catch{setError('Release thumbnail could not be saved. Existing attachment retained.');}
   finally{releaseAssetWrite();}
  }
@@ -283,7 +285,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   if(!active||!storage.current||!acquireAssetWrite())return;
   const db=storage.current,scope=active.project;
   setError('');
-  try{await db.removeProjectThumbnail(scope.workspaceId,scope.projectId,slot);setImageRefresh(v=>v+1);setNotice('Native image removed: '+slot);}
+  try{await db.removeProjectThumbnail(scope.workspaceId,scope.projectId,slot);setImageRefresh(v=>v+1);setNotice('Native image removed: '+slot,'success');}
   catch{setError('Native image removal failed. Existing stored image retained.');}
   finally{releaseAssetWrite();}
  }
@@ -324,23 +326,23 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>{t("Close native module","Закрыть модуль")}</button>
  </nav></aside>}
  <section className="nexus-workspace-content">
- {notice&&<NexusToast kind="info" title={t("Notification","Уведомление")} message={notice} dismissLabel={t("Dismiss notification","Закрыть уведомление")} onDismiss={()=>setNotice('')}/>}
+ {notice&&<NexusToast kind={notification.kind} title={notification.kind==='success'?t("Success","Успешно"):notification.kind==='warning'?t("Warning","Внимание"):notification.kind==='error'?t("Error","Ошибка"):t("Notification","Уведомление")} message={notice} dismissLabel={t("Dismiss notification","Закрыть уведомление")} onDismiss={()=>setNotice('')}/>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
- <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
+ <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={message=>setNotice(message)}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='seo'&&<fieldset disabled={busy} key={active?.project.projectId+':seo'} aria-label="Native YouTube SEO">
  <YouTubeSeoView projectName={active?.project.name??''} scriptContext={seo||script} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} loopSlots={nativeDraft.production?.timeline_slots??[]} externalChaptersTxt={chapters} onClearExternalChapters={()=>{setChapters('');setDirty(true);}} seoState={(nativeDraft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient')} onSeoStateChange={updateNativeSeo} onApplyTitleToThumbnail={v=>{setTitle(v);setDirty(true);}} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='combine'&&<fieldset disabled={busy} key={active?.project.projectId+':combine'} aria-label="Native Montage Combine">
- <MontageCombineView isolatedEditing ghToken="" ghRepo="" ghBranch="" gdriveFolderId="" onGdriveFolderIdChange={()=>{}} driveUser={null} driveToken={null} onDriveAuthChange={()=>{}} initialCombineDraft={hydrateCombine(nativeDraft)} onCombineDraftChange={onCombineChange} transferredScript="" onClearTransferredScript={()=>{}} onOpenConfigModal={()=>setNotice('External actions disabled in preview')} onStartRenderStatus={()=>{}} onCancelRenderRun={()=>{}} onNotify={setNotice} encodeManifestBase64={()=>''} terminalStatus="idle" terminalSeconds={0} terminalLogs={[]} onClearTerminalLogs={()=>{}}/>
+ <MontageCombineView isolatedEditing ghToken="" ghRepo="" ghBranch="" gdriveFolderId="" onGdriveFolderIdChange={()=>{}} driveUser={null} driveToken={null} onDriveAuthChange={()=>{}} initialCombineDraft={hydrateCombine(nativeDraft)} onCombineDraftChange={onCombineChange} transferredScript="" onClearTransferredScript={()=>{}} onOpenConfigModal={()=>setNotice('External actions disabled in preview','warning')} onStartRenderStatus={()=>{}} onCancelRenderRun={()=>{}} onNotify={setNotice} encodeManifestBase64={()=>''} terminalStatus="idle" terminalSeconds={0} terminalLogs={[]} onClearTerminalLogs={()=>{}}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='loop'&&<fieldset disabled={busy||assetBusy} aria-label="Scoped Loop settings">
  <LoopBuilderHeader loopProjectName={active?.project.name??''} videoCodec={nativeDraft.production?.codec??'libx264'} videoCrf={nativeDraft.production?.render?.crf??18} videoFps={nativeDraft.production?.fps??24} audioBitrateKbps={nativeDraft.production?.render?.audioBitrate??320} actCrossfadeSec={nativeDraft.production?.render?.actCrossfadeSec??1} internalLoopCrossfadeSec={nativeDraft.production?.render?.internalCrossfadeSec??1} slotCount={nativeDraft.production?.timeline_slots?.length??0} totalInsertsCount={nativeDraft.production?.timeline_slots?.reduce((n,s)=>n+s.inserts.length,0)??0} durationLabel={'Target '+(nativeDraft.production?.loopHours??3)+'h'}/>
  <p>Shared native header with scoped editing panels. Legacy manifest import and render dispatch are not mounted.</p>
  {(['fps','codec','resolution','loopHours'] as const).map(k=><label key={k}>{k}<select aria-label={'Loop '+k} value={String(nativeDraft.production?.[k]??({fps:24,codec:'libx264',resolution:'4k',loopHours:3}[k]))} onChange={e=>changeLoop(k,e.target.value)}>{({fps:['24','30','60'],codec:['libx264','libx265'],resolution:['720p','1080p','2k','4k'],loopHours:['3','4','5','6','7','8','9','10']}[k]).map(v=><option key={v}>{v}</option>)}</select></label>)}
  <LoopDurationControls loopHours={nativeDraft.production?.loopHours??3} durationSummary={nativeDraft.production?.timeline_slots?.length?'Calculated timeline: '+timelineDuration(nativeDraft.production.timeline_slots).toFixed(3)+' sec (excluding final black)':'No timeline slots yet; target only.'} onPreset={hours=>changeLoop('loopHours',String(hours))} onExact={value=>{const n=Number(value);if(Number.isInteger(n)&&n>=3&&n<=10)changeLoop('loopHours',value);}}/>
- <ScopedRenderSettings production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid render settings');}}}/>
- <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings');}}}/>
+ <ScopedRenderSettings production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid render settings','error');}}}/>
+ <ScopedTimelinePanel production={nativeDraft.production??{fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[]}} onChange={next=>{try{const validated=projectPayload({...nativeDraft,production:next});setProduction(JSON.stringify(validated.production,null,2));setDirty(true);}catch{setNotice('Invalid timeline settings','error');}}}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='loop'&&active&&storage.current&&<fieldset disabled={busy||assetBusy} key={active.project.projectId+':assets'}>
  <ScopedAssetPanel storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} payload={nativeDraft} busy={busy||assetBusy} acquireWrite={acquireAssetWrite} releaseWrite={releaseAssetWrite} saveBeforeAttach={async()=>{if(!context.current||dirty)throw new Error('Save project and reopen Loop settings before attaching');}}/>
