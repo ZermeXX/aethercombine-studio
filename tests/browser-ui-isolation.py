@@ -225,6 +225,27 @@ with sync_playwright() as p:
     assert restored_backup["content"]["project"]["archived"] is False
     assert restored_backup["content"]["payload"]==archived_backup["content"]["payload"]
     print("NEXUS_PROJECT_RESTORE_PASS")
+    page.once("dialog",lambda d:d.accept())
+    restored.get_by_role("button",name="Archive project").click()
+    expect(restored).to_have_count(0)
+    delete_button=archive.get_by_role("button",name="Delete archived project")
+    page.once("dialog",lambda d:d.dismiss())
+    delete_button.click()
+    expect(delete_button).to_have_count(1)
+    def wrong_delete(d):
+        d.accept() if d.type=="confirm" else d.accept("wrong name")
+    page.on("dialog",wrong_delete)
+    delete_button.click()
+    page.remove_listener("dialog",wrong_delete)
+    expect(delete_button).to_have_count(1)
+    def confirmed_delete(d):
+        d.accept() if d.type=="confirm" else d.accept("History UI — imported")
+    page.on("dialog",confirmed_delete)
+    delete_button.click()
+    page.remove_listener("dialog",confirmed_delete)
+    expect(delete_button).to_have_count(0)
+    expect(script).to_have_value("History narration")
+    print("NEXUS_PROJECT_DELETE_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
     page.get_by_text("Advanced production settings (JSON)",exact=True).click()
