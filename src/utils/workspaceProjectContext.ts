@@ -27,6 +27,9 @@ export class WorkspaceProjectContext {
   await this.storage.createProject(project,payload);
   return {project,payload};
  }
+ async duplicate(scope:ProjectScope,expectedRevision:number,name:string):Promise<ProjectRecord>{
+  return this.storage.duplicateProject(scope.workspaceId,scope.projectId,expectedRevision,name);
+ }
  async rename(scope:ProjectScope,expectedRevision:number,name:string):Promise<ProjectSnapshot>{
   const clean=name.trim();
   if(!clean)throw new Error('Project name required');
