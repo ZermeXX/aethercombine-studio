@@ -32,6 +32,7 @@ declare global {
 
 interface ThumbnailStudioViewProps {
   isolatedEditing?: boolean;
+  onProjectReleaseThumbnail?: (blob:Blob)=>void;
   onProjectImageRemove?: (slot:ThumbnailSlotId)=>void;
   onProjectImageData?: (slot:ThumbnailSlotId,dataUrl:string)=>void;
   onProjectImageFile?: (slot:ThumbnailSlotId,file:File)=>void;
@@ -990,6 +991,7 @@ const computeEndScreenWindow = (durationSec: number): string => {
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   isolatedEditing = false,
   onProjectImageRemove,
+  onProjectReleaseThumbnail,
   projectImageUrls,
   onProjectImageFile,
   onProjectImageData,
@@ -3899,6 +3901,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
               )}
             </div>
+            {isolatedEditing&&onProjectReleaseThumbnail&&<button type="button" disabled={Boolean(isExportingFormat)} onClick={()=>{try{const canvas=buildFullResThumbnailCanvas(activeSlot);const url=canvas.toDataURL('image/png');const bytes=atob(url.split(',')[1]);onProjectReleaseThumbnail(new Blob([Uint8Array.from(bytes,c=>c.charCodeAt(0))],{type:'image/png'}));}catch{onNotify('Release thumbnail could not be prepared','error');}}}>Attach active thumbnail to project release</button>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
