@@ -323,3 +323,11 @@
 .nexus-project-cards button > *,.nexus-channel-cards button > * {min-width:0;max-width:100%;overflow-wrap:anywhere;}
 .nexus-workspace-content {grid-template-columns:minmax(0,1fr);}
 .nexus-workspace-content > * {min-width:0;max-width:100%;overflow-wrap:anywhere;}
+
+.nexus-project-cards button {align-content:start;gap:8px;padding:12px;position:relative;}
+.nexus-card-cover {display:grid;place-items:center;aspect-ratio:16/9;border-radius:8px;background:linear-gradient(145deg,#152f50,#34224f);color:var(--nx-cyan);font-size:2rem;}
+.nexus-card-cover[data-format="ambient"] {background:linear-gradient(145deg,#162f36,#302448);color:var(--nx-gold);}
+.nexus-card-cover[data-format="shorts"] {background:linear-gradient(145deg,#29204e,#16334d);color:#c5afff;}
+.nexus-card-name {font-weight:650;overflow-wrap:anywhere;}
+.nexus-card-state {font-size:.75rem;color:var(--nx-muted);border-top:1px solid var(--nx-border);padding-top:8px;}
+.nexus-project-cards button[aria-pressed=true] .nexus-card-state {color:var(--nx-cyan);}
