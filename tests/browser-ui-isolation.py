@@ -41,7 +41,7 @@ with sync_playwright() as p:
     expect(script).to_be_enabled()
     expect(script).to_have_value("")
     expect(page.get_by_role("button",name="Open scoped Loop settings")).to_be_visible()
-    expect(page.get_by_role("button",name="Open native Montage Combine")).to_have_count(0)
+    expect(page.get_by_role("button",name="Open native Montage Combine")).to_be_visible()
     script.fill("Ambient narration")
     ws.select_option("histoviva")
     expect(script).to_have_value("History narration")
