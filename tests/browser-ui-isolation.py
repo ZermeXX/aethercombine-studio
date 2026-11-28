@@ -212,6 +212,32 @@ with sync_playwright() as p:
     script.fill("History narration")
     quick.click()
     expect(header.locator(".nexus-header-status")).to_have_attribute("data-state","saved")
+    # Active project help must not execute its associated action.
+    for lang, actions, help_label, more, limitations in (
+        ("EN", ("Rename", "Duplicate", "Export project", "Archive project"), "Help", "Learn more", "Limitations"),
+        ("RU", ("Переименовать", "Дублировать", "Экспорт проекта", "Архивировать проект"), "Справка", "Подробнее", "Ограничения"),
+    ):
+        toggle = header.get_by_role("button", name="Help language")
+        if toggle.inner_text().strip() != lang:
+            toggle.click()
+        if not menu.evaluate("el => el.open"):
+            menu.locator("summary").click()
+        for action in actions:
+            row = menu.locator(".nexus-help-row").filter(has=page.get_by_role("button", name=action, exact=True))
+            trigger = row.get_by_role("button", name=help_label, exact=True)
+            trigger.click()
+            expect(trigger).to_have_attribute("aria-expanded", "true")
+            row.get_by_role("button", name=more, exact=True).click()
+            expect(row.get_by_text(limitations, exact=True)).to_be_visible()
+            trigger.press("Escape")
+            expect(trigger).to_have_attribute("aria-expanded", "false")
+            expect(trigger).to_be_focused()
+            expect(page.get_by_role("dialog")).to_have_count(0)
+        expect(script).to_have_value("History narration")
+    header.get_by_role("button", name="Help language").click()
+    if not menu.evaluate("el => el.open"):
+        menu.locator("summary").click()
+    print("NEXUS_ACTIVE_PROJECT_HELP_BILINGUAL_PASS")
     menu.get_by_role("button",name="Rename").click()
     name_dialog=page.get_by_role("dialog",name="Rename project")
     name_dialog.get_by_role("textbox",name="Project name").fill("History UI renamed")
