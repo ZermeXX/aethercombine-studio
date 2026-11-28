@@ -1,4 +1,4 @@
-import {dispatchStrictPreflight,findStrictPreflightRun} from '../utils/strictPreflightDispatch';
+import {dispatchStrictPreflight,findStrictPreflightRun,verifyStrictPreflightJobs} from '../utils/strictPreflightDispatch';
 import {prepareLoopPreflight} from '../utils/loopProductionPreflight';
 import {adaptLoopTimeline,buildScopedLoopManifest} from '../utils/loopRendererAdapter';
 import {validateSlotInserts} from '../utils/validateSlotInserts';
@@ -74,7 +74,15 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  }
  async function lookupPreflight(){
   if(!dispatchResult||!acquireWrite())return;
-  try{const run=await findStrictPreflightRun(dispatchResult.requestId,dispatchResult.rendererSha,authToken);setDispatchStatus(run?'Run '+run.id+': '+run.status+' / '+(run.conclusion??'pending')+'; runner verification pending':'Matching run not found yet');}catch{setDispatchStatus('Run lookup failed');}finally{setAuthToken('');releaseWrite();}
+  try{
+   const run=await findStrictPreflightRun(dispatchResult.requestId,dispatchResult.rendererSha,authToken);
+   if(!run){setDispatchStatus('Matching run not found yet');return;}
+   const prefix='Run '+run.id+': '+run.status+' / '+(run.conclusion??'pending');
+   if(run.status==='completed'&&run.conclusion==='success'){
+    const verified=await verifyStrictPreflightJobs(run.id,dispatchResult.rendererSha,authToken);
+    setDispatchStatus(prefix+(verified?'; strict runner evidence verified; production dispatch blocked':'; strict runner evidence not verified'));
+   }else setDispatchStatus(prefix+'; runner verification pending');
+  }catch{setDispatchStatus('Run lookup or evidence verification failed');}finally{setAuthToken('');releaseWrite();}
  }
  async function checkPreflight(){
   if(!acquireWrite())return;setReport('');
