@@ -207,6 +207,24 @@ export class ProjectStorage {
    }catch(e){fail(e);}};
   });
  }
+ deleteArchivedProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number,confirmedName:string):Promise<void>{
+  return transaction(this.db,['projects','workspace_state','project_assets','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const projects=tx.objectStore('projects'),r=projects.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||!old.archived||old.name!==confirmedName)throw new Error('Ownership, archive or revision conflict');
+    const a=tx.objectStore('workspace_state').get(workspaceId);
+    a.onsuccess=()=>{try{
+     if(a.result?.projectId===projectId)throw new Error('Cannot delete active project');
+     for(const name of ['project_assets','project_revisions']){
+      const store=tx.objectStore(name),cursor=store.index('projectId').openCursor(IDBKeyRange.only(projectId));
+      cursor.onsuccess=()=>{const item=cursor.result;if(item){item.delete();item.continue();}};
+     }
+     projects.delete(projectId);done(undefined);
+    }catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
  getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
