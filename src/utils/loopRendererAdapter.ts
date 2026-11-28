@@ -14,6 +14,11 @@ export function adaptLoopTimeline(slots:readonly TimelineSlot[]){
   if(!['none','xfade'].includes(transition.type))throw new Error('Unsupported act transition in renderer preview');
   const overlap=transition.type==='xfade'?transition.duration_sec:0;
   if(!Number.isFinite(transition.duration_sec)||transition.duration_sec<0||(transition.type==='none'&&transition.duration_sec!==0)||overlap>=slot.slot_duration_sec||(index===slots.length-1&&overlap!==0)||(index<slots.length-1&&overlap>=slots[index+1].slot_duration_sec))throw new Error('Invalid act transition');
+  const previous=index>0?slots[index-1].slot_transition_out:undefined;
+  const incoming=previous?.type==='xfade'?previous.duration_sec:0;
+  if(incoming+overlap>=slot.slot_duration_sec)throw new Error('Act crossfades overlap inside slot');
+  // V8.1 smart concat omits bodies of two seconds or less.
+  if(slots.length>1&&slot.slot_duration_sec-incoming-overlap<=2)throw new Error('Act body too short for current renderer');
   const result={slot_id:slot.slot_id,title:slot.title,start_sec:start,slot_duration_sec:slot.slot_duration_sec,base_content:{file_name:file,loop_crossfade_sec:slot.internal_loop_crossfade_sec},slot_transition_out:{type:transition.type==='xfade'?'crossfade':'none',duration_sec:overlap},inserts:slot.inserts.map(ins=>{
    if(!ins.file_name.trim())throw new Error('Missing insert asset');
    if(ins.hold_until_end||ins.audio_soft_compressor||ins.max_peak_over_bed_db!==undefined)throw new Error('Unsupported insert audio or hold option in renderer preview');
