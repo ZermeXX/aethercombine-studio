@@ -220,6 +220,27 @@ with sync_playwright() as p:
     page.wait_for_function("() => {const i=document.querySelector('img[alt=\"Stored project image C\"]');return i?.naturalWidth===1920 && i?.naturalHeight===1080}")
     assert page.get_by_alt_text("Stored project image A").evaluate("(img) => [img.naturalWidth,img.naturalHeight]")==source_dimensions
     print("NATIVE_THUMBNAIL_RESAMPLE_ISOLATION_PASS")
+    from pathlib import Path
+    for label,ext,width,height in [
+        ("4K JPEG (3840×2160)","jpg",3840,2160),
+        ("4K PNG (3840×2160)","png",3840,2160),
+        ("720p JPEG (1280×720)","jpg",1280,720),
+        ("720p PNG (1280×720)","png",1280,720),
+    ]:
+        with page.expect_download(timeout=60000) as exported:
+            page.get_by_role("button",name=label,exact=True).click()
+        download=exported.value
+        assert download.failure() is None
+        assert download.suggested_filename==f"thumbnail_{'4k' if width==3840 else '720p'}_{width}x{height}_C.{ext}"
+        data=Path(download.path()).read_bytes()
+        assert data.startswith(b"\\x89PNG\\r\\n\\x1a\\n" if ext=="png" else b"\\xff\\xd8\\xff")
+        import base64
+        mime="image/png" if ext=="png" else "image/jpeg"
+        dimensions=page.evaluate("""async ({data,mime}) => {const img=new Image();img.src='data:'+mime+';base64,'+data;await img.decode();return [img.naturalWidth,img.naturalHeight]}""",{"data":base64.b64encode(data).decode(),"mime":mime})
+        assert dimensions==[width,height],dimensions
+        if width==1280 and ext=="jpg": assert len(data)<2_000_000,len(data)
+        print("NATIVE_THUMBNAIL_EXPORT_PASS",ext,width,height,len(data))
+    print("NATIVE_THUMBNAIL_EXPORT_ALL_FORMATS_PASS")
     page.get_by_role("button",name="Remove native thumbnail C").click()
     expect(page.get_by_alt_text("Stored project image C")).to_have_count(0)
     page.get_by_label("Project image art",exact=True).set_input_files({"name":"art.png","mimeType":"image/png","buffer":png})
