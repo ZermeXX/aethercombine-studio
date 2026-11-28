@@ -428,3 +428,16 @@
  .nexus-preview .nexus-workspace-content > fieldset {padding:8px;margin-inline:0;}
  .nexus-preview .nexus-workspace-content > fieldset > legend {font-size:14px;}
 }
+
+/* Nexus Script responds to available editor width, not the outer viewport. */
+.nexus-preview fieldset[aria-label="Native VerbaFlow"] {container-type:inline-size;container-name:nexus-script;}
+@container nexus-script (max-width:850px){
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] .grid[class~="lg:grid-cols-12"] {grid-template-columns:minmax(0,1fr);}
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] .grid[class~="lg:grid-cols-12"] > * {grid-column:1/-1;min-width:0;}
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] [class~="xl:flex-row"] {flex-direction:column;align-items:stretch;}
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] [class~="xl:grid-cols-4"] {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container nexus-script (max-width:420px){
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] [class~="xl:grid-cols-4"] {grid-template-columns:minmax(0,1fr);}
+ .nexus-preview fieldset[aria-label="Native VerbaFlow"] button {max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:44px;}
+}
