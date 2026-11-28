@@ -137,6 +137,7 @@ with sync_playwright() as p:
     print("PRODUCTION_PREFLIGHT_BROWSER_PASS")
     # Intercept all GitHub API calls; never dispatch a real cloud job in browser CI.
     requests=[]
+    evidence_valid=[True]
     def github_fixture(route):
         req=route.request
         headers={"access-control-allow-origin":"*","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, accept, content-type, x-github-api-version"}
@@ -154,6 +155,12 @@ with sync_playwright() as p:
             assert "synthetic-preflight-token" not in body["inputs"]["manifest_payload"]
             requests.append(body)
             route.fulfill(status=204,headers=headers)
+        elif "/runs/42/jobs?" in req.url:
+            names=["Strict Project Dispatch Identity Guard","Preflight Asset Check","Download Source Clips (only needed files)","Strict Project Media Verification","Build and Run FFmpeg Pipeline","Upload Output Video, Shorts & Metadata to Google Drive"]
+            steps=[{"name":name,"status":"completed","conclusion":"success" if i<4 else "skipped"} for i,name in enumerate(names)]
+            if not evidence_valid[0]:
+                steps=[s for s in steps if s["name"]!="Strict Project Media Verification"]
+            route.fulfill(status=200,headers=headers,json={"jobs":[{"run_id":42,"head_sha":preflight["rendererCandidate"],"name":"render_and_upload","status":"completed","conclusion":"success","steps":steps}]})
         elif "/runs?" in req.url:
             route.fulfill(status=200,headers=headers,json={"workflow_runs":[{"id":42,"display_title":"Strict preflight "+requests[0]["inputs"]["request_id"],"head_sha":preflight["rendererCandidate"],"head_branch":"fix/loop-timestamp-boundaries-v81","event":"workflow_dispatch","status":"completed","conclusion":"success"}]})
         else:
@@ -171,7 +178,13 @@ with sync_playwright() as p:
     expect(lookup).to_be_disabled()
     token.fill("synthetic-preflight-token")
     lookup.click()
-    expect(page.get_by_text("Run 42: completed / success; runner verification pending",exact=True)).to_be_visible()
+    expect(page.get_by_text("Run 42: completed / success; strict runner evidence verified; production dispatch blocked",exact=True)).to_be_visible()
+    expect(token).to_have_value("")
+    evidence_valid[0]=False
+    token.fill("synthetic-preflight-token")
+    lookup.click()
+    expect(page.get_by_text("Run 42: completed / success; strict runner evidence not verified",exact=True)).to_be_visible()
+    print("STRICT_EVIDENCE_UI_BROWSER_PASS")
     expect(token).to_have_value("")
     token.fill("synthetic-preflight-token")
     page.get_by_label("Preflight Drive folder ID").fill("another-folder")
