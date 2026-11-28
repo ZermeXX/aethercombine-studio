@@ -24,6 +24,33 @@ with sync_playwright() as p:
     script=page.get_by_label("VerbaFlow script")
     expect(name).to_be_enabled()
     expect(page.get_by_role("navigation",name="Production modules")).to_have_count(0)
+    # Two pages in one context share IndexedDB, but retain independent loaded revisions.
+    conflict_context=browser.new_context()
+    first=conflict_context.new_page()
+    second=conflict_context.new_page()
+    for tab in (first,second):
+        tab.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
+        tab.get_by_role("button",name="Open isolated project editor").click()
+        expect(tab.get_by_label("New project name")).to_be_enabled()
+        if tab==first:
+            tab.get_by_label("New project name").fill("Conflict fixture")
+            tab.get_by_role("button",name="Create isolated project").click()
+            expect(tab.get_by_label("VerbaFlow script")).to_be_enabled()
+        else:
+            tab.locator(".nexus-project-card").filter(has_text="Conflict fixture").locator(":scope > button").click()
+        expect(tab.get_by_label("VerbaFlow script")).to_have_value("")
+    first.get_by_label("VerbaFlow script").fill("Committed first tab")
+    first.get_by_role("button",name="Save project").click()
+    expect(first.locator(".nexus-header-status")).to_have_attribute("data-state","saved")
+    second.get_by_label("VerbaFlow script").fill("Unsaved second tab")
+    second.get_by_role("button",name="Save project").click()
+    expect(second.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
+    expect(second.get_by_label("VerbaFlow script")).to_have_value("Unsaved second tab")
+    first.reload()
+    first.get_by_role("button",name="Open isolated project editor").click()
+    expect(first.get_by_label("VerbaFlow script")).to_have_value("Committed first tab")
+    conflict_context.close()
+    print("NEXUS_PROJECT_MULTITAB_CONFLICT_PASS")
     # Dedicated shell acceptance in an independent browser context.
     shell = browser.new_page(viewport={"width":390,"height":844}, is_mobile=True, has_touch=True)
     shell.goto("http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1")
