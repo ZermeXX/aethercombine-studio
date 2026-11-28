@@ -22,15 +22,15 @@ V9.0 is under development in the workspace-isolation branch. The deployed studio
 
 ## Production modules
 
-| Studio module (planned V9 branding) | Existing capabilities |
+| Studio module | Existing capabilities |
 |---|---|
-| Nexus Script | VerbaFlow scripts, chapters, narration normalization and multilingual SRT |
+| Nexus Script | Scripts, chapters, narration normalization and multilingual SRT |
 | Nexus Montage | Scene timeline, hybrid synchronization, audio mixer, broadcast graphics |
 | Nexus Ambient | Multi-hour loops, act transitions and inserts |
 | Nexus Cover | A/B/C thumbnails and feed preview |
 | Nexus Art | Image editing, background removal, resizing and branding |
 | Nexus Growth | Titles, descriptions, chapters, tags and release cards |
-| Nexus Voice / Nexus Shorts | V9 module redesign roadmap |
+| Nexus Voice / Nexus Shorts | Voice and short-form production modules; redesign in progress |
 
 HISTOVIVA and The Whisker Trio have separate project workspaces in V9 development. Ambient is reserved for The Whisker Trio.
 
