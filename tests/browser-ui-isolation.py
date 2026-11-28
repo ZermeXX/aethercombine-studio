@@ -211,6 +211,20 @@ with sync_playwright() as p:
     assert archived_backup["content"]["payload"]["script"]=="History narration"
     expect(script).to_have_value("History narration")
     print("NEXUS_PROJECT_ARCHIVE_PASS")
+    archive.get_by_role("button",name="Restore project").click()
+    expect(restored).to_have_count(1)
+    expect(archive.get_by_role("button",name="Restore project")).to_have_count(0)
+    expect(script).to_have_value("History narration")
+    restored.locator(".nexus-card-menu summary").click()
+    with page.expect_download() as restored_export:
+        restored.get_by_role("button",name="Export project").click()
+    with open(restored_export.value.path(),encoding="utf-8") as f:
+        restored_backup=json.load(f)
+    assert restored_backup["content"]["project"]["projectId"]==archived_backup["content"]["project"]["projectId"]
+    assert restored_backup["content"]["project"]["revision"]==archived_backup["content"]["project"]["revision"]+1
+    assert restored_backup["content"]["project"]["archived"] is False
+    assert restored_backup["content"]["payload"]==archived_backup["content"]["payload"]
+    print("NEXUS_PROJECT_RESTORE_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
     page.get_by_text("Advanced production settings (JSON)",exact=True).click()
