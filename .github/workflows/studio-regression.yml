@@ -98,13 +98,13 @@ jobs:
           PY
 
       - name: Package isolated V9 preview
-        if: success() && github.event_name == 'pull_request' && github.head_ref == 'feature/v9-workspace-isolation'
+        if: success() && ((github.event_name == 'pull_request' && github.head_ref == 'feature/v9-workspace-isolation') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/v9-workspace-isolation'))
         run: |
           mkdir -p preview/aethercombine-studio
           cp -r dist/. preview/aethercombine-studio/
           printf '%s\n' 'Run from the extracted preview directory:' 'python -m http.server 8765 --bind 127.0.0.1' 'Open http://127.0.0.1:8765/aethercombine-studio/?v9-project-preview=1' 'Do not expose this server on a public network. Use only a test project. Stop server with Ctrl+C.' > preview/README.txt
       - name: Upload isolated V9 preview ZIP
-        if: success() && github.event_name == 'pull_request' && github.head_ref == 'feature/v9-workspace-isolation'
+        if: success() && ((github.event_name == 'pull_request' && github.head_ref == 'feature/v9-workspace-isolation') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/v9-workspace-isolation'))
         uses: actions/upload-artifact@v4
         with:
           name: studio-v9-isolated-preview
