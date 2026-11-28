@@ -45,6 +45,11 @@ with sync_playwright() as p:
     second.get_by_label("VerbaFlow script").fill("Unsaved second tab")
     second.get_by_role("button",name="Save project").click()
     expect(second.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
+    second.wait_for_timeout(6200)
+    expect(second.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
+    second.get_by_role("button",name="Dismiss notification").click()
+    expect(second.get_by_role("alert")).to_have_count(0)
+    print("NEXUS_TOAST_ERROR_PERSISTENCE_PASS")
     expect(second.get_by_label("VerbaFlow script")).to_have_value("Unsaved second tab")
     first.reload()
     first.get_by_role("button",name="Open isolated project editor").click()
@@ -718,6 +723,28 @@ with sync_playwright() as p:
     print("PROJECT_RELEASE_ATTACHMENT_RELOAD_PASS")
     page.get_by_role("button",name="Применить к Обложке A").click()
     expect(page.get_by_text("Native image saved: art, A",exact=True)).to_be_visible()
+    # Real success notification: viewport bounds, hover/focus pause, automatic and manual dismissal.
+    toast=page.get_by_role("region",name="Success",exact=True)
+    dismiss=toast.get_by_role("button",name="Dismiss notification")
+    expect(toast).to_be_visible()
+    dismiss.focus()
+    for width,height in [(320,640),(390,844),(768,1024),(1280,800)]:
+        page.set_viewport_size({"width":width,"height":height})
+        assert toast.evaluate("""el => {const r=el.getBoundingClientRect();return r.left>=0 && r.top>=0 && r.right<=innerWidth+1 && r.bottom<=innerHeight+1;}"""), f"Toast outside viewport {width}x{height}"
+    page.wait_for_timeout(6200)
+    expect(toast).to_be_visible()
+    toast.hover()
+    dismiss.evaluate("el => el.blur()")
+    page.wait_for_timeout(6200)
+    expect(toast).to_be_visible()
+    page.mouse.move(0,0)
+    expect(toast).to_be_hidden(timeout=8500)
+    page.get_by_role("button",name="Применить к Обложке A").click()
+    expect(toast).to_be_visible()
+    dismiss.click()
+    expect(toast).to_have_count(0)
+    print("NEXUS_TOAST_SUCCESS_TIMER_LAYOUT_PASS")
+
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_voice_settings')}finally{window.__auditEnabled=true}}")=="voice-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
