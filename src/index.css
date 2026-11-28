@@ -338,3 +338,27 @@
 .nexus-card-menu summary{cursor:pointer;min-height:44px;line-height:44px;overflow-wrap:anywhere;}
 .nexus-card-menu > button{width:100%;min-height:44px;margin-bottom:4px;padding:8px;overflow-wrap:anywhere;}
 .nexus-card-menu summary:focus-visible{outline:2px solid var(--nx-cyan);}
+
+/* 010.6.7.16.7.1: premium shell buttons, without changing native module controls. */
+.nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button,
+.nexus-preview > button {
+ min-height:var(--nx-control);
+ max-width:100%;
+ overflow-wrap:anywhere;
+ cursor:pointer;
+ transition:background-color .15s,border-color .15s,box-shadow .15s;
+}
+.nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button:disabled,
+.nexus-preview > button:disabled {opacity:.48;cursor:not-allowed;}
+.nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button:focus-visible,
+.nexus-preview > button:focus-visible {outline:2px solid var(--nx-cyan);outline-offset:2px;}
+@media(hover:hover) {
+ .nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button:not(:disabled):hover,
+ .nexus-preview > button:not(:disabled):hover {border-color:#a78bfa;box-shadow:0 0 0 1px #a78bfa55;}
+}
+.nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button:not(:disabled):active,
+.nexus-preview > button:not(:disabled):active {box-shadow:inset 0 2px 5px #0008;}
+@media(prefers-reduced-motion:reduce) {
+ .nexus-preview :is(.nexus-smart-header,.nexus-project-picker,.nexus-sidebar) button,
+ .nexus-preview > button {transition:none;transform:none;}
+}
