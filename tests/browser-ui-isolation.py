@@ -182,9 +182,11 @@ with sync_playwright() as p:
     expect(restored).to_have_count(1)
     restored.locator(":scope > button").click()
     expect(script).to_have_value("History narration")
+    project_count_before_tamper=page.locator(".nexus-project-card").count()
     backup["content"]["payload"]["script"]="tampered"
     picker.set_input_files({"name":"tampered.json","mimeType":"application/json","buffer":json.dumps(backup).encode()})
-    expect(page.get_by_text("Invalid backup version or checksum",exact=False)).to_be_visible()
+    expect(page.get_by_role("alert")).to_contain_text("Operation failed. Current edits retained.")
+    expect(page.locator(".nexus-project-card")).to_have_count(project_count_before_tamper)
     expect(restored).to_have_count(1)
     card=page.locator(".nexus-project-card").filter(has=page.locator(".nexus-card-name",has_text="History UI")).filter(has_not_text="imported")
     card.locator(":scope > button").click()
