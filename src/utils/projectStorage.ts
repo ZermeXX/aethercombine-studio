@@ -119,14 +119,14 @@ export class ProjectStorage {
   const payload=content.payload===null?undefined:projectPayload(content.payload);
   if(!Array.isArray(content.assets)||content.assets.length>1000)throw new Error('Invalid asset list');
   const copy=createProject(workspaceId,source.name+' — imported',projectFormat(source));
-  const assets=[];const ids=new Set<string>();let total=0;
+  const assets:(ProjectAsset & {projectId:string;sha256:string})[]=[];const ids=new Set<string>();let total=0;
   for(const value of content.assets){
    const a=obj(value);
    if(typeof a.assetId!=='string'||!a.assetId.trim()||ids.has(a.assetId)||typeof a.name!=='string'||!a.name.trim()||typeof a.mime!=='string'||typeof a.base64!=='string'||typeof a.size!=='number'||!Number.isSafeInteger(a.size)||a.size<0||a.size>32*1024*1024||a.base64.length>Math.ceil(a.size/3)*4)throw new Error('Invalid backup asset');
    total+=a.size;if(total>64*1024*1024)throw new Error('Backup too large');
    const binary=atob(a.base64),bytes=Uint8Array.from(binary,ch=>ch.charCodeAt(0));
    const blob=new Blob([bytes],{type:a.mime});
-   if(blob.size!==a.size||await assetDigest(blob)!==a.sha256)throw new Error('Asset checksum mismatch');
+   if(typeof a.sha256!=='string'||blob.size!==a.size||await assetDigest(blob)!==a.sha256)throw new Error('Asset checksum mismatch');
    ids.add(a.assetId);assets.push({projectId:copy.projectId,assetId:a.assetId,name:a.name,blob,sha256:a.sha256});
   }
   return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done)=>{
