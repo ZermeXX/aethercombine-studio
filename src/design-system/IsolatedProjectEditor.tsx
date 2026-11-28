@@ -200,6 +200,8 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="nexus-preview mx-auto space-y-4 p-4 text-studio-text">
  <header className="nexus-brand"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 Isolated Project Editor · Preview</p></div></header>
+ {!ready&&!error&&<section className="nexus-startup" role="status"><img src={import.meta.env.BASE_URL+'favicon.svg'} width={72} height={72} alt=""/><h2>Story Nexus Studio</h2><p>Opening project library…</p><div className="nexus-loading-track" aria-hidden="true"><span/></div></section>}
+ {!ready&&error&&<section className="nexus-startup" role="alert"><h2>Unable to open Studio</h2><p>{error}</p><button type="button" onClick={()=>window.location.reload()}>Retry / Повторить</button></section>}
  <p>Project-scoped native module previews and validated production settings. Production rendering is disabled. Authorized strict preflight is available in ambient projects only.</p>
  <button type="button" disabled={assetBusy||busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
