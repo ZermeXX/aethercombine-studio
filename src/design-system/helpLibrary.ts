@@ -22,5 +22,65 @@ importBackup: {
     "example": "Import a previously exported HISTOVIVA episode.",
     "limitations": "Cloud files are not copied automatically. Incompatible or damaged backups are rejected."
   }
+},
+exportBackup: {
+  "ru": {
+    "summary": "Экспорт резервной копии JSON.",
+    "effect": "Сохраняет данные проекта в файл.",
+    "whenOn": "Перед переносом или удалением.",
+    "whenOff": "Не заменяет облачное резервирование.",
+    "recommended": "Храните копию отдельно.",
+    "example": "Экспорт выпуска перед архивированием.",
+    "limitations": "Облачные файлы не скачиваются автоматически."
+  },
+  "en": {
+    "summary": "Export a JSON backup.",
+    "effect": "Saves project data to a file.",
+    "whenOn": "Before transfer or deletion.",
+    "whenOff": "Not a replacement for cloud backups.",
+    "recommended": "Keep a separate copy.",
+    "example": "Export an episode before archiving.",
+    "limitations": "Cloud files are not downloaded automatically."
+  }
+},
+archive: {
+  "ru": {
+    "summary": "Архивирование проекта.",
+    "effect": "Скрывает проект из активного списка, сохраняя данные.",
+    "whenOn": "Когда работа завершена.",
+    "whenOff": "Если проект ещё нужен ежедневно.",
+    "recommended": "Архивируйте завершённые выпуски.",
+    "example": "Архив готового видео.",
+    "limitations": "Архивирование не удаляет облачные файлы."
+  },
+  "en": {
+    "summary": "Archive a project.",
+    "effect": "Hides it from the active list while retaining data.",
+    "whenOn": "When work is complete.",
+    "whenOff": "When daily access is needed.",
+    "recommended": "Archive completed episodes.",
+    "example": "Archive a finished video.",
+    "limitations": "Archiving does not delete cloud files."
+  }
+},
+remove: {
+  "ru": {
+    "summary": "Окончательное удаление архивного проекта.",
+    "effect": "Удаляет локальные данные проекта.",
+    "whenOn": "Только если проект больше не нужен.",
+    "whenOff": "Если может понадобиться восстановление.",
+    "recommended": "Сначала экспортируйте резервную копию.",
+    "example": "Удаление ненужного черновика.",
+    "limitations": "Необратимо для локальных данных; облачные файлы не удаляются."
+  },
+  "en": {
+    "summary": "Permanently delete an archived project.",
+    "effect": "Removes local project data.",
+    "whenOn": "Only when no longer needed.",
+    "whenOff": "If recovery may be needed.",
+    "recommended": "Export a backup first.",
+    "example": "Delete an unwanted draft.",
+    "limitations": "Local deletion is irreversible; cloud files are not deleted."
+  }
 }
 } satisfies Record<string, BilingualHelp>;
