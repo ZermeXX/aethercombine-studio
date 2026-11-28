@@ -418,3 +418,13 @@
 .nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-trigger {justify-self:end;grid-column:2;}
 .nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-panel {position:static;grid-column:1 / -1;width:100%;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;}
 .nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-hover {display:none;}
+
+/* Adaptive native module shell: scoped to the isolated V9 workspace. */
+.nexus-preview .nexus-workspace-content {min-width:0;max-width:100%;}
+.nexus-preview .nexus-workspace-content > fieldset {min-inline-size:0;max-inline-size:100%;box-sizing:border-box;}
+.nexus-preview .nexus-workspace-content > fieldset > legend {max-inline-size:100%;white-space:normal;overflow-wrap:anywhere;}
+.nexus-preview .nexus-workspace-content > fieldset :is(input,select,textarea,video,audio,img,canvas) {max-inline-size:100%;box-sizing:border-box;}
+@media(max-width:760px){
+ .nexus-preview .nexus-workspace-content > fieldset {padding:8px;margin-inline:0;}
+ .nexus-preview .nexus-workspace-content > fieldset > legend {font-size:14px;}
+}
