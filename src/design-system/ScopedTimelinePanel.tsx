@@ -1,3 +1,4 @@
+import {dispatchStrictPreflight,findStrictPreflightRun} from '../utils/strictPreflightDispatch';
 import {prepareLoopPreflight} from '../utils/loopProductionPreflight';
 import {adaptLoopTimeline,buildScopedLoopManifest} from '../utils/loopRendererAdapter';
 import {validateSlotInserts} from '../utils/validateSlotInserts';
@@ -62,8 +63,19 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  const names=collectAssetNames(payload);
  const [preflightFolder,setPreflightFolder]=useState('');
  const [report,setReport]=useState('');
+ const [authToken,setAuthToken]=useState('');
+ const [dispatchResult,setDispatchResult]=useState<Awaited<ReturnType<typeof dispatchStrictPreflight>>|null>(null);
+ const [dispatchStatus,setDispatchStatus]=useState('');
  const preflightKey=JSON.stringify([scope.workspaceId,scope.projectId,payload,preflightFolder]);
- useEffect(()=>{setReport('');},[preflightKey]);
+ useEffect(()=>{setReport('');setDispatchResult(null);setDispatchStatus('');setAuthToken('');},[preflightKey]);
+ async function sendPreflight(){
+  if(!acquireWrite())return;setDispatchStatus('');setDispatchResult(null);
+  try{await saveBeforeAttach();if(!payload.production)throw new Error('No production settings');const result=await dispatchStrictPreflight(storage,scope,payload.production,preflightFolder.trim(),authToken);setDispatchResult(result);setDispatchStatus('Preflight request accepted; runner not verified');}catch{setDispatchStatus('Preflight request failed or unconfirmed');}finally{setAuthToken('');releaseWrite();}
+ }
+ async function lookupPreflight(){
+  if(!dispatchResult||!acquireWrite())return;
+  try{const run=await findStrictPreflightRun(dispatchResult.requestId,dispatchResult.rendererSha,authToken);setDispatchStatus(run?'Run '+run.id+': '+run.status+' / '+(run.conclusion??'pending')+'; runner verification pending':'Matching run not found yet');}catch{setDispatchStatus('Run lookup failed');}finally{setAuthToken('');releaseWrite();}
+ }
  async function checkPreflight(){
   if(!acquireWrite())return;setReport('');
   try{await saveBeforeAttach();if(!payload.production)throw new Error('No production settings');const result=await prepareLoopPreflight(storage,scope,payload.production,preflightFolder.trim());setReport(JSON.stringify({assets:result.assets,rendererCandidate:result.rendererCandidate,dispatchAllowed:result.dispatchAllowed,blockers:result.blockers},null,2));}catch(e){setReport(e instanceof Error?e.message:'Preflight failed');}finally{releaseWrite();}
@@ -81,6 +93,12 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  <label>Preflight Drive folder ID<input aria-label="Preflight Drive folder ID" value={preflightFolder} onChange={e=>setPreflightFolder(e.target.value)} disabled={busy||loading}/></label>
  <button type="button" disabled={busy||loading} onClick={()=>void checkPreflight()}>Check production preflight</button>
  {report&&<pre aria-label="Production preflight report" className="whitespace-pre-wrap">{report}</pre>}
- <p>Dispatch blocked until runner-side Drive verification and authentication are connected.</p>
+ <h3>Authenticated preflight only</h3>
+ <label>GitHub token (memory only)<input aria-label="Preflight GitHub token" type="password" autoComplete="off" value={authToken} onChange={e=>setAuthToken(e.target.value)} disabled={busy||loading}/></label>
+ <button type="button" disabled={busy||loading||!authToken.trim()||!preflightFolder.trim()} onClick={()=>void sendPreflight()}>Dispatch strict preflight only</button>
+ {dispatchResult&&<p>Request ID: {dispatchResult.requestId}</p>}
+ <button type="button" disabled={busy||loading||!authToken.trim()||!dispatchResult} onClick={()=>void lookupPreflight()}>Check matching preflight run</button>
+ <p role="status">{dispatchStatus}</p>
+ <p>Production dispatch blocked. Token is cleared after each request and on project or configuration changes.</p>
  </section>;
 }
