@@ -225,7 +225,7 @@ test('production preflight never equates local evidence with runner access',asyn
  await expect(prepareLoopPreflight(storage,scope,unsafe,'fixture-folder')).rejects.toThrow('Unsafe runner asset filename');
 });
 
-import {dispatchStrictPreflight} from '../src/utils/strictPreflightDispatch';
+import {dispatchStrictPreflight,findStrictPreflightRun} from '../src/utils/strictPreflightDispatch';
 import {RENDERER_CANDIDATE} from '../src/utils/loopProductionPreflight';
 test('authenticated dispatch uses fixed preflight-only inputs and rejects candidate mismatch',async()=>{
  const production:NonNullable<import('../src/utils/projectPayload').ProjectPayload['production']>={fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[],timeline_slots:[{slot_index:1,slot_id:'one',title:'One',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:10800,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}],render:{crf:18,audioBitrate:320,actCrossfadeSec:1,internalCrossfadeSec:1,finalBlackEnabled:false,finalBlackSec:0,bitratePreset:'standard',transitionMode:'crossfade',useEmbeddedAudio:true}};
@@ -234,10 +234,12 @@ test('authenticated dispatch uses fixed preflight-only inputs and rejects candid
  const calls:{url:string,init?:RequestInit}[]=[];
  const request=(async(url:string,init?:RequestInit)=>{calls.push({url,init});return calls.length===1?Response.json({object:{sha:RENDERER_CANDIDATE}}):new Response(null,{status:204});}) as typeof fetch;
  const result=await dispatchStrictPreflight(storage,scope,production,'fixture-folder','synthetic-token',request);
- expect(result).toEqual({accepted:true,runnerVerified:false,productionDispatchAllowed:false});
+ expect(result).toEqual({accepted:true,requestId:expect.any(String),rendererSha:RENDERER_CANDIDATE,runnerVerified:false,productionDispatchAllowed:false});
  expect(calls).toHaveLength(2);
  const body=JSON.parse(String(calls[1].init?.body));
  expect(body.inputs.preflight_only).toBe('true');
+ expect(body.inputs.expected_renderer_sha).toBe(RENDERER_CANDIDATE);
+ expect(body.inputs.request_id).toBe(result.requestId);
  expect(body.inputs.strict_project_contract).toBe('true');
  expect(body.inputs.manifest_payload).not.toContain('synthetic-token');
  expect(calls[1].url).toBe('https://api.github.com/repos/ZermeXX/aetherflow-render/actions/workflows/render_loop.yml/dispatches');
@@ -247,4 +249,13 @@ test('authenticated dispatch uses fixed preflight-only inputs and rejects candid
  expect(count).toBe(1);
  await expect(dispatchStrictPreflight(storage,scope,production,'fixture-folder','',mismatch)).rejects.toThrow('GitHub authorization required');
  expect(count).toBe(1);
+});
+
+test('preflight run lookup rejects unrelated and ambiguous runs',async()=>{
+ const id='12345678-1234-1234-1234-123456789abc';
+ const run={id:42,display_title:'Strict preflight '+id,head_sha:RENDERER_CANDIDATE,head_branch:'fix/loop-timestamp-boundaries-v81',event:'workflow_dispatch',status:'completed',conclusion:'success'};
+ const mock=(rows:unknown[])=>(async()=>Response.json({workflow_runs:rows})) as typeof fetch;
+ expect(await findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([{...run,head_sha:'wrong'}]))).toBeNull();
+ expect(await findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([run]))).toEqual({id:42,status:'completed',conclusion:'success',runnerVerified:false});
+ await expect(findStrictPreflightRun(id,RENDERER_CANDIDATE,'fixture-token',mock([run,run]))).rejects.toThrow('Ambiguous');
 });
