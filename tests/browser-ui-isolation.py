@@ -90,6 +90,8 @@ with sync_playwright() as p:
                 toggle.click()
             expect(toggle).to_have_text(lang)
             expect(rh.locator(".nexus-header-actions button").last).to_be_visible()
+            responsive.evaluate("() => document.fonts.ready")
+            print("HEADER_GEOMETRY", width, lang, rh.evaluate("""el => [el,...el.querySelectorAll("button"),...el.children].map(n=>({tag:n.tagName,cls:n.className,left:n.getBoundingClientRect().left,right:n.getBoundingClientRect().right,client:n.clientWidth,scroll:n.scrollWidth}))"""), flush=True)
             assert rh.evaluate("""el => {
                 const r=el.getBoundingClientRect();
                 return r.left>=-1 && r.right<=innerWidth+1 && el.scrollWidth<=el.clientWidth+1 &&
