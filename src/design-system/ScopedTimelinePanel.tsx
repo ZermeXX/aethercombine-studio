@@ -1,3 +1,4 @@
+import {prepareLoopPreflight} from '../utils/loopProductionPreflight';
 import {adaptLoopTimeline,buildScopedLoopManifest} from '../utils/loopRendererAdapter';
 import {validateSlotInserts} from '../utils/validateSlotInserts';
 import {useEffect,useState} from 'react';
@@ -59,6 +60,13 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  const [message,setMessage]=useState('');
  const [loading,setLoading]=useState(true);
  const names=collectAssetNames(payload);
+ const [preflightFolder,setPreflightFolder]=useState('');
+ const [report,setReport]=useState('');
+ useEffect(()=>{setReport('');},[scope.workspaceId,scope.projectId,payload,preflightFolder]);
+ async function checkPreflight(){
+  if(!acquireWrite())return;setReport('');
+  try{await saveBeforeAttach();if(!payload.production)throw new Error('No production settings');const result=await prepareLoopPreflight(storage,scope,payload.production,preflightFolder.trim());setReport(JSON.stringify({assets:result.assets,rendererCandidate:result.rendererCandidate,dispatchAllowed:result.dispatchAllowed,blockers:result.blockers},null,2));}catch(e){setReport(e instanceof Error?e.message:'Preflight failed');}finally{releaseWrite();}
+ }
  useEffect(()=>{let live=true;setLoading(true);storage.listAssets(scope.workspaceId,scope.projectId).then(v=>{if(live)setRows(v);},()=>{if(live)setMessage('Asset list unavailable');}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[storage,scope.workspaceId,scope.projectId]);
  async function attach(file:File){
   if(!acquireWrite())return;setMessage('');
@@ -67,5 +75,11 @@ export function ScopedAssetPanel({storage,scope,payload,busy,saveBeforeAttach,ac
  return <section aria-label="Project assets"><h3>Local project assets</h3><p>Only files referenced by the saved project may be attached. No upload to Google Drive.</p>
  {loading?<p>Loading assets…</p>:names.map(n=><p key={n}>{n}: {rows.some(r=>r.name===n)?'Attached (local)':'Not attached locally'}</p>)}
  <label>Attach referenced file<input aria-label="Attach referenced file" type="file" disabled={busy||loading} onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void attach(file);}}/></label>
- <p role="status">{message}</p></section>;
+ <p role="status">{message}</p>
+ <h3>Production preflight (local evidence only)</h3>
+ <label>Preflight Drive folder ID<input aria-label="Preflight Drive folder ID" value={preflightFolder} onChange={e=>setPreflightFolder(e.target.value)} disabled={busy||loading}/></label>
+ <button type="button" disabled={busy||loading} onClick={()=>void checkPreflight()}>Check production preflight</button>
+ {report&&<pre aria-label="Production preflight report" className="whitespace-pre-wrap">{report}</pre>}
+ <p>Dispatch blocked until runner-side Drive verification and authentication are connected.</p>
+ </section>;
 }
