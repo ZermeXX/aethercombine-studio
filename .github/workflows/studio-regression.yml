@@ -43,7 +43,7 @@ jobs:
           work=$(mktemp -d)
           bun tests/export-loop-fixture.ts > "$work/manifest.json"
           bun tests/export-loop-fixture.ts --advanced > "$work/advanced.json"
-          curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/4448eecfb81a05e0855ceab5871ea8e1c9351630/build_timeline.py -o "$work/build_timeline.py"
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/eb2a44e2e25afd4cb3f518f87876b1bf0e161c49/build_timeline.py -o "$work/build_timeline.py"
           cd "$work"
           mkdir input_clips
           ffmpeg -v error -f lavfi -i color=c=blue:s=1280x720:r=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/base.mp4
