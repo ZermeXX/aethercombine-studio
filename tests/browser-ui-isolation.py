@@ -135,6 +135,50 @@ with sync_playwright() as p:
     page.get_by_label("Preflight Drive folder ID").fill("different-folder")
     expect(report).to_have_count(0)
     print("PRODUCTION_PREFLIGHT_BROWSER_PASS")
+    # Intercept all GitHub API calls; never dispatch a real cloud job in browser CI.
+    requests=[]
+    def github_fixture(route):
+        req=route.request
+        headers={"access-control-allow-origin":"*","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, accept, content-type, x-github-api-version"}
+        if req.method=="OPTIONS":
+            route.fulfill(status=204,headers=headers)
+            return
+        assert req.headers.get("authorization")=="Bearer synthetic-preflight-token"
+        if "/git/ref/heads/" in req.url:
+            route.fulfill(status=200,headers=headers,json={"object":{"sha":preflight["rendererCandidate"]}})
+        elif req.url.endswith("/dispatches"):
+            body=req.post_data_json
+            assert body["inputs"]["preflight_only"]=="true"
+            assert body["inputs"]["strict_project_contract"]=="true"
+            assert body["inputs"]["expected_renderer_sha"]==preflight["rendererCandidate"]
+            assert "synthetic-preflight-token" not in body["inputs"]["manifest_payload"]
+            requests.append(body)
+            route.fulfill(status=204,headers=headers)
+        elif "/runs?" in req.url:
+            route.fulfill(status=200,headers=headers,json={"workflow_runs":[{"id":42,"display_title":"Strict preflight "+requests[0]["inputs"]["request_id"],"head_sha":preflight["rendererCandidate"],"head_branch":"fix/loop-timestamp-boundaries-v81","event":"workflow_dispatch","status":"completed","conclusion":"success"}]})
+        else:
+            route.abort()
+    page.route("https://api.github.com/**",github_fixture)
+    token=page.get_by_label("Preflight GitHub token")
+    dispatch=page.get_by_role("button",name="Dispatch strict preflight only")
+    lookup=page.get_by_role("button",name="Check matching preflight run")
+    expect(dispatch).to_be_disabled()
+    token.fill("synthetic-preflight-token")
+    dispatch.click()
+    expect(page.get_by_text("Preflight request accepted; runner not verified",exact=True)).to_be_visible()
+    expect(token).to_have_value("")
+    assert len(requests)==1
+    expect(lookup).to_be_disabled()
+    token.fill("synthetic-preflight-token")
+    lookup.click()
+    expect(page.get_by_text("Run 42: completed / success; runner verification pending",exact=True)).to_be_visible()
+    expect(token).to_have_value("")
+    token.fill("synthetic-preflight-token")
+    page.get_by_label("Preflight Drive folder ID").fill("another-folder")
+    expect(token).to_have_value("")
+    expect(lookup).to_be_disabled()
+    page.unroute("https://api.github.com/**",github_fixture)
+    print("NATIVE_AUTH_PREFLIGHT_BROWSER_PASS")
     page.get_by_role("button",name="Close native module").click()
     production.fill(original)
     page.get_by_role("button",name="Open scoped Loop settings").click()
