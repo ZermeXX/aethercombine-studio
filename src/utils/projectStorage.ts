@@ -60,6 +60,17 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');for(const target of slots)tx.objectStore('project_assets').put({...record,assetId:'project-image:'+target,name:'project-image-'+target});done(undefined);}catch(e){fail(e);}};
   });
  }
+ /** Delete only a fixed thumbnail slot owned by this project. */
+ removeProjectThumbnail(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'):Promise<void>{
+  if(!['A','B','C'].includes(slot))throw new Error('Invalid thumbnail slot');
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{
+    if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');
+    tx.objectStore('project_assets').delete([projectId,'project-image:'+slot]);done(undefined);
+   }catch(e){fail(e);}};
+  });
+ }
  listAssets(workspaceId:WorkspaceId,projectId:string):Promise<{assetId:string;name:string;size:number}[]>{
   return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const p=tx.objectStore('projects').get(projectId);
