@@ -303,3 +303,14 @@
  .nexus-smart-header .nexus-header-item {flex:1 1 100px;}
  .nexus-smart-header .nexus-header-actions button {flex:1 1 100px;min-width:0;}
 }
+
+@media(max-width:760px){
+ .nexus-preview .nexus-smart-header{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:8px;}
+ .nexus-smart-header > img{grid-column:1;grid-row:1;width:40px;height:40px;}
+ .nexus-smart-header > .nexus-header-brand{grid-column:2;grid-row:1;}
+ .nexus-smart-header > button{grid-column:3;grid-row:1;min-width:0;}
+ .nexus-smart-header > .nexus-header-context{grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;min-width:0;}
+ .nexus-smart-header .nexus-header-item{min-width:0;grid-template-columns:minmax(0,1fr);}
+ .nexus-smart-header .nexus-header-status{grid-column:1/-1;}
+ .nexus-smart-header > .nexus-header-actions{grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;min-width:0;}
+}
