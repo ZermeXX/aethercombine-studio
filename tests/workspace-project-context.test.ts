@@ -193,3 +193,10 @@ test('loop manifest exports runner settings and rejects unsupported configuratio
  expect(()=>buildScopedLoopManifest({...production,loopHours:6},'synthetic-folder')).toThrow();
  expect(()=>buildScopedLoopManifest({...production,render:{...production.render!,finalBlackEnabled:true}},'synthetic-folder')).toThrow();
 });
+
+ test('renderer rejects overlapping act transitions and unsupported short bodies',()=>{
+ const slot=(id:string,duration:number,overlap:number):TimelineSlot=>({slot_index:1,slot_id:id,title:id,asset_id:id,file_name:id+'.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:duration,inserts:[],slot_transition_out:{type:overlap?'xfade':'none',duration_sec:overlap}});
+ expect(()=>adaptLoopTimeline([slot('a',10,4),slot('b',7,4),slot('c',10,0)])).toThrow('Act crossfades overlap');
+ expect(()=>adaptLoopTimeline([slot('a',10,4),slot('b',10,4),slot('c',10,0)])).toThrow('Act body too short');
+ expect(adaptLoopTimeline([slot('a',10,4),slot('b',11,4),slot('c',10,0)])).toHaveLength(3);
+ });
