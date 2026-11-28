@@ -60,6 +60,15 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');for(const target of slots)tx.objectStore('project_assets').put({...record,assetId:'project-image:'+target,name:'project-image-'+target});done(undefined);}catch(e){fail(e);}};
   });
  }
+ /** Frozen release cover, independent of subsequent edits to A/B/C. */
+ async saveReleaseThumbnail(workspaceId:WorkspaceId,projectId:string,blob:Blob):Promise<void>{
+  if(!(blob instanceof Blob)||!blob.size||blob.size>32*1024*1024||blob.type!=='image/png')throw new Error('Invalid release thumbnail');
+  const record={projectId,assetId:'release-thumbnail',name:'release-thumbnail.png',blob,sha256:await assetDigest(blob)};
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').put(record);done(undefined);}catch(e){fail(e);}};
+  });
+ }
  /** Delete only a fixed thumbnail slot owned by this project. */
  removeProjectThumbnail(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'):Promise<void>{
   if(!['A','B','C'].includes(slot))throw new Error('Invalid thumbnail slot');
