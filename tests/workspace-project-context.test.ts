@@ -166,3 +166,17 @@ test('scoped insert validation rejects overlap without mutating input and accept
  slot.inserts[0].transition_in.duration_sec=11;
  expect(()=>validateSlotInserts(slot)).toThrow('Invalid insert transition');
 });
+
+import {adaptLoopTimeline} from '../src/utils/loopRendererAdapter';
+test('renderer preview adapter maps slot-relative triggers, crossfade and input fade without mutation',()=>{
+ const first:TimelineSlot={slot_id:'a',slot_index:1,title:'A',asset_id:'a',file_name:'a.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:2,slot_duration_sec:100,inserts:[],slot_transition_out:{type:'xfade',duration_sec:5}};
+ const second:TimelineSlot={...first,slot_id:'b',slot_index:2,slot_transition_out:{type:'none',duration_sec:0},inserts:[{insert_id:'i',asset_id:'i',file_name:'i.mp4',trigger_at_sec:10,duration_sec:8,transition_in:{type:'fade',duration_sec:1.5},transition_out:{type:'none',duration_sec:0}}]};
+ const input=[first,second],before=structuredClone(input),out=adaptLoopTimeline(input);
+ expect(out[0].slot_transition_out.type).toBe('crossfade');
+ expect(out[0].base_content.loop_crossfade_sec).toBe(2);
+ expect(out[1].start_sec).toBe(95);
+ expect(out[1].inserts[0].trigger_at_sec).toBe(105);
+ expect(out[1].inserts[0].transition_duration_sec).toBe(1.5);
+ expect(input).toEqual(before);
+ expect(()=>adaptLoopTimeline([{...first,slot_transition_out:{type:'fade',duration_sec:5}},second])).toThrow();
+});

@@ -1,3 +1,4 @@
+import {adaptLoopTimeline} from '../utils/loopRendererAdapter';
 import {validateSlotInserts} from '../utils/validateSlotInserts';
 import {useEffect,useState} from 'react';
 import type {ProjectStorage} from '../utils/projectStorage';
@@ -11,12 +12,15 @@ const defaultMaster:AudioMasteringConfig={loudnorm_enabled:true,integrated_lufs:
 export function ScopedTimelinePanel({production,onChange}:{production:Production;onChange:(next:Production)=>void}){
  const slots=production.timeline_slots??[],audio=production.audio_mastering??defaultMaster;
  const [insertError,setInsertError]=useState('');
+ const [preview,setPreview]=useState('');
  function patch(i:number,change:Partial<TimelineSlot>){try{const next={...slots[i],...change};validateSlotInserts(next);onChange({...production,timeline_slots:slots.map((s,n)=>n===i?next:s)});setInsertError('');}catch{setInsertError('Invalid insert timing or slot duration. Previous values retained.');}}
  function editInsert(i:number,j:number,change:Partial<SlotInsertItem>){patch(i,{inserts:slots[i].inserts.map((v,n)=>n===j?{...v,...change}:v)});}
  function addInsert(i:number){const s=slots[i];patch(i,{inserts:[...s.inserts,{insert_id:crypto.randomUUID(),asset_id:'',file_name:'',trigger_at_sec:0,duration_sec:Math.min(5,s.slot_duration_sec),transition_in:{type:'fade',duration_sec:0},transition_out:{type:'none',duration_sec:0}}]});}
  function add(){const id=crypto.randomUUID();onChange({...production,timeline_slots:[...slots,{slot_index:slots.length+1,slot_id:id,title:'New slot',asset_id:'',file_name:'',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:60,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}]});}
  return <section aria-label="Scoped timeline and mastering" className="space-y-3">
  <h3>Timeline &amp; Audio Mastering · Scoped preview</h3>
+ <button type="button" onClick={()=>{try{setPreview(JSON.stringify({timeline_slots:adaptLoopTimeline(slots)},null,2));}catch(e){setPreview(e instanceof Error?e.message:'Invalid timeline');}}}>Inspect renderer timeline contract</button>
+ {preview&&<pre aria-label="Renderer timeline preview" className="whitespace-pre-wrap break-all">{preview}</pre>}
  <button type="button" onClick={add}>Add timeline slot</button>
  {slots.map((s,i)=><fieldset key={s.slot_id} className="border p-2"><legend>Slot {i+1}</legend>
  <label>Title<input aria-label={'Slot title '+(i+1)} value={s.title} onChange={e=>patch(i,{title:e.target.value})}/></label>
