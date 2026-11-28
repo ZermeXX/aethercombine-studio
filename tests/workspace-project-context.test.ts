@@ -261,13 +261,16 @@ test('preflight run lookup rejects unrelated and ambiguous runs',async()=>{
 });
 
 test('strict preflight requires all runner proof and no render or upload',async()=>{
- const names=['Strict Project Dispatch Identity Guard','Preflight Asset Check','Download Source Clips (only needed files)','Strict Project Media Verification','Build and Run FFmpeg Pipeline','Upload Output Video, Shorts & Metadata to Google Drive'];
+ const names=['Strict Project Dispatch Identity Guard','Preflight Asset Check','Download Source Clips (only needed files)','Strict Project Media Verification','Build and Run FFmpeg Pipeline','Upload Output Video, Shorts & Metadata to Google Drive','Generate Vertical Shorts & Release Card','Upload QC artifacts','Send Telegram Notification'];
  const steps=names.map((name,i)=>({name,status:'completed',conclusion:i<4?'success':'skipped'}));
  const job={run_id:42,head_sha:RENDERER_CANDIDATE,name:'render_and_upload',status:'completed',conclusion:'success',steps};
  const mock=(jobs:unknown[])=>(async()=>Response.json({jobs})) as typeof fetch;
  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([job]))).toBe(true);
  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.filter(s=>s.name!==names[3])}]))).toBe(false);
- expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.map((s,i)=>i===4?{...s,conclusion:'success'}:s)}]))).toBe(false);
+ for(let index=4;index<names.length;index++){
+  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.map((s,i)=>i===index?{...s,conclusion:'success'}:s)}]))).toBe(false);
+  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,steps:steps.filter((_,i)=>i!==index)}]))).toBe(false);
+ }
  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([{...job,head_sha:'wrong'}]))).toBe(false);
  expect(await verifyStrictPreflightJobs(42,RENDERER_CANDIDATE,'fixture-token',mock([job,job]))).toBe(false);
 });
