@@ -55,6 +55,17 @@ with sync_playwright() as p:
     expect(nav).not_to_be_visible()
     shell.locator(".nexus-nav-toggle").click()
     expect(nav).to_be_visible()
+    shell.set_viewport_size({"width":1280,"height":900})
+    compact=shell.locator(".nexus-compact-toggle")
+    expect(compact).to_be_visible()
+    compact.click()
+    expect(compact).to_have_attribute("aria-pressed","true")
+    expect(shell.get_by_role("button",name="Open native Montage Combine")).to_be_visible()
+    shell.reload()
+    shell.get_by_role("button",name="Open isolated project editor").click()
+    expect(compact).to_have_attribute("aria-pressed","true")
+    compact.click()
+    expect(compact).to_have_attribute("aria-pressed","false")
     shell.close()
     print("NEXUS_SHELL_LANGUAGE_HELP_NAV_PASS")
     name.fill("History UI")
@@ -383,7 +394,7 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Save project").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_have_count(0)
     entries = page.evaluate('window.__storageAudit')
-    assert all(e['area']=='local' and e['key']=='story-nexus.ui-language.v1' and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
+    assert all(e['area']=='local' and e['key'] in ('story-nexus.ui-language.v1','story-nexus.ui-navigation.v1') and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     page.reload()
     expect(page.get_by_role("button",name="Open isolated project editor")).to_be_visible()
     assert page.evaluate('window.__storageAudit.length') == 0
@@ -407,7 +418,7 @@ with sync_playwright() as p:
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
     entries = page.evaluate('window.__storageAudit')
-    assert all(e['area']=='local' and e['key']=='story-nexus.ui-language.v1' and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
+    assert all(e['area']=='local' and e['key'] in ('story-nexus.ui-language.v1','story-nexus.ui-navigation.v1') and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_gh_token')==='synthetic-migration-fixture'}finally{window.__auditEnabled=true}}")
     print('ISOLATED_COLD_START_STORAGE_PASS')
     print('ISOLATED_PRODUCTION_STORAGE_ACCESS_PASS')
