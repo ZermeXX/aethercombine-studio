@@ -258,3 +258,16 @@
 .nexus-nav-group > button:disabled {opacity:.45;}
 @media(hover:hover){.nexus-nav-group > button:hover:not(:disabled){border-color:var(--nx-border);background:var(--nx-raised);}}
 @media(max-width:760px){.nexus-module-nav:not([hidden]){grid-template-columns:1fr;}.nexus-nav-group{grid-template-columns:repeat(2,minmax(0,1fr));}.nexus-nav-heading{grid-column:1/-1;}}
+
+.nexus-compact-toggle {width:100%;min-height:44px;margin-bottom:8px;padding:8px;border:1px solid var(--nx-border);border-radius:8px;background:var(--nx-panel);font-size:.75rem;overflow-wrap:anywhere;}
+@media(min-width:761px){
+ .nexus-sidebar.nexus-sidebar-compact {flex:0 0 76px;}
+ .nexus-sidebar-compact .nexus-module-nav {padding:6px;}
+ .nexus-sidebar-compact .nexus-nav-heading {display:none;}
+ .nexus-sidebar-compact .nexus-nav-group {border-bottom:1px solid var(--nx-border);padding-bottom:6px;}
+ .nexus-sidebar-compact .nexus-nav-group > button {justify-content:center;padding:8px;}
+ .nexus-sidebar-compact .nexus-nav-label {display:none;}
+ .nexus-sidebar-compact .nexus-nav-toggle {font-size:.75rem;overflow-wrap:anywhere;}
+ .nexus-sidebar-compact .nexus-module-nav > button {font-size:.7rem;padding:6px;overflow-wrap:anywhere;}
+}
+@media(max-width:760px){.nexus-compact-toggle{display:none;}}
