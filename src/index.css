@@ -177,3 +177,15 @@
 .nexus-project-picker > button { padding:10px; border:1px solid #7654b8; border-radius:8px; background:#24203d; }
 .nexus-project-picker button:disabled { opacity:.45; }
 .nexus-project-picker button:focus-visible { outline:2px solid #42d8ff; outline-offset:3px; }
+
+.nexus-workspace-layout { display:flex; align-items:flex-start; gap:16px; }
+.nexus-sidebar { flex:0 0 230px; min-width:0; position:sticky; top:12px; }
+.nexus-sidebar:has(nav[hidden]) { flex-basis:auto; }
+.nexus-nav-toggle { width:100%; padding:10px; border:1px solid #405171; border-radius:8px; background:#151e32; margin-bottom:8px; }
+.nexus-module-nav:not([hidden]) { display:grid; gap:8px; }
+.nexus-module-nav[hidden] { display:none; }
+.nexus-module-nav > button { text-align:left; }
+.nexus-module-nav > button[aria-pressed=true] { border-color:#a78bfa; background:#352452; box-shadow:inset 3px 0 #42d8ff; }
+.nexus-workspace-content { flex:1; min-width:0; display:grid; gap:16px; }
+.nexus-workspace-content > fieldset { min-width:0; }
+@media(max-width:760px){ .nexus-workspace-layout { flex-direction:column; } .nexus-sidebar { position:static; flex:auto; width:100%; } .nexus-workspace-content { width:100%; } .nexus-module-nav:not([hidden]) { grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr)); } }
