@@ -110,6 +110,31 @@ export class ProjectStorage {
   const content=payload===undefined?undefined:projectPayload(payload);
   return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add({...p,...(content===undefined?{}:{payload:content})});done(undefined);});
  }
+ async importProject(workspaceId:WorkspaceId,input:unknown):Promise<ProjectRecord>{
+  const obj=(v:unknown):Record<string,unknown>=>{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('Invalid backup object');return v as Record<string,unknown>;};
+  const b=obj(input),content=obj(b.content);
+  if(b.format!=='story-nexus-project'||b.version!==1||typeof b.sha256!=='string'||await assetDigest(new Blob([JSON.stringify(content)]))!==b.sha256)throw new Error('Invalid backup version or checksum');
+  const source=projectMetadata(content.project);
+  if(source.workspaceId!==workspaceId)throw new Error('Workspace mismatch');
+  const payload=content.payload===null?undefined:projectPayload(content.payload);
+  if(!Array.isArray(content.assets)||content.assets.length>1000)throw new Error('Invalid asset list');
+  const copy=createProject(workspaceId,source.name+' — imported',projectFormat(source));
+  const assets=[];const ids=new Set<string>();let total=0;
+  for(const value of content.assets){
+   const a=obj(value);
+   if(typeof a.assetId!=='string'||!a.assetId.trim()||ids.has(a.assetId)||typeof a.name!=='string'||!a.name.trim()||typeof a.mime!=='string'||typeof a.base64!=='string'||typeof a.size!=='number'||!Number.isSafeInteger(a.size)||a.size<0||a.size>32*1024*1024||a.base64.length>Math.ceil(a.size/3)*4)throw new Error('Invalid backup asset');
+   total+=a.size;if(total>64*1024*1024)throw new Error('Backup too large');
+   const binary=atob(a.base64),bytes=Uint8Array.from(binary,ch=>ch.charCodeAt(0));
+   const blob=new Blob([bytes],{type:a.mime});
+   if(blob.size!==a.size||await assetDigest(blob)!==a.sha256)throw new Error('Asset checksum mismatch');
+   ids.add(a.assetId);assets.push({projectId:copy.projectId,assetId:a.assetId,name:a.name,blob,sha256:a.sha256});
+  }
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done)=>{
+   tx.objectStore('projects').add({...copy,...(payload===undefined?{}:{payload})});
+   for(const a of assets)tx.objectStore('project_assets').add(a);
+   done(copy);
+  });
+ }
  async exportProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number){
   const snapshot=await transaction<{project:ProjectRecord;payload:ProjectPayload|null;assets:{assetId:string;name:string;blob:Blob;sha256?:string}[]}>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
