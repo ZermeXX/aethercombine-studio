@@ -178,6 +178,13 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   }catch{setError('Native image could not be saved. Existing stored images retained.');}
   finally{releaseAssetWrite();}
  }
+ async function attachReleaseThumbnail(blob:Blob){
+  if(!active||!storage.current||!acquireAssetWrite())return;
+  const db=storage.current,scope=active.project;setError('');
+  try{await db.saveReleaseThumbnail(scope.workspaceId,scope.projectId,blob);setImageRefresh(v=>v+1);setNotice('Project release thumbnail saved');}
+  catch{setError('Release thumbnail could not be saved. Existing attachment retained.');}
+  finally{releaseAssetWrite();}
+ }
  async function removeNativeThumbnail(slot:'A'|'B'|'C'){
   if(!active||!storage.current||!acquireAssetWrite())return;
   const db=storage.current,scope=active.project;
@@ -233,7 +240,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
 
  {active&&storage.current&&<ProjectImagePanel key={active.project.projectId+':images'} storage={storage.current} scope={{workspaceId:active.project.workspaceId,projectId:active.project.projectId}} refresh={imageRefresh} onUrls={setImageUrls} acquireWrite={acquireAssetWrite} releaseWrite={releaseAssetWrite} busy={busy||assetBusy}/>}
  {nativeDraft&&nativeTab==='thumb'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':thumb'} aria-label="Native Thumbnail Studio">
- <ThumbnailStudioView isolatedEditing onProjectImageRemove={slot=>void removeNativeThumbnail(slot)} onProjectImageData={(slot,url)=>void persistNativeImage([slot],url)} onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
+ <ThumbnailStudioView isolatedEditing onProjectReleaseThumbnail={blob=>void attachReleaseThumbnail(blob)} onProjectImageRemove={slot=>void removeNativeThumbnail(slot)} onProjectImageData={(slot,url)=>void persistNativeImage([slot],url)} onProjectImageFile={(slot,file)=>void persistNativeImage([slot],file)} projectImageUrls={imageUrls} initialSlots={nativeDraft.legacyExtras?.thumbnails as ComponentProps<typeof ThumbnailStudioView>['initialSlots']} onSlotsChange={onSlots} thumbTitle={title} onThumbTitleChange={v=>{setTitle(v);setDirty(true);}} thumbBadge={badge} onThumbBadgeChange={v=>{setBadge(v);setDirty(true);}} scriptContext={script} onSendToArtEditor={dataUrl=>void persistNativeImage(['art'],dataUrl,'art')} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='voice'&&<fieldset disabled={busy||assetBusy} key={active?.project.projectId+':voice'} aria-label="Native Voice Studio">
  <VoiceStudioView isolatedEditing initialPreferences={nativeDraft.legacyExtras?.voice as ComponentProps<typeof VoiceStudioView>['initialPreferences']} onPreferencesChange={onVoice} scriptText={script} onScriptTextChange={v=>{setScript(v);setDirty(true);}} onMasterVoiceoverReady={()=>{}} onNotify={setNotice}/>
