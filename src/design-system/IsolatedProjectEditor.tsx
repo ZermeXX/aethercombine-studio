@@ -197,8 +197,8 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsModule(active.project.workspaceId,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
- return <main className="mx-auto max-w-4xl space-y-4 p-4 text-studio-text">
- <h1 className="text-xl font-semibold">V9 Isolated Project Editor · Preview</h1>
+ return <main className="nexus-preview mx-auto space-y-4 p-4 text-studio-text">
+ <header className="nexus-brand"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 Isolated Project Editor · Preview</p></div></header>
  <p>Project-scoped native module previews and validated production settings. Production rendering is disabled. Authorized strict preflight is available in ambient projects only.</p>
  <button type="button" disabled={assetBusy||busy||dirty} onClick={onExit}>Return to legacy Studio</button>
  {error&&<p role="alert">{error}</p>}
@@ -207,7 +207,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
  <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
- {active?.payload&&<nav aria-label="Production modules" className="flex flex-wrap gap-2">
+ {active?.payload&&<nav aria-label="Production modules" className="nexus-module-nav flex flex-wrap gap-2">
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
  <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
  {allowsModule(active!.project.workspaceId,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
