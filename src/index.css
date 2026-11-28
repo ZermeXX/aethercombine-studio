@@ -331,3 +331,10 @@
 .nexus-card-name {font-weight:650;overflow-wrap:anywhere;}
 .nexus-card-state {font-size:.75rem;color:var(--nx-muted);border-top:1px solid var(--nx-border);padding-top:8px;}
 .nexus-project-cards button[aria-pressed=true] .nexus-card-state {color:var(--nx-cyan);}
+
+.nexus-project-card{display:grid;align-content:start;min-width:0;gap:6px;}
+.nexus-project-card > button{width:100%;min-width:0;}
+.nexus-card-menu{min-width:0;border:1px solid var(--nx-border);border-radius:8px;padding:4px 8px;background:var(--nx-panel);}
+.nexus-card-menu summary{cursor:pointer;min-height:44px;line-height:44px;overflow-wrap:anywhere;}
+.nexus-card-menu > button{width:100%;min-height:44px;margin-bottom:4px;padding:8px;overflow-wrap:anywhere;}
+.nexus-card-menu summary:focus-visible{outline:2px solid var(--nx-cyan);}
