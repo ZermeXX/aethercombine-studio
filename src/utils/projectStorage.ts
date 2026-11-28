@@ -110,6 +110,30 @@ export class ProjectStorage {
   const content=payload===undefined?undefined:projectPayload(payload);
   return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add({...p,...(content===undefined?{}:{payload:content})});done(undefined);});
  }
+ async exportProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number){
+  const snapshot=await transaction<{project:ProjectRecord;payload:ProjectPayload|null;assets:{assetId:string;name:string;blob:Blob;sha256?:string}[]}>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{
+    const project=projectMetadata(r.result);
+    if(project.workspaceId!==workspaceId||project.revision!==expectedRevision)throw new Error('Ownership or revision conflict');
+    const payload=r.result.payload===undefined?null:projectPayload(r.result.payload);
+    const a=tx.objectStore('project_assets').index('projectId').getAll(projectId);
+    a.onsuccess=()=>done({project,payload,assets:a.result});
+   }catch(e){fail(e);}};
+  });
+  const assets=[];
+  for(const a of snapshot.assets){
+   if(!(a.blob instanceof Blob)||typeof a.assetId!=='string'||typeof a.name!=='string')throw new Error('Invalid asset');
+   const sha256=await assetDigest(a.blob);
+   if(a.sha256!==undefined&&a.sha256!==sha256)throw new Error('Asset checksum mismatch');
+   const bytes=new Uint8Array(await a.blob.arrayBuffer());
+   let binary='';
+   for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+   assets.push({assetId:a.assetId,name:a.name,mime:a.blob.type,size:bytes.length,sha256,base64:btoa(binary)});
+  }
+  const content={project:snapshot.project,payload:snapshot.payload,assets};
+  return {format:'story-nexus-project',version:1,content,sha256:await assetDigest(new Blob([JSON.stringify(content)]))};
+ }
  duplicateProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number,name:string):Promise<ProjectRecord>{
   return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
    const projects=tx.objectStore('projects'),assets=tx.objectStore('project_assets');
