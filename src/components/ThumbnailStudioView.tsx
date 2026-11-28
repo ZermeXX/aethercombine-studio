@@ -32,6 +32,7 @@ declare global {
 
 interface ThumbnailStudioViewProps {
   isolatedEditing?: boolean;
+  onProjectImageRemove?: (slot:ThumbnailSlotId)=>void;
   onProjectImageData?: (slot:ThumbnailSlotId,dataUrl:string)=>void;
   onProjectImageFile?: (slot:ThumbnailSlotId,file:File)=>void;
   projectImageUrls?: Partial<Record<ThumbnailSlotId,string>>;
@@ -988,6 +989,7 @@ const computeEndScreenWindow = (durationSec: number): string => {
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   isolatedEditing = false,
+  onProjectImageRemove,
   projectImageUrls,
   onProjectImageFile,
   onProjectImageData,
@@ -1050,7 +1052,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     let live=true;
     for(const slot of ['A','B','C'] as const){
       const url=projectImageUrls?.[slot];
-      if(!url)continue;
+      if(!url){setSlotImages(prev=>prev[slot]?{...prev,[slot]:null}:prev);continue;}
       const img=new Image();
       img.onload=()=>{if(live)setSlotImages(prev=>({...prev,[slot]:img}));};
       img.src=url;
@@ -3085,12 +3087,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <label className="text-[11px] text-white/60">
                   Свой фон для Варианта {activeSlot}:
                 </label>
-                {activeSlot !== 'A' && slotImages[activeSlot] && (
+                {(isolatedEditing || activeSlot !== 'A') && slotImages[activeSlot] && (
                   <button
                     type="button"
-                    disabled={isolatedEditing}
-                    title={isolatedEditing?'Persistent slot removal is not yet available':undefined}
+                    disabled={isolatedEditing&&!onProjectImageRemove}
+                    aria-label={isolatedEditing?'Remove native thumbnail '+activeSlot:undefined}
                     onClick={() => {
+                      if(isolatedEditing){onProjectImageRemove?.(activeSlot);return;}
                       setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
                       onNotify(
                         `Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`,
@@ -3099,7 +3102,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     }}
                     className="text-[10px] text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
                   >
-                    Использовать фон A
+                    {isolatedEditing&&activeSlot==='A'?'Удалить фон A':'Использовать фон A'}
                   </button>
                 )}
               </div>
