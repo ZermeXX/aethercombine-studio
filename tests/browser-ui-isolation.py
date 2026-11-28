@@ -759,7 +759,7 @@ with sync_playwright() as p:
     expect(error_toast).to_be_visible()
     error_toast.get_by_role("button",name="Dismiss notification").click()
     expect(error_toast).to_have_count(0)
-    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    expect(page.get_by_alt_text("Stored project image A",exact=True)).to_be_visible()
     print("NEXUS_TOAST_ERROR_PERSISTENCE_PASS")
     page.get_by_role("button",name="Close native module").click()
 
