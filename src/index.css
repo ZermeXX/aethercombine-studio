@@ -283,3 +283,8 @@
 .nexus-header-status[data-state="dirty"],.nexus-header-status[data-state="busy"] {color:var(--nx-gold);}
 .nexus-header-status[data-state="error"] {color:#ff9b9b;}
 @media(max-width:760px){.nexus-header-context{order:3;flex:1 0 100%;}.nexus-header-brand{flex:1 1 100px;}.nexus-header-status{flex-basis:100%;}}
+
+.nexus-header-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
+.nexus-preview .nexus-header-actions button{min-height:44px;font-size:.75rem;padding:8px 10px;}
+#nexus-project-library{scroll-margin-top:12px;}
+@media(max-width:760px){.nexus-header-actions{order:4;flex:1 0 100%;}.nexus-header-actions button{flex:1 1 120px;}}
