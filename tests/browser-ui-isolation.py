@@ -65,8 +65,8 @@ with sync_playwright() as p:
     ac.locator(".nexus-card-menu summary").click()
     archive_action=ac.get_by_role("button",name="Archive project")
     if archive_action.is_enabled():
-        ap.once("dialog",lambda d:d.accept())
         archive_action.click()
+        ap.get_by_role("dialog",name="Archive project?").get_by_role("button",name="Archive",exact=True).click()
         expect(ap.get_by_role("alert")).to_contain_text("Current edits retained")
     expect(draft).to_have_value("Preserve active draft")
     expect(ac).to_have_count(1)
@@ -74,8 +74,8 @@ with sync_playwright() as p:
     expect(ap.locator(".nexus-header-status")).to_have_attribute("data-state","saved")
     if not ac.locator(".nexus-card-menu").evaluate("el => el.open"):
         ac.locator(".nexus-card-menu summary").click()
-    ap.once("dialog",lambda d:d.accept())
     archive_action.click()
+    ap.get_by_role("dialog",name="Archive project?").get_by_role("button",name="Archive",exact=True).click()
     expect(ac).to_have_count(0)
     expect(ap.get_by_role("navigation",name="Production modules")).to_have_count(0)
     ar=ap.locator("details").filter(has=ap.locator("summary",has_text="Archived projects"))
@@ -265,11 +265,11 @@ with sync_playwright() as p:
     print("NEXUS_PROJECT_IMPORT_PASS")
     archived_menu=restored.locator(".nexus-card-menu")
     archived_menu.locator("summary").click()
-    page.once("dialog",lambda d:d.dismiss())
     archived_menu.get_by_role("button",name="Archive project").click()
+    page.get_by_role("dialog",name="Archive project?").get_by_role("button",name="Cancel",exact=True).click()
     expect(restored).to_have_count(1)
-    page.once("dialog",lambda d:d.accept())
     archived_menu.get_by_role("button",name="Archive project").click()
+    page.get_by_role("dialog",name="Archive project?").get_by_role("button",name="Archive",exact=True).click()
     expect(restored).to_have_count(0)
     archive=page.locator("details").filter(has=page.locator("summary",has_text="Archived projects"))
     archive.locator("summary").click()
@@ -298,8 +298,8 @@ with sync_playwright() as p:
     assert restored_backup["content"]["payload"]==archived_backup["content"]["payload"]
     assert restored_backup["content"]["assets"]==archived_backup["content"]["assets"]
     print("NEXUS_PROJECT_RESTORE_PASS")
-    page.once("dialog",lambda d:d.accept())
     restored.get_by_role("button",name="Archive project").click()
+    page.get_by_role("dialog",name="Archive project?").get_by_role("button",name="Archive",exact=True).click()
     expect(restored).to_have_count(0)
     delete_button=archive.get_by_role("button",name="Delete archived project")
     page.once("dialog",lambda d:d.dismiss())
