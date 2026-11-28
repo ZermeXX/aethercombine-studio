@@ -44,6 +44,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [production,setProduction]=useState('');
  const [extras,setExtras]=useState('');
  const [nativeTab,setNativeTab]=useState<'none'|'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'>('none');
+ const [navCollapsed,setNavCollapsed]=useState(false);
  const [notice,setNotice]=useState('');
  const [imageUrls,setImageUrls]=useState<ProjectImageUrls>({});
  const [artInput,setArtInput]=useState<{dataUrl:string;label:string;nonce:number}|null>(null);
@@ -208,16 +209,18 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
  <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button><div className="nexus-project-cards">{projects.map(p=><button type="button" key={p.projectId} aria-pressed={active?.project.projectId===p.projectId} disabled={assetBusy||!ready||busy} onClick={()=>void select(p.projectId)}><span>{p.name}</span><small>Open project</small></button>)}</div></section>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
- {active?.payload&&<nav aria-label="Production modules" className="nexus-module-nav flex flex-wrap gap-2">
- <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
- <button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
- {allowsModule(active!.project.workspaceId,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
- {allowsModule(active!.project.workspaceId,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>}
- <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('thumb')}>Open native Thumbnail Studio</button>
- <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('voice')}>Open native Voice Studio</button>
- <button type="button" disabled={busy||assetBusy||!active?.payload} onClick={()=>openNative('art')}>Open native Image Art Editor</button>
+ <div className="nexus-workspace-layout">
+ {active?.payload&&<aside className="nexus-sidebar"><button type="button" className="nexus-nav-toggle" aria-expanded={!navCollapsed} aria-controls="nexus-production-nav" onClick={()=>setNavCollapsed(v=>!v)}>{navCollapsed?"☰ Expand menu":"☰ Collapse menu"}</button><nav id="nexus-production-nav" hidden={navCollapsed} aria-label="Production modules" className="nexus-module-nav">
+ <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='verbaflow'} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='seo'} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
+ {allowsModule(active!.project.workspaceId,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='combine'} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
+ {allowsModule(active!.project.workspaceId,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='loop'} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>}
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='thumb'} onClick={()=>openNative('thumb')}>Open native Thumbnail Studio</button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='voice'} onClick={()=>openNative('voice')}>Open native Voice Studio</button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='art'} onClick={()=>openNative('art')}>Open native Image Art Editor</button>
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>Close native module</button>
- </nav>}
+ </nav></aside>}
+ <section className="nexus-workspace-content">
  {notice&&<p>{notice}</p>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
  <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
@@ -255,5 +258,6 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <details><summary>Advanced production settings (JSON)</summary><p>Only supported typed fields are accepted. Do not enter credentials. Empty text removes the corresponding optional section.</p>{field('Production settings JSON',production,setProduction)}{field('Module settings JSON',extras,setExtras)}</details>
  <button type="button" disabled={!dirty||busy||!active?.payload} onClick={()=>void run(save)}>Save project</button>
  <p role="status">{busy?'Saving or loading…':dirty?'Unsaved changes':active?'Project loaded':'No project selected'}</p>
+ </section></div>
  </main>;
 }
