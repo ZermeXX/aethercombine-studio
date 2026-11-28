@@ -15,7 +15,10 @@ export function synchronizeTimeline(slots:readonly TimelineSlot[],hours:number,f
  const minimum=slots.map((s,i)=>{
   const ends=s.inserts.map(x=>x.trigger_at_sec+x.duration_sec);
   if(ends.some(x=>!Number.isFinite(x)||x<0))throw new Error('Invalid insert timing');
-  return Math.ceil(Math.max(1,overlaps[i]+(overlaps[i-1]??0)+1/fps,...ends)*fps);
+  // Smart Concat V8.1 omits bodies <=2s for multi-slot renders.
+  const overlap=overlaps[i]+(overlaps[i-1]??0);
+  const bodyMinimum=slots.length>1?Math.floor((overlap+2)*fps)+1:1;
+  return Math.max(bodyMinimum,Math.ceil(Math.max(1,...ends)*fps));
  });
  const required=minimum.reduce((a,b)=>a+b,0);
  if(required>total)throw new Error('Target would truncate timeline inserts or transitions');
