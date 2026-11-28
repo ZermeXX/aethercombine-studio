@@ -162,7 +162,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
    if(dirty||!storage.current)throw new Error('Save current changes before archiving');
    const next=await storage.current.archiveProject(p.workspaceId,p.projectId,p.revision);
    setProjects(list=>list.map(item=>item.projectId===p.projectId?next:item));
-   if(active?.project.projectId===p.projectId){hydrate(null);setNativeTab(null);}
+   if(active?.project.projectId===p.projectId){hydrate(null);setNativeTab('none');}
   });
  }
  async function renameProject(p:ProjectRecord){
