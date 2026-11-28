@@ -739,6 +739,9 @@ with sync_playwright() as p:
     expect(toast).to_be_visible()
     page.mouse.move(0,0)
     expect(toast).to_be_hidden(timeout=8500)
+    # Applying art switches to the cover module; reopen art before a second application.
+    page.get_by_role("button",name="Open native Image Art Editor").click()
+    expect(page.get_by_role("group",name="Native Image Art Editor")).to_be_visible()
     page.get_by_role("button",name="Применить к Обложке A").click()
     expect(toast).to_be_visible()
     dismiss.click()
