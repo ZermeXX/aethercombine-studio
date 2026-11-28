@@ -39,3 +39,18 @@ export async function findStrictPreflightRun(requestId:string,rendererSha:string
  const run=matches[0];
  return {id:run.id,status:run.status,conclusion:run.conclusion,runnerVerified:false as const};
 }
+
+/** Require positive evidence of actual strict steps; success alone is insufficient. */
+export async function verifyStrictPreflightJobs(runId:number,rendererSha:string,token:string,request:typeof fetch=fetch){
+ if(!Number.isSafeInteger(runId)||runId<=0||! /^[0-9a-f]{40}$/.test(rendererSha)||!token.trim()||/[\r\n]/.test(token))throw new Error('Invalid evidence lookup');
+ const response=await request(API+'/actions/runs/'+runId+'/jobs?filter=latest&per_page=100',{headers:{Authorization:'Bearer '+token.trim(),Accept:'application/vnd.github+json'},redirect:'error',cache:'no-store'});
+ if(!response.ok)throw new Error('Job evidence unavailable: HTTP '+response.status);
+ const data=await response.json();
+ const jobs=Array.isArray(data.jobs)?data.jobs:[];
+ const matches=jobs.filter((j:any)=>j.run_id===runId&&j.head_sha===rendererSha&&j.name==='render_and_upload');
+ if(matches.length!==1)return false;
+ const job=matches[0];
+ if(job.status!=='completed'||job.conclusion!=='success'||!Array.isArray(job.steps))return false;
+ const step=(name:string,conclusion:string)=>job.steps.filter((s:any)=>s.name===name&&s.status==='completed'&&s.conclusion===conclusion).length===1;
+ return step('Strict Project Dispatch Identity Guard','success')&&step('Preflight Asset Check','success')&&step('Download Source Clips (only needed files)','success')&&step('Strict Project Media Verification','success')&&step('Build and Run FFmpeg Pipeline','skipped')&&step('Upload Output Video, Shorts & Metadata to Google Drive','skipped');
+}
