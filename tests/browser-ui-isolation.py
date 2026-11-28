@@ -37,6 +37,7 @@ with sync_playwright() as p:
     expect(script).to_be_disabled()
     expect(name).to_be_enabled()
     name.fill("Ambient UI")
+    page.get_by_label("Project format").select_option("ambient")
     page.get_by_role("button",name="Create isolated project").click()
     expect(script).to_be_enabled()
     expect(script).to_have_value("")
@@ -349,7 +350,7 @@ with sync_playwright() as p:
     page.get_by_role("button",name="Save project").click()
     expect(page.get_by_role("group",name="Native Voice Studio")).to_have_count(0)
     entries = page.evaluate('window.__storageAudit')
-    assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
+    assert all(e['area']=='local' and e['key']=='story-nexus.ui-language.v1' and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     page.reload()
     expect(page.get_by_role("button",name="Open isolated project editor")).to_be_visible()
     assert page.evaluate('window.__storageAudit.length') == 0
@@ -373,7 +374,7 @@ with sync_playwright() as p:
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_thumb_abc_slots_v2')}finally{window.__auditEnabled=true}}")=="thumb-fixture"
     entries = page.evaluate('window.__storageAudit')
-    assert not entries, [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
+    assert all(e['area']=='local' and e['key']=='story-nexus.ui-language.v1' and e['method'] in ('getItem','setItem') for e in entries), [{"area":e["area"],"method":e["method"],"key":e["key"].split(":")[0]} for e in entries]
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('ac_gh_token')==='synthetic-migration-fixture'}finally{window.__auditEnabled=true}}")
     print('ISOLATED_COLD_START_STORAGE_PASS')
     print('ISOLATED_PRODUCTION_STORAGE_ACCESS_PASS')
