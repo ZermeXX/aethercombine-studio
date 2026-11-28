@@ -152,3 +152,16 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.26);
 }
+
+/* Story Nexus preview only; legacy UI remains unchanged. */
+.nexus-preview { max-width: 1440px; min-height: 100vh; background: radial-gradient(ellipse at top, #20183b 0, #080c18 55%); color: #edf2ff; }
+.nexus-brand { display:flex; align-items:center; gap:16px; padding:16px; border:1px solid #414369; border-radius:16px; background:#131b30; }
+.nexus-brand h1 { color:#f4f2ff; }
+.nexus-brand p { color:#a9b9da; font-size:.85rem; }
+.nexus-preview > label { display:grid; gap:6px; }
+.nexus-preview > label > input, .nexus-preview > label > select { background:#141e32; color:#edf2ff; border:1px solid #405171; border-radius:8px; padding:10px; min-width:0; }
+.nexus-preview > button, .nexus-module-nav > button { background:#24203d; border:1px solid #7654b8; border-radius:8px; padding:10px 14px; color:#eeeaff; }
+.nexus-preview > button:disabled, .nexus-module-nav > button:disabled { opacity:.45; }
+.nexus-preview > button:focus-visible, .nexus-module-nav > button:focus-visible { outline:2px solid #42d8ff; outline-offset:3px; }
+.nexus-module-nav { padding:12px; background:#101827; border:1px solid #344461; border-radius:12px; }
+@media(max-width:600px){ .nexus-module-nav > button { flex:1 1 140px; } .nexus-brand { padding:12px; } }
