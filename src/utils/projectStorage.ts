@@ -195,6 +195,18 @@ export class ProjectStorage {
    }catch(e){fail(e);}};
   });
  }
+ restoreProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const s=tx.objectStore('projects'),r=s.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||!old.archived)throw new Error('Ownership or revision conflict');
+    const next=projectMetadata({...old,archived:false,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
+    tx.objectStore('project_revisions').add(r.result);
+    s.put({...r.result,...next});done(next);
+   }catch(e){fail(e);}};
+  });
+ }
  getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
