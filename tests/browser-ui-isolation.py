@@ -747,6 +747,22 @@ with sync_playwright() as p:
     dismiss.click()
     expect(toast).to_have_count(0)
     print("NEXUS_TOAST_SUCCESS_TIMER_LAYOUT_PASS")
+    # Invalid file type exercises the actual Art validation and error toast.
+    page.get_by_role("button",name="Open native Image Art Editor").click()
+    art=page.get_by_role("group",name="Native Image Art Editor")
+    art.locator('input[type="file"][accept="image/*"]').set_input_files({"name":"invalid.txt","mimeType":"text/plain","buffer":b"not an image"})
+    error_toast=page.get_by_role("region",name="Error",exact=True)
+    expect(error_toast.get_by_role("alert")).to_contain_text("Пожалуйста, выберите файл изображения")
+    page.mouse.move(0,0)
+    page.evaluate("() => document.activeElement?.blur()")
+    page.wait_for_timeout(6500)
+    expect(error_toast).to_be_visible()
+    error_toast.get_by_role("button",name="Dismiss notification").click()
+    expect(error_toast).to_have_count(0)
+    expect(page.get_by_alt_text("Stored project image A")).to_be_visible()
+    print("NEXUS_TOAST_ERROR_PERSISTENCE_PASS")
+    page.get_by_role("button",name="Close native module").click()
+
 
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('aether_voice_settings')}finally{window.__auditEnabled=true}}")=="voice-fixture"
     assert page.evaluate("() => {window.__auditEnabled=false;try{return localStorage.getItem('favorite_voices')}finally{window.__auditEnabled=true}}")=="favorites-fixture"
