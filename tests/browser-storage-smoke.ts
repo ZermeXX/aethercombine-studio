@@ -58,6 +58,15 @@ async function main(){
  const c=new WorkspaceProjectContext(scoped),sw=new WorkspaceSwitchCoordinator(c);
  const h=await c.create('histoviva','Scoped H'),w=await c.create('the_whisker_trio','Scoped W');
  const hs={workspaceId:'histoviva' as const,projectId:h.project.projectId},ws={workspaceId:'the_whisker_trio' as const,projectId:w.project.projectId};
+ const image=new Blob(['synthetic storage fixture'],{type:'image/png'});
+ await scoped.replaceProjectImage(hs.workspaceId,hs.projectId,'C',image);
+ await scoped.replaceProjectImage(ws.workspaceId,ws.projectId,'C',image);
+ let wrongOwner=false;
+ try{await scoped.removeProjectThumbnail(ws.workspaceId,hs.projectId,'C');}catch{wrongOwner=true;}
+ if(!wrongOwner||!await scoped.getAsset(hs.workspaceId,hs.projectId,'project-image:C'))throw new Error('Thumbnail ownership guard failed');
+ await scoped.removeProjectThumbnail(hs.workspaceId,hs.projectId,'C');
+ if(await scoped.getAsset(hs.workspaceId,hs.projectId,'project-image:C')||!await scoped.getAsset(ws.workspaceId,ws.projectId,'project-image:C'))throw new Error('Thumbnail deletion isolation failed');
+ console.log('THUMBNAIL_ASSET_OWNERSHIP_PASS');
  await sw.switchTo(hs,async()=>{});
  await sw.switchTo(ws,async old=>{await saveModulePatch(c,old,h.project.revision,{module:'verbaflow',script:'History',chapters:'Intro'});});
  if((await c.read(hs)).payload?.script!=='History'||JSON.stringify((await c.read(ws)).payload)!==JSON.stringify(emptyProjectPayload()))throw new Error('Scoped persistence isolation failed');
