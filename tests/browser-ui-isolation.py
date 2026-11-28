@@ -164,6 +164,18 @@ with sync_playwright() as p:
     card.locator(":scope > button").click()
     expect(script).to_have_value("History narration")
     print("NEXUS_PROJECT_DUPLICATION_PASS")
+    import json
+    if menu.locator("summary").get_attribute("aria-expanded") != "true" and not menu.evaluate("el => el.open"):
+        menu.locator("summary").click()
+    with page.expect_download() as exported:
+        menu.get_by_role("button",name="Export project").click()
+    with open(exported.value.path(),encoding="utf-8") as f:
+        backup=json.load(f)
+    assert backup["format"]=="story-nexus-project" and backup["version"]==1
+    assert backup["content"]["project"]["name"]=="History UI"
+    assert backup["content"]["payload"]["script"]=="History narration"
+    assert len(backup["sha256"])==64
+    print("NEXUS_PROJECT_EXPORT_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
     page.get_by_text("Advanced production settings (JSON)",exact=True).click()
