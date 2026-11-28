@@ -245,6 +245,23 @@ with sync_playwright() as p:
     page.remove_listener("dialog",confirmed_delete)
     expect(delete_button).to_have_count(0)
     expect(script).to_have_value("History narration")
+    # Inspect committed IndexedDB records, not only the rendered card.
+    deleted_id=restored_backup["content"]["project"]["projectId"]
+    original_id=backup["content"]["project"]["projectId"]
+    counts=page.evaluate("""async ({deleted,original}) => {
+      const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('aether_studio_v9');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+      try {
+        const tx=db.transaction(['projects','project_assets','project_revisions'],'readonly');
+        const read=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+        return await Promise.all([read(tx.objectStore('projects').count(deleted)),read(tx.objectStore('project_assets').index('projectId').count(deleted)),read(tx.objectStore('project_revisions').index('projectId').count(deleted)),read(tx.objectStore('projects').count(original))]);
+      } finally {db.close();}
+    }""",{"deleted":deleted_id,"original":original_id})
+    assert counts==[0,0,0,1],counts
+    page.reload()
+    page.get_by_role("button",name="Open isolated project editor").click()
+    expect(script).to_have_value("History narration")
+    expect(restored).to_have_count(0)
+    print("NEXUS_PROJECT_DELETE_PERSISTENCE_PASS")
     print("NEXUS_PROJECT_DELETE_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
