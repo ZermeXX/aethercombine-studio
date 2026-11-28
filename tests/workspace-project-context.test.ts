@@ -200,3 +200,15 @@ test('loop manifest exports runner settings and rejects unsupported configuratio
  expect(()=>adaptLoopTimeline([slot('a',10,4),slot('b',10,4),slot('c',10,0)])).toThrow('Act body too short');
  expect(adaptLoopTimeline([slot('a',10,4),slot('b',11,4),slot('c',10,0)])).toHaveLength(3);
  });
+
+test('timeline synchronization reserves a renderer-compatible body at a tight target',()=>{
+ const slot=(id:string,duration:number,overlap:number):TimelineSlot=>({slot_index:1,slot_id:id,title:id,asset_id:id,file_name:id+'.mp4',source_clip_duration_sec:10,internal_loop_crossfade_sec:1,slot_duration_sec:duration,inserts:[],slot_transition_out:{type:overlap?'xfade':'none',duration_sec:overlap}});
+ const original=[slot('a',5400,5396),slot('b',10794,5396),slot('c',5400,0)];
+ const before=structuredClone(original);
+ const next=synchronizeTimeline(original,3,24);
+ expect(timelineDuration(next)).toBeCloseTo(10800,8);
+ expect(()=>adaptLoopTimeline(next)).not.toThrow();
+ expect(original).toEqual(before);
+ const impossible=[slot('a',5400,5398),slot('b',10800,5398),slot('c',5400,0)];
+ expect(()=>synchronizeTimeline(impossible,3,24)).toThrow();
+});
