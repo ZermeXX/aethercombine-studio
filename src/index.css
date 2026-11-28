@@ -410,3 +410,11 @@
 .nexus-preview .nexus-help-panel dt {font-size:16px;font-weight:700;}
 .nexus-preview .nexus-help-panel dd {font-size:13px;}
 .nexus-preview .nexus-help-panel button {font-family:inherit;font-size:14px;}
+
+/* Project action help stays in the card's flow, including narrow columns. */
+.nexus-preview .nexus-card-menu .nexus-help-row {display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:start;gap:8px;}
+.nexus-preview .nexus-card-menu .nexus-help-row > button {min-width:0;min-height:44px;overflow-wrap:anywhere;}
+.nexus-preview .nexus-card-menu .nexus-help-row:has(.nexus-help-trigger[aria-expanded="true"]) .nexus-help {display:grid;grid-template-columns:minmax(0,1fr) 44px;grid-column:1 / -1;grid-row:2;min-width:0;}
+.nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-trigger {justify-self:end;grid-column:2;}
+.nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-panel {position:static;grid-column:1 / -1;width:100%;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;}
+.nexus-preview .nexus-card-menu .nexus-help-row .nexus-help-hover {display:none;}
