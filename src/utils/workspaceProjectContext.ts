@@ -27,6 +27,14 @@ export class WorkspaceProjectContext {
   await this.storage.createProject(project,payload);
   return {project,payload};
  }
+ async rename(scope:ProjectScope,expectedRevision:number,name:string):Promise<ProjectSnapshot>{
+  const clean=name.trim();
+  if(!clean)throw new Error('Project name required');
+  const snapshot=await this.read(scope);
+  if(snapshot.project.revision!==expectedRevision)throw new Error('Project revision conflict');
+  const project=await this.storage.saveProject({...snapshot.project,name:clean},expectedRevision);
+  return {project,payload:snapshot.payload};
+ }
  async select(scope:ProjectScope):Promise<ProjectSnapshot>{
   const snapshot=await this.read(scope);
   await this.storage.setActiveProject(scope.workspaceId,scope.projectId);
