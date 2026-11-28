@@ -208,3 +208,42 @@
 .nexus-help-panel button { margin-top:8px; color:#a78bfa; text-decoration:underline; }
 .nexus-help-panel dt { font-weight:700; margin-top:8px; }
 .nexus-help-panel dd { margin:0; color:#c1cce5; }
+
+/* V9 premium shell tokens: scoped to preview, not legacy modules. */
+.nexus-preview {
+ --nx-base:#080c18; --nx-cyan:#00c8ff; --nx-blue:#245bff; --nx-violet:#9747ff; --nx-gold:#ffbd38;
+ --nx-panel:#111a2b; --nx-raised:#182238; --nx-border:#354461; --nx-text:#edf2ff; --nx-muted:#a9b9da;
+ --nx-radius:12px; --nx-gap:12px; --nx-control:44px;
+ color:var(--nx-text); background:radial-gradient(ellipse at 50% 0%,#20183b,var(--nx-base) 55%);
+}
+.nexus-preview :is(.nexus-brand,.nexus-project-picker,.nexus-module-nav) {
+ background:linear-gradient(155deg,var(--nx-raised),var(--nx-panel));
+ border-color:var(--nx-border); border-radius:var(--nx-radius);
+ box-shadow:0 12px 28px -22px #000c,inset 0 1px 0 #ffffff09;
+}
+.nexus-brand {gap:var(--nx-gap);}
+.nexus-brand > div {flex:1;min-width:0;}
+.nexus-brand > button,.nexus-nav-toggle,.nexus-project-picker > button,.nexus-module-nav > button {
+ min-height:var(--nx-control); border-radius:8px; font-size:.875rem; font-weight:500;
+}
+.nexus-brand > button {padding:8px 12px;border:1px solid var(--nx-border);background:var(--nx-panel);}
+.nexus-project-picker > button {background:linear-gradient(120deg,#50318b,#392b68);border-color:#8964cb;}
+.nexus-project-picker :is(input,select) {min-height:var(--nx-control);border-color:var(--nx-border);width:100%;}
+.nexus-preview :is(.nexus-brand,.nexus-project-picker,.nexus-sidebar) :is(button,input,select):focus-visible {
+ outline:2px solid var(--nx-cyan);outline-offset:2px;
+}
+.nexus-module-nav > button {background:var(--nx-panel);border-color:var(--nx-border);}
+.nexus-module-nav > button[aria-pressed=true] {border-color:#a78bfa;background:#30234b;box-shadow:inset 3px 0 var(--nx-cyan);}
+.nexus-help-trigger {width:44px;height:44px;}
+.nexus-help-panel {max-height:min(65vh,420px);overflow:auto;}
+@media(max-width:600px){
+ .nexus-preview {padding:12px;}
+ .nexus-project-picker {padding:12px;gap:10px;}
+ .nexus-channel-cards,.nexus-project-cards {gap:8px;}
+ .nexus-channel-cards button,.nexus-project-cards button {padding:12px;}
+ .nexus-brand h1 {font-size:1rem;}
+ .nexus-brand img {width:40px;height:40px;}
+}
+@media(prefers-reduced-motion:reduce){
+ .nexus-preview button {transition:none;transform:none;}
+}
