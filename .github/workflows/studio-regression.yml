@@ -43,7 +43,7 @@ jobs:
           work=$(mktemp -d)
           bun tests/export-loop-fixture.ts > "$work/manifest.json"
           bun tests/export-loop-fixture.ts --advanced > "$work/advanced.json"
-          curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/0a0b71254eb9a2bcfc27e5dceb7ffa2ee1966039/build_timeline.py -o "$work/build_timeline.py"
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/52f4b90ed2a93736f8e86b38eb14de836f26931f/build_timeline.py -o "$work/build_timeline.py"
           cd "$work"
           mkdir input_clips
           ffmpeg -v error -f lavfi -i color=c=blue:s=1280x720:r=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/base.mp4
@@ -51,7 +51,8 @@ jobs:
           mkdir blocked-bin
           printf '#!/bin/sh\nexit 99\n' > blocked-bin/rclone
           chmod +x blocked-bin/rclone
-          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py
+          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py 2>&1 | tee render.log
+          if grep -Ei "non.monotoni(c|cally)|queue input is backward in time" render.log; then exit 1; fi
           python - <<'PY'
           import json, subprocess
           result=json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams","-show_format","-of","json","output.mp4"]))
@@ -66,7 +67,8 @@ jobs:
           ffmpeg -v error -f lavfi -i color=c=green:s=1280x720:r=24 -f lavfi -i sine=frequency=660:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/green.mp4
           ffmpeg -v error -f lavfi -i color=c=red:s=1280x720:r=24 -f lavfi -i sine=frequency=880:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/red.mp4
           rm -f output.mp4 qc_report.json
-          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py
+          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py 2>&1 | tee render.log
+          if grep -Ei "non.monotoni(c|cally)|queue input is backward in time" render.log; then exit 1; fi
           python - <<'PY'
           import json, subprocess
           m=json.load(open("manifest.json"))
@@ -88,5 +90,9 @@ jobs:
           assert red[0]>red[1]+40 and red[0]>red[2]+40
           assert after[1]>after[0]+40 and after[1]>after[2]+40
           assert json.load(open("qc_report.json"))["status"]=="PASS"
+          packets=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams","a:0","-show_packets","-show_entries","packet=dts","-of","json","output.mp4"]))["packets"]
+          dts=[int(p["dts"]) for p in packets]
+          assert len(dts)>1 and all(a<b for a,b in zip(dts,dts[1:])), "Non-monotonic audio packet DTS"
+          print("ADVANCED_AUDIO_DTS_PASS",len(dts))
           print("ADVANCED_LOOP_RENDER_PASS")
           PY
