@@ -124,6 +124,17 @@ with sync_playwright() as p:
     assert exported["timeline_slots"][0]["inserts"][0]["transition_duration_sec"]==1.5
     assert exported["timeline_slots"][0]["inserts"][0]["trigger_at_sec"]==120
     print("NATIVE_MANIFEST_DOWNLOAD_PASS")
+    page.get_by_label("Preflight Drive folder ID").fill("synthetic-folder")
+    page.get_by_role("button",name="Check production preflight").click()
+    report=page.get_by_label("Production preflight report")
+    expect(report).to_contain_text('"dispatchAllowed": false')
+    preflight=json.loads(report.inner_text())
+    assert preflight["assets"]
+    assert all(not asset["runnerVerified"] for asset in preflight["assets"])
+    assert preflight["blockers"]
+    page.get_by_label("Preflight Drive folder ID").fill("different-folder")
+    expect(report).to_have_count(0)
+    print("PRODUCTION_PREFLIGHT_BROWSER_PASS")
     page.get_by_role("button",name="Close native module").click()
     production.fill(original)
     page.get_by_role("button",name="Open scoped Loop settings").click()
