@@ -1,3 +1,4 @@
+import {ContextHelp,type HelpLanguage} from './ContextHelp';
 import {synchronizeTimeline,timelineDuration} from '../utils/timelineSynchronization';
 import {LoopDurationControls} from '../components/LoopDurationControls';
 import {LoopBuilderHeader} from '../components/LoopBuilderHeader';
@@ -31,6 +32,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const storage=useRef<ProjectStorage|null>(null);
  const context=useRef<WorkspaceProjectContext|null>(null);
  const locked=useRef(false);
+ const [language,setLanguage]=useState<HelpLanguage>('ru');
  const [ready,setReady]=useState(false);
  const [workspace,setWorkspace]=useState<WorkspaceId>('histoviva');
  const [projects,setProjects]=useState<ProjectRecord[]>([]);
@@ -199,7 +201,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsModule(active.project.workspaceId,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="nexus-preview mx-auto space-y-4 p-4 text-studio-text">
- <header className="nexus-brand"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 Isolated Project Editor · Preview</p></div></header>
+ <header className="nexus-brand"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 Isolated Project Editor · Preview</p></div><button type="button" aria-label="Help language" onClick={()=>setLanguage(v=>v==='ru'?'en':'ru')}>{language==='ru'?'RU':'EN'}</button></header>
  {!ready&&!error&&<section className="nexus-startup" role="status"><img src={import.meta.env.BASE_URL+'favicon.svg'} width={72} height={72} alt=""/><h2>Story Nexus Studio</h2><p>Opening project library…</p><div className="nexus-loading-track" aria-hidden="true"><span/></div></section>}
  {!ready&&error&&<section className="nexus-startup" role="alert"><h2>Unable to open Studio</h2><p>{error}</p><button type="button" onClick={()=>window.location.reload()}>Retry / Повторить</button></section>}
  <p>Project-scoped native module previews and validated production settings. Production rendering is disabled. Authorized strict preflight is available in ambient projects only.</p>
@@ -208,7 +210,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <section className="nexus-project-picker" aria-label="My projects"><h2>Мои проекты / My projects</h2><div className="nexus-channel-cards">{Object.values(CHANNEL_PROFILES).map(p=><button type="button" key={p.id} aria-pressed={workspace===p.id} disabled={assetBusy||!ready||busy} onClick={()=>void changeWorkspace(p.id)}><span>{p.id==='histoviva'?'HISTOVIVA':'The Whisker Trio'}</span><small>{p.id==='histoviva'?'History · Documentary':'Video · Shorts · Ambient'}</small></button>)}</div>
  <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={assetBusy||!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
  <label className="grid gap-1">Project<select aria-label="Isolated project" value={active?.project.projectId??''} disabled={assetBusy||!ready||busy} onChange={e=>{if(e.currentTarget.value)void select(e.currentTarget.value);}}><option value="" disabled>Select project</option>{projects.map(p=><option key={p.projectId} value={p.projectId}>{p.name}</option>)}</select></label>
- <label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label>
+ <div className="nexus-help-row"><label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label><ContextHelp language={language} entry={{ru:{summary:"Название нового независимого проекта.",effect:"Создаёт отдельную запись при нажатии кнопки создания.",whenOn:"Для нового выпуска или отдельного видео.",whenOff:"Для продолжения существующего проекта выберите его карточку.",recommended:"Уникальное понятное название.",example:"HISTOVIVA EP03",limitations:"Название не является идентификатором облачной папки."},en:{summary:"Name of a new independent project.",effect:"Creates a separate record when you press Create.",whenOn:"For a new episode or separate video.",whenOff:"Select an existing project to continue it.",recommended:"A descriptive unique name.",example:"HISTOVIVA EP03",limitations:"The name is not a cloud folder ID."}}}/></div>
  <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button><div className="nexus-project-cards">{projects.map(p=><button type="button" key={p.projectId} aria-pressed={active?.project.projectId===p.projectId} disabled={assetBusy||!ready||busy} onClick={()=>void select(p.projectId)}><span>{p.name}</span><small>Open project</small></button>)}</div></section>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
  <div className="nexus-workspace-layout">
