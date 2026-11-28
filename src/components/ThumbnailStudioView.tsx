@@ -2324,7 +2324,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       onNotify('Сначала выберите или загрузите базовый кадр для изменения разрешения.', 'info');
       return;
     }
-    const slotToUpdate: ThumbnailSlotId = slotImages[activeSlot] ? activeSlot : 'A';
+    const slotToUpdate: ThumbnailSlotId = isolatedEditing ? activeSlot : (slotImages[activeSlot] ? activeSlot : 'A');
     resampleSingleImage(targetImg, (nextImg, url) => {
       if(persistLocalImage(slotToUpdate,url)){setBaseResolutionPreset(presetKey);return;}
       setSlotImages(prev => ({ ...prev, [slotToUpdate]: nextImg }));
