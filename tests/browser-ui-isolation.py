@@ -176,6 +176,20 @@ with sync_playwright() as p:
     assert backup["content"]["payload"]["script"]=="History narration"
     assert len(backup["sha256"])==64
     print("NEXUS_PROJECT_EXPORT_PASS")
+    picker=page.get_by_label("Import project backup")
+    picker.set_input_files(str(exported.value.path()))
+    restored=page.locator(".nexus-project-card").filter(has_text="History UI — imported")
+    expect(restored).to_have_count(1)
+    restored.locator(":scope > button").click()
+    expect(script).to_have_value("History narration")
+    backup["content"]["payload"]["script"]="tampered"
+    picker.set_input_files({"name":"tampered.json","mimeType":"application/json","buffer":json.dumps(backup).encode()})
+    expect(page.get_by_text("Invalid backup version or checksum",exact=False)).to_be_visible()
+    expect(restored).to_have_count(1)
+    card=page.locator(".nexus-project-card").filter(has=page.locator(".nexus-card-name",has_text="History UI")).filter(has_not_text="imported")
+    card.locator(":scope > button").click()
+    expect(script).to_have_value("History narration")
+    print("NEXUS_PROJECT_IMPORT_PASS")
     print("NEXUS_PROJECT_CARD_MENU_PASS")
     print("NEXUS_SMART_HEADER_PASS")
     page.get_by_text("Advanced production settings (JSON)",exact=True).click()
