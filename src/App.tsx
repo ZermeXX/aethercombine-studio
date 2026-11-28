@@ -1,3 +1,6 @@
+import {LoopDurationControls} from './components/LoopDurationControls';
+import {LoopBuilderHeader} from './components/LoopBuilderHeader';
+import {IsolatedProjectEditor} from './design-system/IsolatedProjectEditor';
 /**
  @license
  SPDX-License-Identifier: Apache-2.0
@@ -5,6 +8,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { StudioShell } from './design-system/StudioShell';
+import {ProjectContextPreview} from './design-system/ProjectContextPreview';
 import {readWorkspaceSelection,saveWorkspaceSelection,type WorkspaceId} from './design-system/workspaces';
 import {
   Layers,
@@ -94,6 +98,7 @@ import {
   clearWorkspaceDraft,
   loadActiveRenderJob,
   loadGoogleAuthRecord,
+  migrateLegacySecrets,
   loadTelegramSession,
   loadWorkspaceDraft,
   saveActiveRenderJob,
@@ -477,8 +482,16 @@ const DEFAULT_SEAMLESS_ASYMMETRY: SeamlessAsymmetryConfig = {
   random_interval: [1200, 2400]
 };
 
-export default function App() {
+export default function App(){
+ // Do not unmount live legacy production state: isolated mode is only offered before mounting it.
+ const [mode,setMode]=useState<'choose'|'legacy'|'isolated'>(()=>new URLSearchParams(window.location.search).get('v9-project-preview')==='1'?'choose':'legacy');
+ if(mode==='choose')return <main className="mx-auto max-w-xl space-y-4 p-6 text-studio-text"><h1>AetherCombine Studio V9.0</h1><p>Choose legacy production or the isolated project editor preview. No automatic migration.</p><button type="button" onClick={()=>setMode('legacy')}>Open legacy Studio</button><button type="button" onClick={()=>setMode('isolated')}>Open isolated project editor</button></main>;
+ if(mode==='isolated')return <IsolatedProjectEditor onExit={()=>setMode('choose')}/>;
+ return <LegacyStudio/>;
+}
+function LegacyStudio() {
   const [bootSnapshot] = useState(() => {
+    migrateLegacySecrets();
     const googleAuth = loadGoogleAuthRecord();
     const restoredGoogleSession = getRestoredGoogleSession();
     const draft = loadWorkspaceDraft();
@@ -4262,6 +4275,7 @@ export default function App() {
       </header>
 
       <StudioShell active={activeTab} onSelect={handleSelectTab} workspace={workspace} onWorkspaceChange={handleWorkspaceChange}>
+      <ProjectContextPreview key={workspace} workspace={workspace}/>
       <main
         onPaste={handleGlobalManifestPaste}
         className="relative z-10 flex-1 min-w-0 max-w-[1600px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-6 overflow-x-hidden"
@@ -4373,44 +4387,7 @@ export default function App() {
               </label>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
-              <div className="space-y-2 flex-1 min-w-0 sm:min-w-[260px]">
-                <h2 className="text-base sm:text-lg font-bold text-[#f8fafc] flex items-center gap-2">
-                  <Repeat className="text-amber-400 w-5 h-5 shrink-0" />
-                  <span>Многочасовой Луп (N-Слотов) — Конструктор 4K</span>
-                </h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                    Project Name:
-                  </label>
-                  <input
-                    type="text"
-                    value={loopProjectName}
-                    onChange={e => setLoopProjectName(e.target.value)}
-                    placeholder="Ambient Loop 4K"
-                    className="min-h-[40px] bg-[#080c14]/90 border border-white/[0.12] focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs font-semibold text-[#f8fafc] w-full sm:w-80 outline-none"
-                  />
-                </div>
-                <p className="text-xs text-white/55">
-                  Экспорт{' '}
-                  <code className="font-mono text-amber-300">
-                    {videoCodec} (CRF {videoCrf})
-                  </code>{' '}
-                  {videoFps} fps • AAC {audioBitrateKbps} kbps • Стыки актов {actCrossfadeSec}с •
-                  Петли 10с (шов {internalLoopCrossfadeSec.toFixed(1)}с)
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono tabular-nums text-white/75">
-                <span className="text-cyan-300">
-                  {videoCodec === 'libx265' ? 'H.265' : 'H.264'} • CRF {videoCrf} • {videoFps}fps
-                </span>
-                <span className="text-white/25">•</span>
-                <span className="text-emerald-300 font-semibold">
-                  Актов: {timelineSlots.length} • Вставок: {totalInsertsCount} •{' '}
-                  {formatTimeHMS(calculatedProjectDurationSec)}
-                </span>
-              </div>
-            </div>
+            <LoopBuilderHeader loopProjectName={loopProjectName} setLoopProjectName={setLoopProjectName} videoCodec={videoCodec} videoCrf={videoCrf} videoFps={videoFps} audioBitrateKbps={audioBitrateKbps} actCrossfadeSec={actCrossfadeSec} internalLoopCrossfadeSec={internalLoopCrossfadeSec} slotCount={timelineSlots.length} totalInsertsCount={totalInsertsCount} durationLabel={formatTimeHMS(calculatedProjectDurationSec)}/>
 
             <div className="aether-card rounded-2xl p-4 space-y-3 border border-amber-400/20">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -5957,53 +5934,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="space-y-3 pt-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="block text-xs font-semibold text-slate-400 uppercase">
-                  3. Быстрая синхронизация длительности проекта по слотам (от 3 до 10 часов)
-                </label>
-                <span className="text-xs text-amber-400 font-mono">
-                  Расчетная сумма слотов с вычетом переходов: {calculatedProjectDurationSec} сек
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-center">
-                {[
-                  { hours: 3, label: '3 Часа (3:00:00)' },
-                  { hours: 5, label: '5 Часов' },
-                  { hours: 8, label: '8 Часов' },
-                  { hours: 10, label: '10 Часов' }
-                ].map(item => (
-                  <button
-                    key={item.hours}
-                    type="button"
-                    onClick={() =>
-                      item.hours === 3
-                        ? applyBlizzard3HSpecPreset()
-                        : syncSlotsToTargetHours(item.hours)
-                    }
-                    className={`loop-h-btn py-3.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                      loopHours === item.hours
-                        ? 'border-amber-500 bg-amber-500/15 text-amber-400 shadow-lg shadow-amber-500/10'
-                        : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-amber-500/60'
-                    }`}
-                  >
-                    [ {item.label} ]
-                  </button>
-                ))}
-                <div className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-slate-400 font-medium">Точно (3–10ч):</span>
-                  <input
-                    type="number"
-                    min={3}
-                    max={10}
-                    step={1}
-                    value={loopHours}
-                    onChange={e => handleExactLoopHoursChange(e.target.value)}
-                    className="w-16 bg-[#0b0f17] border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs font-bold text-amber-400 outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-            </div>
+            <LoopDurationControls loopHours={loopHours} durationSummary={`Расчетная сумма слотов с вычетом переходов: ${calculatedProjectDurationSec} сек`} onPreset={hours=>hours===3?applyBlizzard3HSpecPreset():syncSlotsToTargetHours(hours)} onExact={handleExactLoopHoursChange}/>
 
             <div className="bg-[#0b0f17] border border-amber-500/30 rounded-xl p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">

@@ -621,6 +621,7 @@ export interface NarrativeMontageManifest {
 }
 
 interface MontageCombineViewProps {
+  isolatedEditing?: boolean;
   ghToken: string;
   ghRepo: string;
   ghBranch: string;
@@ -1214,6 +1215,7 @@ const DraggableSceneRow: React.FC<DraggableSceneRowProps> = ({
 };
 
 export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
+  isolatedEditing = false,
   ghToken,
   ghRepo,
   ghBranch,
@@ -1326,7 +1328,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   const [narrativeScenes, setNarrativeScenes] = useState<NarrativeSceneItem[]>(() => {
     if (
       Array.isArray(initialCombineDraft?.narrative_scenes) &&
-      initialCombineDraft.narrative_scenes.length > 0
+      (isolatedEditing || initialCombineDraft.narrative_scenes.length > 0)
     ) {
       return initialCombineDraft.narrative_scenes as NarrativeSceneItem[];
     }
@@ -3064,6 +3066,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
   };
 
   const handleUploadMasterAudioToDrive = async () => {
+    if (isolatedEditing) { onNotify('This action is unavailable in isolated editing preview.', 'info'); return; }
     if (!masterAudioFile) {
       onNotify('Сначала выберите локальный файл мастер-аудио (.mp3 или .wav)!', 'error');
       return;
@@ -3765,6 +3768,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Экспорт автономной интерактивной раскадровки (storyboard.html) без внешних зависимостей
   const handleExportInteractiveStoryboardHtml = () => {
+    if (isolatedEditing) { onNotify('This action is unavailable in isolated editing preview.', 'info'); return; }
     const escHtml = (str: string): string =>
       str
         .replace(/&/g, '&amp;')
@@ -4211,6 +4215,7 @@ export const MontageCombineView: React.FC<MontageCombineViewProps> = ({
 
   // Прямой и чистый запуск облачной сборки N-сцен: ровно один POST workflow_dispatch
   const startNarrativeScenesRender = async () => {
+    if (isolatedEditing) { onNotify('This action is unavailable in isolated editing preview.', 'info'); return; }
     if (isRunnerBusy || isDispatching) {
       onNotify('Сборка уже выполняется в GitHub Actions! Дождитесь завершения или отмените текущий run.', 'info');
       return;

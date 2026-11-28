@@ -68,6 +68,9 @@ interface AetherVoiceSettings {
 }
 
 interface VoiceStudioViewProps {
+  isolatedEditing?: boolean;
+  initialPreferences?: Partial<Omit<AetherVoiceSettings, 'elevenKey1' | 'elevenKey2'>>;
+  onPreferencesChange?: (prefs: Omit<AetherVoiceSettings, 'elevenKey1' | 'elevenKey2'>) => void;
   scriptText: string;
   onScriptTextChange: (text: string) => void;
   onMasterVoiceoverReady: (fileName: string, audioFile?: File, durationSec?: number) => void;
@@ -552,23 +555,27 @@ export function filterAndPopulateVoices(
 }
 
 export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
+  isolatedEditing = false,
+  initialPreferences,
+  onPreferencesChange,
   scriptText,
   onScriptTextChange,
   onMasterVoiceoverReady,
   onNotify
 }) => {
-  const initialSavedConfig = useMemo(() => loadVoiceStudioSettings(), []);
+  const initialSavedConfig = useMemo(() => isolatedEditing ? (initialPreferences ?? {}) : loadVoiceStudioSettings(), []);
 
   // 1. Мульти-аккаунт ElevenLabs (2 API-ключа + активный аккаунт)
   const [apiKey1, setApiKey1] = useState<string>(
-    () => readVoiceCredential(1)
+    () => isolatedEditing ? '' : readVoiceCredential(1)
   );
   const [apiKey2, setApiKey2] = useState<string>(
-    () => readVoiceCredential(2)
+    () => isolatedEditing ? '' : readVoiceCredential(2)
   );
   const [activeKeySlot, setActiveKeySlot] = useState<1 | 2>(() => {
     if (initialSavedConfig.activeAccount === '2') return 2;
     if (initialSavedConfig.activeAccount === '1') return 1;
+    if (isolatedEditing) return 1;
     return localStorage.getItem('elevenlabs_active_slot') === '2' ? 2 : 1;
   });
 
@@ -597,9 +604,10 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // 3. Избранное (⭐ Favorites)
   const [favoriteVoiceIds, setFavoriteVoiceIds] = useState<string[]>(() => {
-    if (Array.isArray(initialSavedConfig.favorites) && initialSavedConfig.favorites.length > 0) {
+    if (Array.isArray(initialSavedConfig.favorites) && (isolatedEditing || initialSavedConfig.favorites.length > 0)) {
       return initialSavedConfig.favorites;
     }
+    if (isolatedEditing) return [];
     try {
       const raw = localStorage.getItem('favorite_voices');
       return raw ? JSON.parse(raw) : ['en-US-ChristopherNeural', 'en-US-GuyNeural'];
@@ -623,20 +631,28 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     if (!writeVoiceCredential(1, apiKey1)) onNotify('ElevenLabs session storage unavailable', 'error');
   }, [apiKey1]);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     if (!writeVoiceCredential(2, apiKey2)) onNotify('ElevenLabs session storage unavailable', 'error');
   }, [apiKey2]);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     localStorage.setItem('elevenlabs_active_slot', String(activeKeySlot));
   }, [activeKeySlot]);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     localStorage.setItem('favorite_voices', JSON.stringify(favoriteVoiceIds));
   }, [favoriteVoiceIds]);
+
+  useEffect(() => {
+    if (isolatedEditing) onPreferencesChange?.({activeAccount:String(activeKeySlot),activeEngine:provider,selectedLang:selectedLanguage,selectedGender:genderFilter,selectedVoiceId,favorites:favoriteVoiceIds});
+  }, [isolatedEditing,onPreferencesChange,activeKeySlot,provider,selectedLanguage,genderFilter,selectedVoiceId,favoriteVoiceIds]);
 
   const activeElevenLabsKey = activeKeySlot === 1 ? apiKey1.trim() : apiKey2.trim();
 
@@ -656,6 +672,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
       favorites: favoriteVoiceIds
     };
 
+    if (isolatedEditing) { onPreferencesChange?.(settings); return; }
     localStorage.setItem('aether_voice_settings', JSON.stringify(settings));
     localStorage.setItem(
       'config_voice_studio',
@@ -675,6 +692,8 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
     onNotify('💾 Настройки дикторского цеха сохранены!', 'success');
   }, [
+    isolatedEditing,
+    onPreferencesChange,
     activeKeySlot,
     apiKey1,
     apiKey2,
@@ -819,6 +838,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
   // Проверка баланса символов через GET https://api.elevenlabs.io/v1/user/subscription
   const fetchSubscriptionBalance = useCallback(
     async (slot: 1 | 2, keyValue: string) => {
+      if (isolatedEditing) return;
       const cleanKey = keyValue.trim();
       if (!cleanKey) {
         if (slot === 1) setSubInfo1(null);
@@ -865,6 +885,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // Подгрузка каталога голосов ElevenLabs через GET https://api.elevenlabs.io/v1/voices
   const fetchElevenLabsVoicesCatalog = useCallback(async () => {
+    if (isolatedEditing) return;
     if (!activeElevenLabsKey) {
       setVoicesFetchError(
         'API-ключ ElevenLabs не указан в активном слоте. Отображены встроенные студийные пресеты ElevenLabs.'
@@ -966,6 +987,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // Прослушивание демо-фразы голоса («▶ Прослушать демо»)
   const handlePlayVoiceDemo = (voice: StudioVoiceItem) => {
+    if (isolatedEditing) return;
     if (playingDemoId === voice.id) {
       window.speechSynthesis?.cancel();
       if (audioPlayerRef.current) {
@@ -1069,6 +1091,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
 
   // Кнопка «🎙 Сгенерировать master_voiceover.mp3 и подставить в манифест монтажа»
   const handleGenerateMasterVoiceover = async () => {
+    if (isolatedEditing) { onNotify('Voice generation disabled in isolated preview', 'info'); return; }
     const cleanScript = scriptText.trim();
     if (!cleanScript) {
       onNotify('Текст сценария пуст — сначала введите или передайте сценарий из VerbaFlow!', 'error');
@@ -1261,7 +1284,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               id="eleven_key_1"
               type="password"
               value={apiKey1}
-              onChange={e => setApiKey1(e.target.value)}
+              disabled={isolatedEditing} onChange={e => setApiKey1(e.target.value)}
               placeholder="sk_... (введите ElevenLabs API Key #1)"
               className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 outline-none"
             />
@@ -1319,7 +1342,7 @@ export const VoiceStudioView: React.FC<VoiceStudioViewProps> = ({
               id="eleven_key_2"
               type="password"
               value={apiKey2}
-              onChange={e => setApiKey2(e.target.value)}
+              disabled={isolatedEditing} onChange={e => setApiKey2(e.target.value)}
               placeholder="sk_... (введите ElevenLabs API Key #2)"
               className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 outline-none"
             />

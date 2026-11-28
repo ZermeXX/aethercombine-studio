@@ -266,7 +266,8 @@ export const migrateLegacySecrets = (localStorage: Storage = globalThis.localSto
   }
 };
 
-migrateLegacySecrets();
+// Legacy Studio explicitly performs migration before reading its boot snapshot.
+
 
 /* ---------------- public auth record ---------------- */
 const sanitizeProfile = (raw: unknown): AetherGoogleProfile | null => {

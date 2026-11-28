@@ -1,0 +1,72 @@
+import {createProject,type ProjectRecord,type ProjectFormat} from '../design-system/projectRegistry';
+import {isWorkspaceId,type WorkspaceId} from '../design-system/workspaces';
+import {projectPayload,type ProjectPayload} from './projectPayload';
+import {ProjectStorage} from './projectStorage';
+
+export type ProjectScope=Readonly<{workspaceId:WorkspaceId;projectId:string}>;
+export type ProjectSnapshot={project:ProjectRecord;payload:ProjectPayload|null};
+export type WorkspaceSnapshot={workspaceId:WorkspaceId;projects:ProjectRecord[];active:ProjectSnapshot|null};
+export const emptyProjectPayload=():ProjectPayload=>({schemaVersion:1,script:'',seoScript:'',thumbnailTitle:'',thumbnailBadge:'',chapters:''});
+/** No implicit fallback to global legacy drafts. Every write has an explicit scope. */
+export class WorkspaceProjectContext {
+ constructor(private readonly storage:ProjectStorage){}
+ async read(scope:ProjectScope):Promise<ProjectSnapshot>{
+  const snapshot=await this.storage.getSnapshot(scope.workspaceId,scope.projectId);
+  if(!snapshot)throw new Error('Project unavailable in workspace');
+  return snapshot;
+ }
+ async openWorkspace(workspaceId:WorkspaceId):Promise<WorkspaceSnapshot>{
+  if(!isWorkspaceId(workspaceId))throw new Error('Invalid workspace');
+  const projects=await this.storage.listProjects(workspaceId);
+  const active=await this.storage.getActiveProject(workspaceId);
+  return {workspaceId,projects,active:active?await this.read({workspaceId,projectId:active.projectId}):null};
+ }
+ async create(workspaceId:WorkspaceId,name:string,format?:ProjectFormat):Promise<ProjectSnapshot>{
+  const project=createProject(workspaceId,name,format);
+  const payload=emptyProjectPayload();
+  await this.storage.createProject(project,payload);
+  return {project,payload};
+ }
+ async duplicate(scope:ProjectScope,expectedRevision:number,name:string):Promise<ProjectRecord>{
+  return this.storage.duplicateProject(scope.workspaceId,scope.projectId,expectedRevision,name);
+ }
+ async rename(scope:ProjectScope,expectedRevision:number,name:string):Promise<ProjectSnapshot>{
+  const clean=name.trim();
+  if(!clean)throw new Error('Project name required');
+  const snapshot=await this.read(scope);
+  if(snapshot.project.revision!==expectedRevision)throw new Error('Project revision conflict');
+  const project=await this.storage.saveProject({...snapshot.project,name:clean},expectedRevision);
+  return {project,payload:snapshot.payload};
+ }
+ async select(scope:ProjectScope):Promise<ProjectSnapshot>{
+  const snapshot=await this.read(scope);
+  await this.storage.setActiveProject(scope.workspaceId,scope.projectId);
+  return snapshot;
+ }
+ async save(scope:ProjectScope,expectedRevision:number,input:ProjectPayload):Promise<ProjectSnapshot>{
+  const snapshot=await this.read(scope);
+  if(snapshot.project.revision!==expectedRevision)throw new Error('Project revision conflict');
+  const payload=projectPayload(input);
+  const project=await this.storage.saveProject(snapshot.project,expectedRevision,payload);
+  return {project,payload};
+ }
+}
+/** Serialize UI transitions; a failed flush must not change the selected scope. */
+export class WorkspaceSwitchCoordinator {
+ private queue:Promise<unknown>=Promise.resolve();
+ private current:ProjectScope|null=null;
+ constructor(private readonly context:WorkspaceProjectContext){}
+ get scope():ProjectScope|null{return this.current?{...this.current}:null;}
+ switchTo(scope:ProjectScope,flush:(previous:ProjectScope)=>Promise<void>):Promise<ProjectSnapshot>{
+  const target={...scope};
+  const operation=this.queue.then(async()=>{
+   await this.context.read(target);
+   if(this.current&&(this.current.workspaceId!==target.workspaceId||this.current.projectId!==target.projectId))await flush({...this.current});
+   const snapshot=await this.context.select(target);
+   this.current=Object.freeze(target);
+   return snapshot;
+  });
+  this.queue=operation.catch(()=>undefined);
+  return operation;
+ }
+}

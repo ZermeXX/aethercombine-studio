@@ -31,6 +31,14 @@ declare global {
 }
 
 interface ThumbnailStudioViewProps {
+  isolatedEditing?: boolean;
+  onProjectReleaseThumbnail?: (blob:Blob)=>void;
+  onProjectImageRemove?: (slot:ThumbnailSlotId)=>void;
+  onProjectImageData?: (slot:ThumbnailSlotId,dataUrl:string)=>void;
+  onProjectImageFile?: (slot:ThumbnailSlotId,file:File)=>void;
+  projectImageUrls?: Partial<Record<ThumbnailSlotId,string>>;
+  initialSlots?: Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
+  onSlotsChange?: (slots: Record<ThumbnailSlotId, ThumbnailSlotConfig>) => void;
   thumbTitle: string;
   onThumbTitleChange: (title: string) => void;
   thumbBadge: string;
@@ -981,6 +989,14 @@ const computeEndScreenWindow = (durationSec: number): string => {
 };
 
 export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
+  isolatedEditing = false,
+  onProjectImageRemove,
+  onProjectReleaseThumbnail,
+  projectImageUrls,
+  onProjectImageFile,
+  onProjectImageData,
+  initialSlots,
+  onSlotsChange,
   thumbTitle,
   onThumbTitleChange,
   thumbBadge: _thumbBadge,
@@ -1033,12 +1049,31 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     C: null
   });
 
+  useEffect(()=>{
+    if(!isolatedEditing)return;
+    let live=true;
+    for(const slot of ['A','B','C'] as const){
+      const url=projectImageUrls?.[slot];
+      if(!url){setSlotImages(prev=>prev[slot]?{...prev,[slot]:null}:prev);continue;}
+      const img=new Image();
+      img.onload=()=>{if(live)setSlotImages(prev=>({...prev,[slot]:img}));};
+      img.src=url;
+    }
+    return()=>{live=false;};
+  },[isolatedEditing,projectImageUrls]);
+  const imageModuleLive=useRef(false);
+  useEffect(()=>{imageModuleLive.current=true;return()=>{imageModuleLive.current=false;};},[]);
+  function persistLocalImage(slot:ThumbnailSlotId,url:string):boolean{
+    if(!isolatedEditing)return false;
+    if(imageModuleLive.current&&onProjectImageData)onProjectImageData(slot,url);
+    return true;
+  }
   const projectTitleSeed = (youtubeMockTitle || thumbTitle || '').trim();
   const lastSyncedExternalTitleRef = useRef<string>(thumbTitle);
 
   const [slotConfigs, setSlotConfigs] = useState<Record<ThumbnailSlotId, ThumbnailSlotConfig>>(() => {
-    let parsed: Partial<Record<ThumbnailSlotId, PersistedSlotState>> | null = null;
-    try {
+    let parsed: Partial<Record<ThumbnailSlotId, PersistedSlotState>> | null = initialSlots ?? null;
+    if (!isolatedEditing) try {
       const rawV2 = localStorage.getItem(THUMB_ABC_SLOTS_STORAGE_KEY);
       if (rawV2) {
         parsed = JSON.parse(rawV2) as Partial<Record<ThumbnailSlotId, PersistedSlotState>>;
@@ -1085,12 +1120,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   }, [externalSlotTitlePatch, onConsumeExternalSlotTitlePatch]);
 
   useEffect(() => {
+    if (isolatedEditing) { onSlotsChange?.(slotConfigs); return; }
     try {
       localStorage.setItem(THUMB_ABC_SLOTS_STORAGE_KEY, JSON.stringify(slotConfigs));
     } catch {
       /* quota */
     }
-  }, [slotConfigs]);
+  }, [slotConfigs, isolatedEditing, onSlotsChange]);
 
   const updateSlotConfig = useCallback(
     (slot: ThumbnailSlotId, updater: (prev: ThumbnailSlotConfig) => ThumbnailSlotConfig) => {
@@ -1111,7 +1147,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     const editedImg = new Image();
     editedImg.onload = () => {
       setSlotImages(prev => ({ ...prev, A: editedImg }));
-      window.selectedMasterThumbnail = externalCoverAImageUrl;
+      if (!isolatedEditing) window.selectedMasterThumbnail = externalCoverAImageUrl;
       onConsumeExternalCoverAImage?.();
     };
     editedImg.src = externalCoverAImageUrl;
@@ -1154,14 +1190,16 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   const generationAbortRef = useRef<AbortController | null>(null);
 
   const [cfAccountId, setCfAccountId] = useState<string>(() => {
+    if (isolatedEditing) return '';
     try {
       return localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) || '';
     } catch {
       return '';
     }
   });
-  const [cfApiToken, setCfApiToken] = useState<string>(() => readCfToken());
+  const [cfApiToken, setCfApiToken] = useState<string>(() => isolatedEditing ? '' : readCfToken());
   const [showCfSettings, setShowCfSettings] = useState<boolean>(() => {
+    if (isolatedEditing) return false;
     try {
       return Boolean(
         localStorage.getItem(CF_ACCOUNT_ID_STORAGE_KEY) ||
@@ -1187,6 +1225,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   }, []);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     try {
       localStorage.setItem(CF_ACCOUNT_ID_STORAGE_KEY, cfAccountId.trim());
     } catch {
@@ -1195,6 +1234,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   }, [cfAccountId]);
 
   useEffect(() => {
+    if (isolatedEditing) return;
     const v = cfApiToken.trim();
     try {
       if (v) sessionStorage.setItem(CF_API_TOKEN_SESSION_KEY, v);
@@ -1295,7 +1335,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     }
     setSlotConfigs(prev => ({ ...prev, [targetSlot]: clonedCfg }));
     const sourceImg = slotImages[activeSlot] || slotImages.A;
-    if (sourceImg) setSlotImages(prev => ({ ...prev, [targetSlot]: sourceImg }));
+    if(sourceImg){
+      if(isolatedEditing){
+        const canvas=document.createElement('canvas');canvas.width=sourceImg.naturalWidth;canvas.height=sourceImg.naturalHeight;
+        const ctx=canvas.getContext('2d');if(ctx&&canvas.width&&canvas.height){ctx.drawImage(sourceImg,0,0);persistLocalImage(targetSlot,canvas.toDataURL('image/png'));}
+      }else setSlotImages(prev=>({...prev,[targetSlot]:sourceImg}));
+    }
     setShowCopyMenu(false);
     setActiveSlot(targetSlot);
     onNotify(
@@ -1811,19 +1856,20 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   }, [renderAllCanvases]);
 
   useEffect(() => {
-    if (!imgA && batchVariants[0]) {
-      window.selectedMasterThumbnail = batchVariants[0];
+    if (!isolatedEditing && !imgA && batchVariants[0]) {
+      if (!isolatedEditing) window.selectedMasterThumbnail = batchVariants[0];
       const initImg = new Image();
       initImg.onload = () => setSlotImages(prev => ({ ...prev, A: initImg }));
       initImg.src = batchVariants[0];
     }
-  }, [imgA, batchVariants]);
+  }, [imgA, batchVariants, isolatedEditing]);
 
   const handleSelectBatchVariant = (idx: number, targetSlot: ThumbnailSlotId = activeSlot) => {
     const url = batchVariants[idx];
     if (!url) return;
     setSelectedMasterVariantIdx(idx);
-    window.selectedMasterThumbnail = url;
+    if(persistLocalImage(targetSlot,url))return;
+    if (!isolatedEditing) window.selectedMasterThumbnail = url;
     const selectedImage = new Image();
     selectedImage.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: selectedImage }));
@@ -1855,11 +1901,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   const handleAttachToYoutubeRelease = (idx: number) => {
+    if (isolatedEditing) { onNotify('Global release attachment disabled in isolated preview', 'info'); return; }
     const url = batchVariants[idx];
     if (!url) return;
     setSelectedMasterVariantIdx(idx);
     setAttachedToYoutubeIdx(idx);
-    window.selectedMasterThumbnail = url;
+    if (!isolatedEditing) window.selectedMasterThumbnail = url;
     try {
       localStorage.setItem(
         'youtube_release_thumbnail',
@@ -1901,7 +1948,8 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
     setSelectedMasterVariantIdx(0);
     setLastModelUsed('HTML5 Canvas 4K (локальный генератор)');
     setGenerationError(null);
-    window.selectedMasterThumbnail = fallbackUrls[0];
+    if (!isolatedEditing) window.selectedMasterThumbnail = fallbackUrls[0];
+    if(persistLocalImage(targetSlot,fallbackUrls[0]))return;
     const fallbackImg = new Image();
     fallbackImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: fallbackImg }));
@@ -1988,9 +2036,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setVariantLabels(slicedLabels);
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Видео-нарезка (${file.name})`);
-        window.selectedMasterThumbnail = slicedUrls[0];
+        if (!isolatedEditing) window.selectedMasterThumbnail = slicedUrls[0];
         const firstImg = new Image();
-        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
+        firstImg.onload = () => {if(!persistLocalImage(activeSlot,slicedUrls[0]))setSlotImages(prev=>({...prev,[activeSlot]:firstImg}));};
         firstImg.src = slicedUrls[0];
         onNotify(
           `🎬 Из видео «${file.name}» нарезано 4 варианта превью (16:9) в сетку 2×2!`,
@@ -2068,9 +2116,9 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         setVariantLabels(crops.map(c => c.label));
         setSelectedMasterVariantIdx(0);
         setLastModelUsed(`Арт-нарезка (${file.name})`);
-        window.selectedMasterThumbnail = slicedUrls[0];
+        if (!isolatedEditing) window.selectedMasterThumbnail = slicedUrls[0];
         const firstImg = new Image();
-        firstImg.onload = () => setSlotImages(prev => ({ ...prev, [activeSlot]: firstImg }));
+        firstImg.onload = () => {if(!persistLocalImage(activeSlot,slicedUrls[0]))setSlotImages(prev=>({...prev,[activeSlot]:firstImg}));};
         firstImg.src = slicedUrls[0];
         onNotify(
           `🖼️ Из изображения «${file.name}» созданы 4 варианта превью (16:9) в сетку 2×2!`,
@@ -2086,6 +2134,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   };
 
   const handleGenerateFluxCover = async (targetSlot: ThumbnailSlotId = activeSlot) => {
+    if (isolatedEditing) { onNotify('External generation disabled in isolated preview', 'info'); return; }
     generationAbortRef.current?.abort();
     const controller = new AbortController();
     generationAbortRef.current = controller;
@@ -2130,7 +2179,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       ]);
       setSelectedMasterVariantIdx(0);
       setLastModelUsed(result.modelUsed);
-      window.selectedMasterThumbnail = paddedUrls[0];
+      if (!isolatedEditing) window.selectedMasterThumbnail = paddedUrls[0];
       const generatedImg = new Image();
       generatedImg.onload = () => {
         setSlotImages(prev => ({ ...prev, [targetSlot]: generatedImg }));
@@ -2168,6 +2217,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if(isolatedEditing&&onProjectImageFile){e.target.value='';onProjectImageFile(slot,file);return;}
     const reader = new FileReader();
     reader.onload = ev => {
       const result = ev.target?.result;
@@ -2175,7 +2225,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
         const img = new Image();
         img.onload = () => {
           setSlotImages(prev => ({ ...prev, [slot]: img }));
-          if (slot === 'A') window.selectedMasterThumbnail = result;
+          if (slot === 'A') if (!isolatedEditing) window.selectedMasterThumbnail = result;
           onNotify(`Изображение загружено в Вариант ${slot}!`, 'success');
         };
         img.src = result;
@@ -2229,11 +2279,12 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       );
       return;
     }
+    if(persistLocalImage(targetSlot,dataUrl))return;
     const capturedImg = new Image();
     capturedImg.onload = () => {
       setSlotImages(prev => ({ ...prev, [targetSlot]: capturedImg }));
       setActiveSlot(targetSlot);
-      if (targetSlot === 'A') window.selectedMasterThumbnail = dataUrl;
+      if (targetSlot === 'A') if (!isolatedEditing) window.selectedMasterThumbnail = dataUrl;
       onNotify(
         `📸 4K стоп-кадр (3840×2160 @ ${seekTimeSec.toFixed(1)}с) установлен на Вариант ${targetSlot}!`,
         'success'
@@ -2275,10 +2326,11 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
       onNotify('Сначала выберите или загрузите базовый кадр для изменения разрешения.', 'info');
       return;
     }
-    const slotToUpdate: ThumbnailSlotId = slotImages[activeSlot] ? activeSlot : 'A';
+    const slotToUpdate: ThumbnailSlotId = isolatedEditing ? activeSlot : (slotImages[activeSlot] ? activeSlot : 'A');
     resampleSingleImage(targetImg, (nextImg, url) => {
+      if(persistLocalImage(slotToUpdate,url)){setBaseResolutionPreset(presetKey);return;}
       setSlotImages(prev => ({ ...prev, [slotToUpdate]: nextImg }));
-      if (slotToUpdate === 'A') window.selectedMasterThumbnail = url;
+      if (slotToUpdate === 'A') if (!isolatedEditing) window.selectedMasterThumbnail = url;
       setBaseResolutionPreset(presetKey);
       onNotify(
         `🔍 Кадр Варианта ${slotToUpdate} приведён к ${targetW}×${targetH} px (High-Quality Canvas)`,
@@ -2877,7 +2929,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <input
                       type="text"
                       value={cfAccountId}
-                      onChange={e => setCfAccountId(e.target.value)}
+                      disabled={isolatedEditing} onChange={e => setCfAccountId(e.target.value)}
                       placeholder="Например: 8a1b2c3d4e5f67890..."
                       className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />
@@ -2889,7 +2941,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     <input
                       type="password"
                       value={cfApiToken}
-                      onChange={e => setCfApiToken(e.target.value)}
+                      disabled={isolatedEditing} onChange={e => setCfApiToken(e.target.value)}
                       placeholder="Bearer API Token"
                       className="w-full min-h-[40px] bg-[#0f1623] border border-white/[0.1] rounded-xl px-3 py-2 text-xs font-mono text-[#f8fafc] outline-none focus:border-amber-400"
                     />
@@ -3037,10 +3089,13 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 <label className="text-[11px] text-white/60">
                   Свой фон для Варианта {activeSlot}:
                 </label>
-                {activeSlot !== 'A' && slotImages[activeSlot] && (
+                {(isolatedEditing || activeSlot !== 'A') && slotImages[activeSlot] && (
                   <button
                     type="button"
+                    disabled={isolatedEditing&&!onProjectImageRemove}
+                    aria-label={isolatedEditing?'Remove native thumbnail '+activeSlot:undefined}
                     onClick={() => {
+                      if(isolatedEditing){onProjectImageRemove?.(activeSlot);return;}
                       setSlotImages(prev => ({ ...prev, [activeSlot]: null }));
                       onNotify(
                         `Фон Варианта ${activeSlot} сброшен на общий фон Слота A.`,
@@ -3049,14 +3104,14 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                     }}
                     className="text-[10px] text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
                   >
-                    Использовать фон A
+                    {isolatedEditing&&activeSlot==='A'?'Удалить фон A':'Использовать фон A'}
                   </button>
                 )}
               </div>
               <input
                 type="file"
                 accept="image/*"
-                onChange={e => handleLoadImageForSlot(e, activeSlot)}
+                aria-label="Native thumbnail background" onChange={e => handleLoadImageForSlot(e, activeSlot)}
                 className="w-full text-xs text-white/60 file:mr-3 file:min-h-[36px] file:py-1.5 file:px-3 file:rounded-xl file:border file:border-white/[0.1] file:text-xs file:font-bold file:bg-[#111827] file:text-amber-300 hover:file:bg-white/[0.1] cursor-pointer"
               />
             </div>
@@ -3846,6 +3901,7 @@ export const ThumbnailStudioView: React.FC<ThumbnailStudioViewProps> = ({
                 </span>
               )}
             </div>
+            {isolatedEditing&&onProjectReleaseThumbnail&&<button type="button" disabled={Boolean(isExportingFormat)} onClick={()=>{try{const canvas=buildFullResThumbnailCanvas(activeSlot);const url=canvas.toDataURL('image/png');const bytes=atob(url.split(',')[1]);onProjectReleaseThumbnail(new Blob([Uint8Array.from(bytes,c=>c.charCodeAt(0))],{type:'image/png'}));}catch{onNotify('Release thumbnail could not be prepared','error');}}}>Attach active thumbnail to project release</button>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"

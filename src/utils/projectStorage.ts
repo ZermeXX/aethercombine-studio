@@ -1,5 +1,5 @@
 import { projectPayload, type ProjectPayload } from './projectPayload';
-import { projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
+import { createProject, projectFormat, projectMetadata, type ProjectRecord } from '../design-system/projectRegistry';
 import { isWorkspaceId, type WorkspaceId } from '../design-system/workspaces';
 export const DATABASE_NAME='aether_studio_v9';
 export const DATABASE_VERSION=2;
@@ -46,6 +46,49 @@ export class ProjectStorage {
    r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').add(record);done(undefined);}catch(e){fail(e);}};
   });
  }
+ /** Fixed image slots only; ownership checked in the write transaction. */
+ async replaceProjectImage(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'|'art',blob:Blob):Promise<void>{
+  return this.replaceProjectImages(workspaceId,projectId,[slot],blob);
+ }
+ async replaceProjectImages(workspaceId:WorkspaceId,projectId:string,slots:readonly ('A'|'B'|'C'|'art')[],blob:Blob):Promise<void>{
+  if(!slots.length||slots.some(slot=>!['A','B','C','art'].includes(slot)))throw new Error('Invalid image slots');
+  const slot=slots[0];
+  if(!['A','B','C','art'].includes(slot)||!(blob instanceof Blob)||!blob.size||blob.size>32*1024*1024||!['image/png','image/jpeg','image/webp'].includes(blob.type))throw new Error('Invalid project image');
+  const record={projectId,assetId:'project-image:'+slot,name:'project-image-'+slot,blob,sha256:await assetDigest(blob)};
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{if(!r.result||projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');for(const target of slots)tx.objectStore('project_assets').put({...record,assetId:'project-image:'+target,name:'project-image-'+target});done(undefined);}catch(e){fail(e);}};
+  });
+ }
+ /** Frozen release cover, independent of subsequent edits to A/B/C. */
+ async saveReleaseThumbnail(workspaceId:WorkspaceId,projectId:string,blob:Blob):Promise<void>{
+  if(!(blob instanceof Blob)||!blob.size||blob.size>32*1024*1024||blob.type!=='image/png')throw new Error('Invalid release thumbnail');
+  const record={projectId,assetId:'release-thumbnail',name:'release-thumbnail.png',blob,sha256:await assetDigest(blob)};
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('project_assets').put(record);done(undefined);}catch(e){fail(e);}};
+  });
+ }
+ /** Delete only a fixed thumbnail slot owned by this project. */
+ removeProjectThumbnail(workspaceId:WorkspaceId,projectId:string,slot:'A'|'B'|'C'):Promise<void>{
+  if(!['A','B','C'].includes(slot))throw new Error('Invalid thumbnail slot');
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{
+    if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');
+    tx.objectStore('project_assets').delete([projectId,'project-image:'+slot]);done(undefined);
+   }catch(e){fail(e);}};
+  });
+ }
+ listAssets(workspaceId:WorkspaceId,projectId:string):Promise<{assetId:string;name:string;size:number}[]>{
+  return transaction(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+   const p=tx.objectStore('projects').get(projectId);
+   p.onsuccess=()=>{try{if(!p.result||projectMetadata(p.result).workspaceId!==workspaceId){done([]);return;}
+    const r=tx.objectStore('project_assets').index('projectId').getAll(projectId);
+    r.onsuccess=()=>{try{done(r.result.map(a=>{if(!(a.blob instanceof Blob)||typeof a.name!=='string'||typeof a.assetId!=='string')throw new Error('Invalid stored asset');return {assetId:a.assetId,name:a.name,size:a.blob.size};}));}catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
  async getAsset(workspaceId:WorkspaceId,projectId:string,assetId:string):Promise<ProjectAsset|null>{
   const result=await transaction<ProjectAsset & {sha256?:string} | null>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
@@ -61,10 +104,132 @@ export class ProjectStorage {
  // Hash outside the IndexedDB transaction to avoid transaction inactivity.
  constructor(private readonly db:IDBDatabase){}
  close(){this.db.close();}
- createProject(input:ProjectRecord):Promise<void>{
+ createProject(input:ProjectRecord,payload?:ProjectPayload):Promise<void>{
   const p=projectMetadata(input);
   if(p.revision!==1)throw new Error('Initial revision must be 1');
-  return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add(p);done(undefined);});
+  const content=payload===undefined?undefined:projectPayload(payload);
+  return transaction(this.db,['projects'],'readwrite',(tx,done)=>{tx.objectStore('projects').add({...p,...(content===undefined?{}:{payload:content})});done(undefined);});
+ }
+ async importProject(workspaceId:WorkspaceId,input:unknown):Promise<ProjectRecord>{
+  const obj=(v:unknown):Record<string,unknown>=>{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('Invalid backup object');return v as Record<string,unknown>;};
+  const b=obj(input),content=obj(b.content);
+  if(b.format!=='story-nexus-project'||b.version!==1||typeof b.sha256!=='string'||await assetDigest(new Blob([JSON.stringify(content)]))!==b.sha256)throw new Error('Invalid backup version or checksum');
+  const source=projectMetadata(content.project);
+  if(source.workspaceId!==workspaceId)throw new Error('Workspace mismatch');
+  const payload=content.payload===null?undefined:projectPayload(content.payload);
+  if(!Array.isArray(content.assets)||content.assets.length>1000)throw new Error('Invalid asset list');
+  const copy=createProject(workspaceId,source.name+' — imported',projectFormat(source));
+  const assets:(ProjectAsset & {projectId:string;sha256:string})[]=[];const ids=new Set<string>();let total=0;
+  for(const value of content.assets){
+   const a=obj(value);
+   if(typeof a.assetId!=='string'||!a.assetId.trim()||ids.has(a.assetId)||typeof a.name!=='string'||!a.name.trim()||typeof a.mime!=='string'||typeof a.base64!=='string'||typeof a.size!=='number'||!Number.isSafeInteger(a.size)||a.size<0||a.size>32*1024*1024||a.base64.length>Math.ceil(a.size/3)*4)throw new Error('Invalid backup asset');
+   total+=a.size;if(total>64*1024*1024)throw new Error('Backup too large');
+   const binary=atob(a.base64),bytes=Uint8Array.from(binary,ch=>ch.charCodeAt(0));
+   const blob=new Blob([bytes],{type:a.mime});
+   if(typeof a.sha256!=='string'||blob.size!==a.size||await assetDigest(blob)!==a.sha256)throw new Error('Asset checksum mismatch');
+   ids.add(a.assetId);assets.push({projectId:copy.projectId,assetId:a.assetId,name:a.name,blob,sha256:a.sha256});
+  }
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done)=>{
+   tx.objectStore('projects').add({...copy,...(payload===undefined?{}:{payload})});
+   for(const a of assets)tx.objectStore('project_assets').add(a);
+   done(copy);
+  });
+ }
+ async exportProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number){
+  const snapshot=await transaction<{project:ProjectRecord;payload:ProjectPayload|null;assets:{assetId:string;name:string;blob:Blob;sha256?:string}[]}>(this.db,['projects','project_assets'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{
+    const project=projectMetadata(r.result);
+    if(project.workspaceId!==workspaceId||project.revision!==expectedRevision)throw new Error('Ownership or revision conflict');
+    const payload=r.result.payload===undefined?null:projectPayload(r.result.payload);
+    const a=tx.objectStore('project_assets').index('projectId').getAll(projectId);
+    a.onsuccess=()=>done({project,payload,assets:a.result});
+   }catch(e){fail(e);}};
+  });
+  const assets=[];
+  for(const a of snapshot.assets){
+   if(!(a.blob instanceof Blob)||typeof a.assetId!=='string'||typeof a.name!=='string')throw new Error('Invalid asset');
+   const sha256=await assetDigest(a.blob);
+   if(a.sha256!==undefined&&a.sha256!==sha256)throw new Error('Asset checksum mismatch');
+   const bytes=new Uint8Array(await a.blob.arrayBuffer());
+   let binary='';
+   for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+   assets.push({assetId:a.assetId,name:a.name,mime:a.blob.type,size:bytes.length,sha256,base64:btoa(binary)});
+  }
+  const content={project:snapshot.project,payload:snapshot.payload,assets};
+  return {format:'story-nexus-project',version:1,content,sha256:await assetDigest(new Blob([JSON.stringify(content)]))};
+ }
+ duplicateProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number,name:string):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','project_assets'],'readwrite',(tx,done,fail)=>{
+   const projects=tx.objectStore('projects'),assets=tx.objectStore('project_assets');
+   const r=projects.get(projectId);
+   r.onsuccess=()=>{try{
+    const source=projectMetadata(r.result);
+    if(source.workspaceId!==workspaceId||source.revision!==expectedRevision)throw new Error('Ownership or revision conflict');
+    const copy=createProject(workspaceId,name,projectFormat(source));
+    const payload=r.result.payload===undefined?undefined:projectPayload(r.result.payload);
+    const a=assets.index('projectId').getAll(projectId);
+    a.onsuccess=()=>{try{
+     projects.add({...copy,...(payload===undefined?{}:{payload})});
+     for(const asset of a.result){
+      if(!(asset.blob instanceof Blob)||typeof asset.assetId!=='string'||typeof asset.name!=='string')throw new Error('Invalid stored asset');
+      assets.add({...asset,projectId:copy.projectId});
+     }
+     done(copy);
+    }catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
+ archiveProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','workspace_state','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const s=tx.objectStore('projects'),state=tx.objectStore('workspace_state');
+   const r=s.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||old.archived)throw new Error('Ownership or revision conflict');
+    const next=projectMetadata({...old,archived:true,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
+    tx.objectStore('project_revisions').add(r.result);
+    s.put({...r.result,...next});
+    const a=state.get(workspaceId);
+    a.onsuccess=()=>{if(a.result?.projectId===projectId)state.delete(workspaceId);done(next);};
+   }catch(e){fail(e);}};
+  });
+ }
+ restoreProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number):Promise<ProjectRecord>{
+  return transaction(this.db,['projects','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const s=tx.objectStore('projects'),r=s.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||!old.archived)throw new Error('Ownership or revision conflict');
+    const next=projectMetadata({...old,archived:false,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
+    tx.objectStore('project_revisions').add(r.result);
+    s.put({...r.result,...next});done(next);
+   }catch(e){fail(e);}};
+  });
+ }
+ deleteArchivedProject(workspaceId:WorkspaceId,projectId:string,expectedRevision:number,confirmedName:string):Promise<void>{
+  return transaction(this.db,['projects','workspace_state','project_assets','project_revisions'],'readwrite',(tx,done,fail)=>{
+   const projects=tx.objectStore('projects'),r=projects.get(projectId);
+   r.onsuccess=()=>{try{
+    const old=projectMetadata(r.result);
+    if(old.workspaceId!==workspaceId||old.revision!==expectedRevision||!old.archived||old.name!==confirmedName)throw new Error('Ownership, archive or revision conflict');
+    const a=tx.objectStore('workspace_state').get(workspaceId);
+    a.onsuccess=()=>{try{
+     if(a.result?.projectId===projectId)throw new Error('Cannot delete active project');
+     for(const name of ['project_assets','project_revisions']){
+      const store=tx.objectStore(name),cursor=store.index('projectId').openCursor(IDBKeyRange.only(projectId));
+      cursor.onsuccess=()=>{const item=cursor.result;if(item){item.delete();item.continue();}};
+     }
+     projects.delete(projectId);done(undefined);
+    }catch(e){fail(e);}};
+   }catch(e){fail(e);}};
+  });
+ }
+ getSnapshot(workspaceId:WorkspaceId,projectId:string):Promise<{project:ProjectRecord;payload:ProjectPayload|null}|null>{
+  return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
+   const r=tx.objectStore('projects').get(projectId);
+   r.onsuccess=()=>{try{const p=r.result;done(p?.workspaceId===workspaceId?{project:projectMetadata(p),payload:p.payload===undefined?null:projectPayload(p.payload)}:null);}catch(e){fail(e);}};
+  });
  }
  getProject(workspaceId:WorkspaceId,projectId:string):Promise<ProjectRecord|null>{
   return transaction(this.db,['projects'],'readonly',(tx,done,fail)=>{
@@ -86,7 +251,7 @@ export class ProjectStorage {
    const s=tx.objectStore('projects');const r=s.get(p.projectId);
    r.onsuccess=()=>{try{
     const old=projectMetadata(r.result);
-    if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt)throw new Error('Ownership or revision conflict');
+    if(old.workspaceId!==p.workspaceId||old.revision!==expectedRevision||p.revision!==expectedRevision||old.createdAt!==p.createdAt||old.archived||p.archived)throw new Error('Ownership or revision conflict');
     const next=projectMetadata({...p,revision:old.revision+1,updatedAt:Math.max(Date.now(),old.updatedAt)});
     const previous=r.result.payload===undefined?undefined:projectPayload(r.result.payload);
     tx.objectStore('project_revisions').add({...old,...(previous===undefined?{}:{payload:previous})});
@@ -103,13 +268,13 @@ export class ProjectStorage {
  setActiveProject(workspaceId:WorkspaceId,projectId:string):Promise<void>{
   return transaction(this.db,['projects','workspace_state'],'readwrite',(tx,done,fail)=>{
    const r=tx.objectStore('projects').get(projectId);
-   r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId)throw new Error('Workspace mismatch');tx.objectStore('workspace_state').put({workspaceId,projectId});done(undefined);}catch(e){fail(e);}};
+   r.onsuccess=()=>{try{if(projectMetadata(r.result).workspaceId!==workspaceId||projectMetadata(r.result).archived)throw new Error('Workspace mismatch or archived project');tx.objectStore('workspace_state').put({workspaceId,projectId});done(undefined);}catch(e){fail(e);}};
   });
  }
  getActiveProject(workspaceId:WorkspaceId):Promise<ProjectRecord|null>{
   return transaction(this.db,['projects','workspace_state'],'readonly',(tx,done,fail)=>{
    const r=tx.objectStore('workspace_state').get(workspaceId);
-   r.onsuccess=()=>{if(!r.result){done(null);return;}const p=tx.objectStore('projects').get(r.result.projectId);p.onsuccess=()=>{try{done(p.result?.workspaceId===workspaceId?projectMetadata(p.result):null);}catch(e){fail(e);}};};
+   r.onsuccess=()=>{if(!r.result){done(null);return;}const p=tx.objectStore('projects').get(r.result.projectId);p.onsuccess=()=>{try{done(p.result?.workspaceId===workspaceId&&!p.result.archived?projectMetadata(p.result):null);}catch(e){fail(e);}};};
   });
  }
 }
