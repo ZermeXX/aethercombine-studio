@@ -309,7 +309,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>{t("Close native module","Закрыть модуль")}</button>
  </nav></aside>}
  <section className="nexus-workspace-content">
- {notice&&<p>{notice}</p>}
+ {notice&&<section aria-label={t("Notification","Уведомление")} style={{display:'flex',alignItems:'center',gap:12,padding:12,border:'1px solid #38668c',borderRadius:12,background:'linear-gradient(120deg,#122b42,#171d36)',color:'#edf2ff'}}><span aria-hidden="true" style={{color:'#55dfff',fontSize:22}}>ⓘ</span><p role="status" style={{flex:1,margin:0,overflowWrap:'anywhere'}}>{notice}</p><button type="button" aria-label={t("Dismiss notification","Закрыть уведомление")} onClick={()=>setNotice('')} style={{minWidth:44,minHeight:44}}>×</button></section>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
  <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
  </fieldset>}
