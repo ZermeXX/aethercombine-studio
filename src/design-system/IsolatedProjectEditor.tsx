@@ -24,7 +24,7 @@ import {applyModulePatch} from '../utils/scopedModulePersistence';
 import type {ProjectPayload} from '../utils/projectPayload';
 import type {SetStateAction} from 'react';
 import {projectPayload} from '../utils/projectPayload';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
 import {WorkspaceProjectContext,type ProjectSnapshot} from '../utils/workspaceProjectContext';
 import {CHANNEL_PROFILES,allowsModule,type WorkspaceId} from './workspaces';
@@ -65,7 +65,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  }
  const [notification,setNotification]=useState<{message:string;kind:NexusToastKind}>({message:'',kind:'info'});
  const notice=notification.message;
- function setNotice(message:string,kind:NexusToastKind='info'){setNotification({message,kind});}
+ const setNotice=useCallback((message:string,kind:NexusToastKind='info')=>{setNotification({message,kind});},[]);
  const [archiveTarget,setArchiveTarget]=useState<ProjectRecord|null>(null);
  const [deleteDialog,setDeleteDialog]=useState<{project:ProjectRecord;step:1|2;value:string}|null>(null);
  const [nameDialog,setNameDialog]=useState<{project:ProjectRecord;mode:'rename'|'duplicate';value:string}|null>(null);
@@ -328,7 +328,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <section className="nexus-workspace-content">
  {notice&&<NexusToast kind={notification.kind} title={notification.kind==='success'?t("Success","Успешно"):notification.kind==='warning'?t("Warning","Внимание"):notification.kind==='error'?t("Error","Ошибка"):t("Notification","Уведомление")} message={notice} dismissLabel={t("Dismiss notification","Закрыть уведомление")} onDismiss={()=>setNotice('')}/>}
  {nativeDraft&&nativeTab==='verbaflow'&&<fieldset disabled={busy} key={active?.project.projectId+':verbaflow'} aria-label="Native VerbaFlow">
- <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={message=>setNotice(message)}/>
+ <VerbaFlowTextWorkbench sourceText={script} onSourceTextChange={v=>{setScript(v);setDirty(true);}} projectName={active?.project.name} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} onSendScenesToTimeline={transferScenes} onSendToYoutubeSeo={(v,scenes)=>{if(scenes.length)transferScenes(scenes,v);else{setSeo(v);setDirty(true);}setNativeTab('seo');}} onSendChaptersToYoutubeSeo={v=>{setChapters(v);setDirty(true);}} onNotify={setNotice}/>
  </fieldset>}
  {nativeDraft&&nativeTab==='seo'&&<fieldset disabled={busy} key={active?.project.projectId+':seo'} aria-label="Native YouTube SEO">
  <YouTubeSeoView projectName={active?.project.name??''} scriptContext={seo||script} narrativeScenes={nativeDraft.production?.narrative_scenes??[]} loopSlots={nativeDraft.production?.timeline_slots??[]} externalChaptersTxt={chapters} onClearExternalChapters={()=>{setChapters('');setDirty(true);}} seoState={(nativeDraft.legacyExtras?.seo as YoutubeSeoState|undefined)??createDefaultYoutubeSeoState(workspace==='histoviva'?'Historical Doc':'Cozy Ambient')} onSeoStateChange={updateNativeSeo} onApplyTitleToThumbnail={v=>{setTitle(v);setDirty(true);}} onNotify={setNotice}/>
