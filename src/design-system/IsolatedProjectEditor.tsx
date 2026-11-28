@@ -1,3 +1,4 @@
+import {NexusConfirmDialog} from './NexusConfirmDialog';
 import {readUiLanguage,saveUiLanguage,uiText} from './uiLanguage';
 import {ContextHelp,type HelpLanguage} from './ContextHelp';
 import {synchronizeTimeline,timelineDuration} from '../utils/timelineSynchronization';
@@ -62,6 +63,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   try {localStorage.setItem('story-nexus.ui-navigation.v1',next?'compact':'full');} catch {}
  }
  const [notice,setNotice]=useState('');
+ const [archiveTarget,setArchiveTarget]=useState<ProjectRecord|null>(null);
  const [imageUrls,setImageUrls]=useState<ProjectImageUrls>({});
  const [artInput,setArtInput]=useState<{dataUrl:string;label:string;nonce:number}|null>(null);
  const combineInvalid=useRef(false);
@@ -174,7 +176,9 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   });
  }
  async function archiveProject(p:ProjectRecord){
-  if(!window.confirm(t("Archive project? Data will be retained.","Архивировать проект? Данные будут сохранены.")))return;
+  setArchiveTarget(p);
+ }
+ async function confirmArchive(p:ProjectRecord){
   await run(async ()=>{
    if(dirty||!storage.current)throw new Error('Save current changes before archiving');
    const next=await storage.current.archiveProject(p.workspaceId,p.projectId,p.revision);
@@ -279,6 +283,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsProjectModule(active.project,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="nexus-preview mx-auto space-y-4 p-4 text-studio-text">
+ {archiveTarget&&<NexusConfirmDialog title={t("Archive project?","Архивировать проект?")} message={archiveTarget.name+" — "+t("Data will be retained.","Данные будут сохранены.")} cancelLabel={t("Cancel","Отмена")} confirmLabel={t("Archive","Архивировать")} onCancel={()=>setArchiveTarget(null)} onConfirm={()=>{const target=archiveTarget;setArchiveTarget(null);void confirmArchive(target);}}/>}
  <header className="nexus-brand nexus-smart-header"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div className="nexus-header-brand"><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 · {t("Preview","Предпросмотр")}</p></div><div className="nexus-header-context"><div className="nexus-header-item"><small>{t("Channel","Канал")}</small><strong>{workspace==='histoviva'?'HISTOVIVA':'The Whisker Trio'}</strong></div><div className="nexus-header-item"><small>{t("Active project","Активный проект")}</small><strong title={active?.project.name}>{active?.project.name??t("No project","Нет проекта")}</strong></div><span className="nexus-header-status" data-state={error?'error':busy||assetBusy?'busy':dirty?'dirty':active?.payload?'saved':'idle'} role="status">{error?t("Check error","Проверьте ошибку"):busy||assetBusy?t("Working…","Выполняется…"):dirty?t("Unsaved changes","Не сохранено"):active?.payload?t("Saved locally","Сохранено локально"):t("No active draft","Нет активного черновика")}</span></div><div className="nexus-header-actions"><button type="button" disabled={!dirty||busy||assetBusy||!active?.payload||combineInvalid.current} onClick={()=>void run(save)}>{t("Quick save","Быстрое сохранение")}</button><button type="button" onClick={()=>{const library=document.getElementById("nexus-project-library");library?.scrollIntoView({block:"start"});library?.focus({preventScroll:true});}}>{t("Project library","Библиотека проектов")}</button></div><button type="button" aria-label="Help language" onClick={()=>setLanguage(v=>v==='ru'?'en':'ru')}>{language==='ru'?'RU':'EN'}</button></header>
  {!ready&&!error&&<section className="nexus-startup" role="status"><img src={import.meta.env.BASE_URL+'favicon.svg'} width={72} height={72} alt=""/><h2>Story Nexus Studio</h2><p>{t("Opening project library…","Открываем библиотеку проектов…")}</p><div className="nexus-loading-track" aria-hidden="true"><span/></div></section>}
  {!ready&&error&&<section className="nexus-startup" role="alert"><h2>{t("Unable to open Studio","Не удалось открыть Studio")}</h2><p>{error}</p><button type="button" onClick={()=>window.location.reload()}>Retry / Повторить</button></section>}
