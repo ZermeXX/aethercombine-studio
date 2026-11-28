@@ -1,3 +1,4 @@
+import type {ProjectPayload} from './projectPayload';
 import type {TimelineSlot} from '../App';
 import {validateSlotInserts} from './validateSlotInserts';
 /** Pure preview adapter for build_timeline.py. No dispatch, credentials or storage. */
@@ -21,4 +22,20 @@ export function adaptLoopTimeline(slots:readonly TimelineSlot[]){
   start+=slot.slot_duration_sec-overlap;
   return result;
  });
+}
+
+/** Export the fields consumed by the current loop runner, not the narrative renderer. */
+export function buildScopedLoopManifest(production:NonNullable<ProjectPayload['production']>,folderId:string){
+ const render=production.render;
+ if(!render)throw new Error('Configure render settings first');
+ if(!/^[A-Za-z0-9_-]+$/.test(folderId))throw new Error('Explicit Drive folder ID required');
+ if(render.finalBlackEnabled||render.transitionMode!=='crossfade'||!render.useEmbeddedAudio)throw new Error('Runner export requires embedded audio, crossfade mode and no final black');
+ if(production.audio_mastering)throw new Error('Custom mastering is not supported by this runner export');
+ const dimensions={ '720p':[1280,720],'1080p':[1920,1080],'2k':[2560,1440],'4k':[3840,2160]} as const;
+ const [width,height]=dimensions[production.resolution];
+ const timeline_slots=adaptLoopTimeline(production.timeline_slots??[]);
+ const duration=timeline_slots.reduce((n,s)=>n+s.slot_duration_sec-s.slot_transition_out.duration_sec,0);
+ if(Math.abs(duration-production.loopHours*3600)>1/production.fps)throw new Error('Timeline does not match target duration');
+ if(new Set(timeline_slots.map(s=>s.slot_id)).size!==timeline_slots.length)throw new Error('Duplicate slot ID');
+ return {content_profile:'ambience',timeline_slots,export_settings:{width,height,fps:production.fps,video_codec:production.codec,preset:'veryfast',crf:render.crf,audio_bitrate:render.audioBitrate+'k',output_filename:'output.mp4'},cloud_export:{target_folder_id:folderId}};
 }

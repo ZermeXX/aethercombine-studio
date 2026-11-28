@@ -1,4 +1,4 @@
-import {adaptLoopTimeline} from '../utils/loopRendererAdapter';
+import {adaptLoopTimeline,buildScopedLoopManifest} from '../utils/loopRendererAdapter';
 import {validateSlotInserts} from '../utils/validateSlotInserts';
 import {useEffect,useState} from 'react';
 import type {ProjectStorage} from '../utils/projectStorage';
@@ -13,6 +13,9 @@ export function ScopedTimelinePanel({production,onChange}:{production:Production
  const slots=production.timeline_slots??[],audio=production.audio_mastering??defaultMaster;
  const [insertError,setInsertError]=useState('');
  const [preview,setPreview]=useState('');
+ const [folderId,setFolderId]=useState('');
+ const [exportError,setExportError]=useState('');
+ function downloadManifest(){try{const manifest=buildScopedLoopManifest(production,folderId.trim());const url=URL.createObjectURL(new Blob([JSON.stringify(manifest,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='loop_manifest.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setExportError('');}catch(e){setExportError(e instanceof Error?e.message:'Export rejected');}}
  function patch(i:number,change:Partial<TimelineSlot>){try{const next={...slots[i],...change};validateSlotInserts(next);onChange({...production,timeline_slots:slots.map((s,n)=>n===i?next:s)});setInsertError('');}catch{setInsertError('Invalid insert timing or slot duration. Previous values retained.');}}
  function editInsert(i:number,j:number,change:Partial<SlotInsertItem>){patch(i,{inserts:slots[i].inserts.map((v,n)=>n===j?{...v,...change}:v)});}
  function addInsert(i:number){const s=slots[i];patch(i,{inserts:[...s.inserts,{insert_id:crypto.randomUUID(),asset_id:'',file_name:'',trigger_at_sec:0,duration_sec:Math.min(5,s.slot_duration_sec),transition_in:{type:'fade',duration_sec:0},transition_out:{type:'none',duration_sec:0}}]});}
@@ -21,6 +24,10 @@ export function ScopedTimelinePanel({production,onChange}:{production:Production
  <h3>Timeline &amp; Audio Mastering · Scoped preview</h3>
  <button type="button" onClick={()=>{try{setPreview(JSON.stringify({timeline_slots:adaptLoopTimeline(slots)},null,2));}catch(e){setPreview(e instanceof Error?e.message:'Invalid timeline');}}}>Inspect renderer timeline contract</button>
  {preview&&<pre aria-label="Renderer timeline preview" className="whitespace-pre-wrap break-all">{preview}</pre>}
+ <label>Export Drive folder ID<input aria-label="Export Drive folder ID" value={folderId} onChange={e=>setFolderId(e.target.value)}/></label>
+ <p>Local JSON export only. Runner uses fixed -16 LUFS mastering. No dispatch or upload.</p>
+ <button type="button" onClick={downloadManifest}>Download loop manifest JSON</button>
+ {exportError&&<p role="alert">{exportError}</p>}
  <button type="button" onClick={add}>Add timeline slot</button>
  {slots.map((s,i)=><fieldset key={s.slot_id} className="border p-2"><legend>Slot {i+1}</legend>
  <label>Title<input aria-label={'Slot title '+(i+1)} value={s.title} onChange={e=>patch(i,{title:e.target.value})}/></label>

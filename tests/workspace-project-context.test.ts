@@ -180,3 +180,16 @@ test('renderer preview adapter maps slot-relative triggers, crossfade and input 
  expect(input).toEqual(before);
  expect(()=>adaptLoopTimeline([{...first,slot_transition_out:{type:'fade',duration_sec:5}},second])).toThrow();
 });
+
+import {buildScopedLoopManifest} from '../src/utils/loopRendererAdapter';
+test('loop manifest exports runner settings and rejects unsupported configurations',()=>{
+ const production:NonNullable<import('../src/utils/projectPayload').ProjectPayload['production']>={fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[],timeline_slots:[{slot_index:1,slot_id:'one',title:'One',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:10800,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}],render:{crf:18,audioBitrate:320,actCrossfadeSec:1,internalCrossfadeSec:1,finalBlackEnabled:false,finalBlackSec:0,bitratePreset:'standard',transitionMode:'crossfade',useEmbeddedAudio:true}};
+ const out=buildScopedLoopManifest(production,'synthetic-folder');
+ expect(out.export_settings.width).toBe(3840);
+ expect(out.export_settings.audio_bitrate).toBe('320k');
+ expect(out.cloud_export.target_folder_id).toBe('synthetic-folder');
+ expect(out.timeline_slots[0].slot_duration_sec).toBe(10800);
+ expect(()=>buildScopedLoopManifest(production,'')).toThrow();
+ expect(()=>buildScopedLoopManifest({...production,loopHours:6},'synthetic-folder')).toThrow();
+ expect(()=>buildScopedLoopManifest({...production,render:{...production.render!,finalBlackEnabled:true}},'synthetic-folder')).toThrow();
+});
