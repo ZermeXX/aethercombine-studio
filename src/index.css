@@ -400,3 +400,13 @@
 @media (hover:none) {
   .nexus-preview .nexus-help .nexus-help-hover {display:none;}
 }
+
+/* Smart Help typography: use locally available fonts only. */
+.nexus-preview .nexus-help-hover,
+.nexus-preview .nexus-help-panel {
+  font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  font-size:14px; line-height:1.5;
+}
+.nexus-preview .nexus-help-panel dt {font-size:16px;font-weight:700;}
+.nexus-preview .nexus-help-panel dd {font-size:13px;}
+.nexus-preview .nexus-help-panel button {font-family:inherit;font-size:14px;}
