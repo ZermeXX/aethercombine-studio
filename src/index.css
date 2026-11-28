@@ -288,3 +288,18 @@
 .nexus-preview .nexus-header-actions button{min-height:44px;font-size:.75rem;padding:8px 10px;}
 #nexus-project-library{scroll-margin-top:12px;}
 @media(max-width:760px){.nexus-header-actions{order:4;flex:1 0 100%;}.nexus-header-actions button{flex:1 1 120px;}}
+
+/* Smart header: override generic brand child flex rules explicitly. */
+.nexus-preview {width:100%;min-width:0;box-sizing:border-box;}
+.nexus-preview .nexus-smart-header {width:100%;min-width:0;box-sizing:border-box;}
+.nexus-smart-header > .nexus-header-brand {flex:1 1 180px;min-width:0;overflow-wrap:anywhere;}
+.nexus-smart-header > .nexus-header-context {flex:2 1 320px;min-width:0;}
+.nexus-smart-header > .nexus-header-actions {flex:0 1 auto;min-width:0;}
+.nexus-smart-header .nexus-header-item {max-width:100%;box-sizing:border-box;}
+.nexus-smart-header button {max-width:100%;white-space:normal;overflow-wrap:anywhere;}
+@media(max-width:760px){
+ .nexus-smart-header > .nexus-header-brand {flex:1 1 80px;}
+ .nexus-smart-header > .nexus-header-context,.nexus-smart-header > .nexus-header-actions {flex:1 1 100%;width:100%;max-width:100%;}
+ .nexus-smart-header .nexus-header-item {flex:1 1 100px;}
+ .nexus-smart-header .nexus-header-actions button {flex:1 1 100px;min-width:0;}
+}
