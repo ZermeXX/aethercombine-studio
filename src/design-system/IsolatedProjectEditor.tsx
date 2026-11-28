@@ -25,7 +25,8 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {openProjectDatabase,ProjectStorage} from '../utils/projectStorage';
 import {WorkspaceProjectContext,type ProjectSnapshot} from '../utils/workspaceProjectContext';
 import {CHANNEL_PROFILES,allowsModule,type WorkspaceId} from './workspaces';
-import type {ProjectRecord} from './projectRegistry';
+import {projectFormat,allowsProjectFormat,defaultProjectFormat,type ProjectRecord,type ProjectFormat} from './projectRegistry';
+function allowsProjectModule(p:ProjectRecord,tab:string){return allowsModule(p.workspaceId,tab)&& (tab!=='loop'||projectFormat(p)==='ambient');}
 
 /** Explicit opt-in isolated editor. Never mounts legacy production modules. */
 export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
@@ -38,6 +39,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  const [projects,setProjects]=useState<ProjectRecord[]>([]);
  const [active,setActive]=useState<ProjectSnapshot|null>(null);
  const [name,setName]=useState('');
+ const [format,setFormat]=useState<ProjectFormat>('video');
  const [script,setScript]=useState('');
  const [chapters,setChapters]=useState('');
  const [seo,setSeo]=useState('');
@@ -115,7 +117,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   await run(async c=>{await save(c);const next=await c.select({workspaceId:workspace,projectId:id});hydrate(next);});
  }
  async function create(){
-  await run(async c=>{await save(c);const next=await c.create(workspace,name);const selected=await c.select({workspaceId:workspace,projectId:next.project.projectId});setProjects(await c.openWorkspace(workspace).then(x=>x.projects));hydrate(selected);setName('');});
+  await run(async c=>{await save(c);const next=await c.create(workspace,name,allowsProjectFormat(workspace,format)?format:defaultProjectFormat(workspace));const selected=await c.select({workspaceId:workspace,projectId:next.project.projectId});setProjects(await c.openWorkspace(workspace).then(x=>x.projects));hydrate(selected);setName('');});
  }
  // Native components use the same draft as the JSON editor, never global LocalStorage.
  function currentDraft():ProjectPayload{
@@ -123,7 +125,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   return projectPayload({...active.payload,script,chapters,seoScript:seo,thumbnailTitle:title,thumbnailBadge:badge,production:production.trim()?JSON.parse(production):undefined,legacyExtras:extras.trim()?JSON.parse(extras):undefined});
  }
  function openNative(tab:'verbaflow'|'seo'|'combine'|'loop'|'thumb'|'voice'|'art'){
-  if(!active?.payload||!allowsModule(active.project.workspaceId,tab))return;
+  if(!active?.payload||!allowsProjectModule(active.project,tab))return;
   // Save and validate advanced JSON before mounting a native component.
   void run(async c=>{await save(c);setNativeTab(tab);});
  }
@@ -198,7 +200,7 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
   finally{releaseAssetWrite();}
  }
  const artSource=useMemo(()=>artInput??(imageUrls.art?{dataUrl:imageUrls.art,label:'Stored project art',nonce:0}:null),[artInput,imageUrls.art]);
- const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsModule(active.project.workspaceId,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
+ const nativeDraft=(()=>{if(nativeTab==='none'||!active?.payload||!allowsProjectModule(active.project,nativeTab))return null;try{return currentDraft();}catch{return null;}})();
  const field=(label:string,value:string,set:(v:string)=>void)=><label className="grid gap-1">{label}<textarea aria-label={label} value={value} disabled={assetBusy||busy||!active?.payload||nativeTab!=='none'} onChange={e=>{set(e.currentTarget.value);setDirty(true);}} className="min-h-20 rounded border border-studio-border bg-studio-bg p-2"/></label>;
  return <main className="nexus-preview mx-auto space-y-4 p-4 text-studio-text">
  <header className="nexus-brand"><img src={import.meta.env.BASE_URL+'favicon.svg'} alt="" width={48} height={48}/><div><h1 className="text-xl font-semibold">Story Nexus Studio</h1><p>V9 Isolated Project Editor · Preview</p></div><button type="button" aria-label="Help language" onClick={()=>setLanguage(v=>v==='ru'?'en':'ru')}>{language==='ru'?'RU':'EN'}</button></header>
@@ -211,14 +213,14 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  <label className="grid gap-1">Workspace<select aria-label="Isolated workspace" value={workspace} disabled={assetBusy||!ready||busy} onChange={e=>{const id=e.currentTarget.value;if(id==='histoviva'||id==='the_whisker_trio')void changeWorkspace(id);}}>{Object.values(CHANNEL_PROFILES).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
  <label className="grid gap-1">Project<select aria-label="Isolated project" value={active?.project.projectId??''} disabled={assetBusy||!ready||busy} onChange={e=>{if(e.currentTarget.value)void select(e.currentTarget.value);}}><option value="" disabled>Select project</option>{projects.map(p=><option key={p.projectId} value={p.projectId}>{p.name}</option>)}</select></label>
  <div className="nexus-help-row"><label>New project name<input aria-label="New project name" value={name} disabled={assetBusy||!ready||busy} onChange={e=>setName(e.currentTarget.value)}/></label><ContextHelp language={language} entry={{ru:{summary:"Название нового независимого проекта.",effect:"Создаёт отдельную запись при нажатии кнопки создания.",whenOn:"Для нового выпуска или отдельного видео.",whenOff:"Для продолжения существующего проекта выберите его карточку.",recommended:"Уникальное понятное название.",example:"HISTOVIVA EP03",limitations:"Название не является идентификатором облачной папки."},en:{summary:"Name of a new independent project.",effect:"Creates a separate record when you press Create.",whenOn:"For a new episode or separate video.",whenOff:"Select an existing project to continue it.",recommended:"A descriptive unique name.",example:"HISTOVIVA EP03",limitations:"The name is not a cloud folder ID."}}}/></div>
- <button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button><div className="nexus-project-cards">{projects.map(p=><button type="button" key={p.projectId} aria-pressed={active?.project.projectId===p.projectId} disabled={assetBusy||!ready||busy} onClick={()=>void select(p.projectId)}><span>{p.name}</span><small>Open project</small></button>)}</div></section>
+ <div className="nexus-help-row"><label>{language==='ru'?'Формат проекта':'Project format'}<select aria-label="Project format" value={allowsProjectFormat(workspace,format)?format:defaultProjectFormat(workspace)} disabled={assetBusy||!ready||busy} onChange={e=>{const v=e.currentTarget.value;if(allowsProjectFormat(workspace,v))setFormat(v);}}><option value="video">Video</option><option value="shorts">Shorts</option>{workspace==='the_whisker_trio'&&<option value="ambient">Ambient Loop</option>}</select></label><ContextHelp language={language} entry={{ru:{summary:"Формат нового проекта.",effect:"Определяет доступность Loop.",whenOn:"Выберите формат до создания.",whenOff:"Не меняет существующие проекты.",recommended:"Video для обычного выпуска.",example:"Ambient Loop для длинного видео Whisker.",limitations:"Ambient недоступен HISTOVIVA."},en:{summary:"New project format.",effect:"Controls Loop availability.",whenOn:"Choose before creation.",whenOff:"Does not change existing projects.",recommended:"Video for regular episodes.",example:"Ambient Loop for long Whisker videos.",limitations:"Ambient is unavailable in HISTOVIVA."}}}/></div><button type="button" disabled={assetBusy||!ready||busy||!name.trim()} onClick={()=>void create()}>Create isolated project</button><div className="nexus-project-cards">{projects.map(p=><button type="button" key={p.projectId} aria-pressed={active?.project.projectId===p.projectId} disabled={assetBusy||!ready||busy} onClick={()=>void select(p.projectId)}><span>{p.name}</span><small>{projectFormat(p)} · Open project</small></button>)}</div></section>
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
  <div className="nexus-workspace-layout">
  {active?.payload&&<aside className="nexus-sidebar"><button type="button" className="nexus-nav-toggle" aria-expanded={!navCollapsed} aria-controls="nexus-production-nav" onClick={()=>setNavCollapsed(v=>!v)}>{navCollapsed?"☰ Expand menu":"☰ Collapse menu"}</button><nav id="nexus-production-nav" hidden={navCollapsed} aria-label="Production modules" className="nexus-module-nav">
  <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='verbaflow'} onClick={()=>openNative('verbaflow')}>Open native VerbaFlow</button>
  <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='seo'} onClick={()=>openNative('seo')}>Open native YouTube SEO</button>
- {allowsModule(active!.project.workspaceId,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='combine'} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
- {allowsModule(active!.project.workspaceId,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='loop'} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>}
+ {allowsProjectModule(active!.project,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='combine'} onClick={()=>openNative('combine')}>Open native Montage Combine</button>}
+ {allowsProjectModule(active!.project,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='loop'} onClick={()=>openNative('loop')}>Open scoped Loop settings</button>}
  <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='thumb'} onClick={()=>openNative('thumb')}>Open native Thumbnail Studio</button>
  <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='voice'} onClick={()=>openNative('voice')}>Open native Voice Studio</button>
  <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='art'} onClick={()=>openNative('art')}>Open native Image Art Editor</button>
