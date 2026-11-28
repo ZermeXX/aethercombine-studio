@@ -220,13 +220,19 @@ export function IsolatedProjectEditor({onExit}:{onExit:()=>void}){
  {active&&!active.payload&&<p role="alert">Project has no payload. Editing disabled.</p>}
  <div className="nexus-workspace-layout">
  {active?.payload&&<aside className="nexus-sidebar"><button type="button" className="nexus-nav-toggle" aria-expanded={!navCollapsed} aria-controls="nexus-production-nav" onClick={()=>setNavCollapsed(v=>!v)}>{navCollapsed?t("☰ Expand menu","☰ Развернуть меню"):t("☰ Collapse menu","☰ Свернуть меню")}</button><nav id="nexus-production-nav" hidden={navCollapsed} aria-label="Production modules" className="nexus-module-nav">
- <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='verbaflow'} onClick={()=>openNative('verbaflow')}>{t("Open native VerbaFlow","Открыть VerbaFlow")}</button>
- <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='seo'} onClick={()=>openNative('seo')}>{t("Open native YouTube SEO","Открыть YouTube SEO")}</button>
- {allowsProjectModule(active!.project,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='combine'} onClick={()=>openNative('combine')}>{t("Open native Montage Combine","Открыть Montage Combine")}</button>}
- {allowsProjectModule(active!.project,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='loop'} onClick={()=>openNative('loop')}>{t("Open scoped Loop settings","Открыть Ambient Loop")}</button>}
- <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='thumb'} onClick={()=>openNative('thumb')}>{t("Open native Thumbnail Studio","Открыть Thumbnail Studio")}</button>
- <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='voice'} onClick={()=>openNative('voice')}>{t("Open native Voice Studio","Открыть Voice Studio")}</button>
- <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='art'} onClick={()=>openNative('art')}>{t("Open native Image Art Editor","Открыть Image Art Editor")}</button>
+ <div className="nexus-nav-group" role="group" aria-label={t("Creation","Создание")}><span className="nexus-nav-heading">{t("Creation","Создание")}</span>
+<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='verbaflow'} onClick={()=>openNative('verbaflow')}><span className="nexus-nav-symbol" aria-hidden="true">▤</span><span>{t("Open native VerbaFlow","Открыть VerbaFlow")}</span></button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='voice'} onClick={()=>openNative('voice')}><span className="nexus-nav-symbol" aria-hidden="true">♫</span><span>{t("Open native Voice Studio","Открыть Voice Studio")}</span></button>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='art'} onClick={()=>openNative('art')}><span className="nexus-nav-symbol" aria-hidden="true">✧</span><span>{t("Open native Image Art Editor","Открыть Image Art Editor")}</span></button>
+ </div>
+ <div className="nexus-nav-group" role="group" aria-label={t("Production","Производство")}><span className="nexus-nav-heading">{t("Production","Производство")}</span>
+ {allowsProjectModule(active!.project,'combine')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='combine'} onClick={()=>openNative('combine')}><span className="nexus-nav-symbol" aria-hidden="true">▣</span><span>{t("Open native Montage Combine","Открыть Montage Combine")}</span></button>}
+ {allowsProjectModule(active!.project,'loop')&&<button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='loop'} onClick={()=>openNative('loop')}><span className="nexus-nav-symbol" aria-hidden="true">∞</span><span>{t("Open scoped Loop settings","Открыть Ambient Loop")}</span></button>}
+ </div>
+ <div className="nexus-nav-group" role="group" aria-label={t("Release","Публикация")}><span className="nexus-nav-heading">{t("Release","Публикация")}</span>
+ <button type="button" disabled={busy||assetBusy||!active?.payload} aria-pressed={nativeTab==='thumb'} onClick={()=>openNative('thumb')}><span className="nexus-nav-symbol" aria-hidden="true">▧</span><span>{t("Open native Thumbnail Studio","Открыть Thumbnail Studio")}</span></button>
+ <button type="button" disabled={assetBusy||busy||!active?.payload} aria-pressed={nativeTab==='seo'} onClick={()=>openNative('seo')}><span className="nexus-nav-symbol" aria-hidden="true">⌕</span><span>{t("Open native YouTube SEO","Открыть YouTube SEO")}</span></button>
+ </div>
  <button type="button" onClick={()=>setNativeTab('none')} disabled={assetBusy||busy||nativeTab==='none'||combineInvalid.current}>{t("Close native module","Закрыть модуль")}</button>
  </nav></aside>}
  <section className="nexus-workspace-content">
