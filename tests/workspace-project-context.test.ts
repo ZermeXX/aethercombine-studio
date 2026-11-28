@@ -212,3 +212,15 @@ test('timeline synchronization reserves a renderer-compatible body at a tight ta
  const impossible=[slot('a',5400,5398),slot('b',10800,5398),slot('c',5400,0)];
  expect(()=>synchronizeTimeline(impossible,3,24)).toThrow();
 });
+
+import {prepareLoopPreflight} from '../src/utils/loopProductionPreflight';
+test('production preflight never equates local evidence with runner access',async()=>{
+ const production:NonNullable<import('../src/utils/projectPayload').ProjectPayload['production']>={fps:24,codec:'libx264',resolution:'4k',loopHours:3,scenes:[],timeline_slots:[{slot_index:1,slot_id:'one',title:'One',asset_id:'base',file_name:'base.mp4',source_clip_duration_sec:8,internal_loop_crossfade_sec:1,slot_duration_sec:10800,inserts:[],slot_transition_out:{type:'none',duration_sec:0}}],render:{crf:18,audioBitrate:320,actCrossfadeSec:1,internalCrossfadeSec:1,finalBlackEnabled:false,finalBlackSec:0,bitratePreset:'standard',transitionMode:'crossfade',useEmbeddedAudio:true}};
+ const scope={workspaceId:'histoviva' as const,projectId:'fixture'};
+ const storage={getAsset:async(w:string,p:string,id:string)=>{expect([w,p,id]).toEqual(['histoviva','fixture','legacy-file:base.mp4']);return {name:'base.mp4',blob:new Blob(['fixture'])};}} as unknown as import('../src/utils/projectStorage').ProjectStorage;
+ const result=await prepareLoopPreflight(storage,scope,production,'fixture-folder');
+ expect(result.assets).toEqual([{name:'base.mp4',localVerified:true,runnerVerified:false}]);
+ expect(result.dispatchAllowed).toBe(false);
+ const unsafe={...production,timeline_slots:[{...production.timeline_slots![0],file_name:'../base.mp4'}]};
+ await expect(prepareLoopPreflight(storage,scope,unsafe,'fixture-folder')).rejects.toThrow('Unsafe runner asset filename');
+});
