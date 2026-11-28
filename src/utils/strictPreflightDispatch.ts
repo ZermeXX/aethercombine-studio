@@ -52,5 +52,5 @@ export async function verifyStrictPreflightJobs(runId:number,rendererSha:string,
  const job=matches[0];
  if(job.status!=='completed'||job.conclusion!=='success'||!Array.isArray(job.steps))return false;
  const step=(name:string,conclusion:string)=>job.steps.filter((s:any)=>s.name===name&&s.status==='completed'&&s.conclusion===conclusion).length===1;
- return step('Strict Project Dispatch Identity Guard','success')&&step('Preflight Asset Check','success')&&step('Download Source Clips (only needed files)','success')&&step('Strict Project Media Verification','success')&&step('Build and Run FFmpeg Pipeline','skipped')&&step('Upload Output Video, Shorts & Metadata to Google Drive','skipped');
+ return step('Strict Project Dispatch Identity Guard','success')&&step('Preflight Asset Check','success')&&step('Download Source Clips (only needed files)','success')&&step('Strict Project Media Verification','success')&&step('Build and Run FFmpeg Pipeline','skipped')&&step('Upload Output Video, Shorts & Metadata to Google Drive','skipped')&&step('Generate Vertical Shorts & Release Card','skipped')&&step('Upload QC artifacts','skipped')&&step('Send Telegram Notification','skipped');
 }
