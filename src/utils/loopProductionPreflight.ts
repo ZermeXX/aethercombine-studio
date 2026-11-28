@@ -2,7 +2,7 @@ import {buildScopedLoopManifest} from './loopRendererAdapter';
 import type {ProjectPayload} from './projectPayload';
 import type {ProjectStorage} from './projectStorage';
 import type {ProjectScope} from './workspaceProjectContext';
-export const RENDERER_CANDIDATE='4dd440608923b8397498d36c44e8e810d1e3efa3';
+export const RENDERER_CANDIDATE='5aa1f3dbfc4f3e22fcfa0a78a8515761bffdffb7';
 /** Local evidence is not evidence of runner access to Drive. No network or credentials. */
 export async function prepareLoopPreflight(storage:ProjectStorage,scope:ProjectScope,production:NonNullable<ProjectPayload['production']>,folderId:string){
  if(!/^[A-Za-z0-9_-]{10,200}$/.test(folderId))throw new Error('Explicit project Drive folder required');
