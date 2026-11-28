@@ -42,6 +42,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           work=$(mktemp -d)
           bun tests/export-loop-fixture.ts > "$work/manifest.json"
+          bun tests/export-loop-fixture.ts --advanced > "$work/advanced.json"
           curl --fail --silent --show-error --location https://raw.githubusercontent.com/ZermeXX/aetherflow-render/78ac0c2219fd8f290b6c4a67857b6683148aaee3/build_timeline.py -o "$work/build_timeline.py"
           cd "$work"
           mkdir input_clips
@@ -60,4 +61,32 @@ jobs:
           assert abs(float(result["format"]["duration"])-5)<0.25
           assert json.load(open("qc_report.json"))["status"]=="PASS"
           print("SYNTHETIC_LOOP_RENDER_PASS")
+          PY
+          cp advanced.json manifest.json
+          ffmpeg -v error -f lavfi -i color=c=green:s=1280x720:r=24 -f lavfi -i sine=frequency=660:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/green.mp4
+          ffmpeg -v error -f lavfi -i color=c=red:s=1280x720:r=24 -f lavfi -i sine=frequency=880:sample_rate=48000 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac input_clips/red.mp4
+          rm -f output.mp4 qc_report.json
+          PATH="$PWD/blocked-bin:$PATH" python build_timeline.py
+          python - <<'PY'
+          import json, subprocess
+          m=json.load(open("manifest.json"))
+          assert m["timeline_slots"][1]["start_sec"]==7
+          assert m["timeline_slots"][1]["inserts"][0]["trigger_at_sec"]==10
+          result=json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams","-show_format","-of","json","output.mp4"]))
+          video=next(s for s in result["streams"] if s["codec_type"]=="video")
+          assert (video["width"],video["height"],video["r_frame_rate"])==(1280,720,"24/1")
+          assert any(s["codec_type"]=="audio" for s in result["streams"])
+          duration=float(result["format"]["duration"])
+          print("ADVANCED_RENDER_DURATION",duration)
+          assert abs(duration-15)<0.5, duration
+          def rgb(t):
+              return tuple(subprocess.check_output(["ffmpeg","-v","error","-ss",str(t),"-i","output.mp4","-frames:v","1","-vf","scale=1:1","-pix_fmt","rgb24","-f","rawvideo","pipe:1"])[:3])
+          blue,green,red,after=map(rgb,[2,8.5,11,13.5])
+          print("ADVANCED_RENDER_RGB",blue,green,red,after)
+          assert blue[2]>blue[0]+40 and blue[2]>blue[1]+40
+          assert green[1]>green[0]+40 and green[1]>green[2]+40
+          assert red[0]>red[1]+40 and red[0]>red[2]+40
+          assert after[1]>after[0]+40 and after[1]>after[2]+40
+          assert json.load(open("qc_report.json"))["status"]=="PASS"
+          print("ADVANCED_LOOP_RENDER_PASS")
           PY
